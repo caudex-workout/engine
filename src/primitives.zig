@@ -305,6 +305,40 @@ pub const Timestamp = struct {
         return out[0..self.bytes.len];
     }
 
+    /// Returns the represented UTC instant as seconds from the Unix epoch.
+    ///
+    /// Fractional seconds are deliberately truncated because v0 recency helpers
+    /// report whole elapsed seconds.
+    pub fn unixSeconds(self: Timestamp) i64 {
+        const year: i64 = parseFixedDigits(self.bytes[0..4]).?;
+        const month: i64 = parseFixedDigits(self.bytes[5..7]).?;
+        const day: i64 = parseFixedDigits(self.bytes[8..10]).?;
+        const hour: i64 = parseFixedDigits(self.bytes[11..13]).?;
+        const minute: i64 = parseFixedDigits(self.bytes[14..16]).?;
+        const second: i64 = parseFixedDigits(self.bytes[17..19]).?;
+
+        var zone_index: usize = 19;
+        if (self.bytes[zone_index] == '.') {
+            zone_index += 1;
+            while (std.ascii.isDigit(self.bytes[zone_index])) : (zone_index += 1) {}
+        }
+        var offset_seconds: i64 = 0;
+        if (self.bytes[zone_index] != 'Z') {
+            const offset_hours: i64 =
+                parseFixedDigits(self.bytes[zone_index + 1 .. zone_index + 3]).?;
+            const offset_minutes: i64 =
+                parseFixedDigits(self.bytes[zone_index + 4 .. zone_index + 6]).?;
+            offset_seconds = (offset_hours * 60 + offset_minutes) * 60;
+            if (self.bytes[zone_index] == '-') offset_seconds = -offset_seconds;
+        }
+
+        return daysFromCivil(year, month, day) * 86_400 +
+            hour * 3_600 +
+            minute * 60 +
+            second -
+            offset_seconds;
+    }
+
     fn isValidRfc3339(bytes: []const u8) bool {
         if (bytes.len < 20) return false;
         if (bytes[4] != '-' or bytes[7] != '-' or bytes[10] != 'T' or
@@ -359,6 +393,19 @@ pub const Timestamp = struct {
 
     fn isLeapYear(year: u16) bool {
         return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0);
+    }
+
+    fn daysFromCivil(year_input: i64, month: i64, day: i64) i64 {
+        const year = year_input - @intFromBool(month <= 2);
+        const era = @divFloor(year, 400);
+        const year_of_era = year - era * 400;
+        const shifted_month = month + (if (month > 2) @as(i64, -3) else 9);
+        const day_of_year = @divFloor(153 * shifted_month + 2, 5) + day - 1;
+        const day_of_era = year_of_era * 365 +
+            @divFloor(year_of_era, 4) -
+            @divFloor(year_of_era, 100) +
+            day_of_year;
+        return era * 146_097 + day_of_era - 719_468;
     }
 };
 
@@ -445,5 +492,13 @@ test "timestamp is explicit and round-trips" {
     try std.testing.expectError(
         error.InvalidTimestamp,
         Timestamp.parse("2025-02-29T14:00:00Z"),
+    );
+    try std.testing.expectEqual(
+        @as(i64, 0),
+        (try Timestamp.parse("1970-01-01T00:00:00Z")).unixSeconds(),
+    );
+    try std.testing.expectEqual(
+        (try Timestamp.parse("2026-07-25T18:00:00Z")).unixSeconds(),
+        timestamp.unixSeconds(),
     );
 }
