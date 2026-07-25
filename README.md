@@ -1,5 +1,56 @@
 # Caudex Workout Engine
 
+## npm quickstart
+
+> **Design target:** The npm package is not published yet. This example defines
+> the intended five-minute API and is saved as a future executable
+> documentation test.
+
+```bash
+npm install @caudex/workout-engine
+```
+
+```ts
+import {
+  createCaudex,
+  methodologies,
+  type RecommendationRequest,
+} from "@caudex/workout-engine";
+import { sampleCatalog } from "./sample-catalog.js";
+
+const caudex = await createCaudex();
+const methodology = methodologies.doubleProgression({
+  repRange: { min: 8, max: 12 },
+  workingSets: 3,
+  loadIncrement: { amount: "5", unit: "lb" },
+});
+
+const request: RecommendationRequest = {
+  schemaVersion: 1,
+  asOf: "2026-07-25T14:00:00Z",
+  methodology,
+  catalog: sampleCatalog,
+  history: { workouts: [] },
+  session: {
+    availableMinutes: 35,
+    availableEquipmentIds: ["dumbbell", "adjustable-bench"],
+  },
+};
+
+const result = caudex.recommendSession(request);
+if (!result.ok) {
+  console.error(result.issues);
+} else {
+  console.log(result.recommendation);
+  console.log(result.explanations);
+}
+```
+
+The complete future documentation test is
+[`examples/typescript-node/quickstart.ts`](examples/typescript-node/quickstart.ts).
+After package installation, it runs locally without a database, account, or
+runtime network request.
+
 Caudex Workout Engine is an open-source, embeddable strength and hypertrophy
 programming engine for developers. Applications supply explicit training
 snapshots and methodology configuration; Caudex returns deterministic,
