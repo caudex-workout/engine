@@ -24,6 +24,10 @@ pub const Id = struct {
         @memcpy(out[0..self.bytes.len], self.bytes);
         return out[0..self.bytes.len];
     }
+
+    pub fn eql(left: Id, right: Id) bool {
+        return std.mem.eql(u8, left.bytes, right.bytes);
+    }
 };
 
 /// An exact base-10 value represented by a signed mantissa and decimal scale.
