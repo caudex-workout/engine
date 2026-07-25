@@ -1,5 +1,7 @@
 const std = @import("std");
-const canonical = @import("caudex").canonical;
+const caudex = @import("caudex");
+const canonical = caudex.canonical;
+const diagnostics = caudex.diagnostics;
 
 test "canonical request fixtures decode" {
     inline for (.{
@@ -103,4 +105,42 @@ test "explanation supports deterministic derived evidence" {
         "/@derived/history/lastCompletedExercise",
         parsed.value.evidence[0].path,
     );
+}
+
+test "diagnostic bundle matches the stable canonical fixture" {
+    var issue_storage: [1]canonical.ValidationIssue = undefined;
+    var issue_writer: diagnostics.IssueWriter = .init(&issue_storage);
+    try issue_writer.append(.{
+        .code = "history.exercise_reference_missing",
+        .path = "/history/workouts/0/exercises/0/exerciseId",
+        .message = "The completed exercise is absent from the catalog.",
+        .severity = .@"error",
+    });
+
+    const evidence = [_]canonical.EvidenceRef{
+        .{ .path = "/session/availableEquipmentIds" },
+    };
+    var explanation_storage: [1]canonical.Explanation = undefined;
+    var explanation_writer: diagnostics.ExplanationWriter = .init(&explanation_storage);
+    try explanation_writer.append(.{
+        .id = "explanation-1",
+        .code = "exercise.selected.available_equipment",
+        .category = "selection",
+        .summary = "Available equipment supported the exercise selection.",
+        .evidence = &evidence,
+        .severity = .info,
+    });
+
+    const bundle = diagnostics.DiagnosticBundle{
+        .issues = issue_writer.items(),
+        .explanations = explanation_writer.items(),
+    };
+    var json_buffer: [1024]u8 = undefined;
+    const actual = try bundle.writeJson(&json_buffer);
+    const expected = std.mem.trimEnd(
+        u8,
+        @embedFile("fixtures/results/diagnostics.json"),
+        "\n",
+    );
+    try std.testing.expectEqualStrings(expected, actual);
 }
