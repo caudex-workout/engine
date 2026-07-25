@@ -2,6 +2,7 @@ const std = @import("std");
 const caudex = @import("caudex");
 const canonical = caudex.canonical;
 const diagnostics = caudex.diagnostics;
+const engine = caudex.engine;
 
 test "canonical request fixtures decode" {
     inline for (.{
@@ -142,5 +143,35 @@ test "diagnostic bundle matches the stable canonical fixture" {
         @embedFile("fixtures/results/diagnostics.json"),
         "\n",
     );
+    try std.testing.expectEqualStrings(expected, actual);
+}
+
+test "deterministic recommendation matches the golden canonical fixture" {
+    const equipment = [_]caudex.primitives.Id{
+        try .parse("dumbbell"),
+        try .parse("adjustable-bench"),
+    };
+    const exercises = [_]caudex.training.Exercise{.{
+        .id = try .parse("incline-dumbbell-press"),
+        .equipment_ids = &equipment,
+    }};
+    const request = engine.RecommendationRequest{
+        .as_of = try .parse("2026-07-25T14:00:00Z"),
+        .methodology_id = try .parse("caudex.double-progression"),
+        .methodology_version = .{ .major = 0, .minor = 1, .patch = 0 },
+        .config = .{ .rep_min = 8, .rep_max = 12, .working_sets = 1 },
+        .catalog = .{ .exercises = &exercises },
+        .available_equipment_ids = &equipment,
+    };
+    var output: engine.Output = .{};
+    const result = try engine.recommendSession(request, &output);
+    var json_buffer: [2048]u8 = undefined;
+    const actual = try engine.writeResultJson(result, &json_buffer);
+    const expected = std.mem.trimEnd(
+        u8,
+        @embedFile("fixtures/results/recommendation-no-history.json"),
+        "\n",
+    );
+
     try std.testing.expectEqualStrings(expected, actual);
 }
