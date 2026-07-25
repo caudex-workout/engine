@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "asOf": "2026-07-25T15:00:00Z",
+  "methodology": {
+    "id": "caudex.rpe-top-set-backoff",
+    "configVersion": 1,
+    "config": {
+      "topSetRepetitions": 5,
+      "targetRpe": "8.0",
+      "backoffPercentage": "90"
+    }
+  },
+  "methodologyState": {
+    "schemaVersion": 1,
+    "data": {
+      "estimatedOneRepMax": {
+        "barbell-bench-press": { "amount": "225", "unit": "lb" }
+      }
+    }
+  },
+  "catalog": [
+    {
+      "id": "barbell-bench-press",
+      "name": "Barbell Bench Press",
+      "equipmentIds": ["barbell", "bench", "rack"],
+      "movementTags": ["horizontal-push"],
+      "muscleContributions": [
+        { "muscleId": "pectoralis-major", "role": "primary" }
+      ]
+    }
+  ],
+  "history": { "workouts": [] },
+  "completedWorkout": {
+    "id": "workout-204",
+    "startedAt": "2026-07-25T14:00:00Z",
+    "completedAt": "2026-07-25T14:45:00Z",
+    "exercises": [
+      {
+        "exerciseId": "barbell-bench-press",
+        "sets": [
+          {
+            "id": "top-set",
+            "kind": "top",
+            "actualMetrics": [
+              { "code": "load", "value": { "amount": "185", "unit": "lb" } },
+              { "code": "repetitions", "value": { "amount": "5", "unit": "count" } },
+              { "code": "rpe", "value": { "amount": "8.5", "unit": "rpe" } }
+            ],
+            "targetMetrics": [
+              { "code": "rpe", "value": { "amount": "8.0", "unit": "rpe" } }
+            ],
+            "status": "completed"
+          }
+        ]
+      }
+    ]
+  }
+}

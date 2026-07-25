@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://caudex.dev/schemas/v0/evaluation-request.schema.json",
+  "title": "EvaluationRequest",
+  "$ref": "canonical.schema.json#/$defs/evaluationRequest"
+}

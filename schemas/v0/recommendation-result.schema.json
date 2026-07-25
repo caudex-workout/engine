@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://caudex.dev/schemas/v0/recommendation-result.schema.json",
+  "title": "RecommendationResult",
+  "$ref": "canonical.schema.json#/$defs/recommendationResult"
+}

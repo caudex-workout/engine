@@ -21,6 +21,19 @@ pub fn build(b: *std.Build) void {
     });
     const run_library_tests = b.addRunArtifact(library_tests);
 
+    const contract_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("contract_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "caudex", .module = module },
+            },
+        }),
+    });
+    const run_contract_tests = b.addRunArtifact(contract_tests);
+
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&run_library_tests.step);
+    test_step.dependOn(&run_contract_tests.step);
 }

@@ -1,0 +1,440 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://caudex.dev/schemas/v0/canonical.schema.json",
+  "title": "Caudex canonical v0 messages",
+  "anyOf": [
+    { "$ref": "#/$defs/recommendationRequest" },
+    { "$ref": "#/$defs/evaluationRequest" },
+    { "$ref": "#/$defs/recommendationResult" },
+    { "$ref": "#/$defs/evaluationResult" }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "decimal": {
+      "type": "string",
+      "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "openObject": {
+      "type": "object"
+    },
+    "measurement": {
+      "type": "object",
+      "required": ["amount", "unit"],
+      "properties": {
+        "amount": { "$ref": "#/$defs/decimal" },
+        "unit": { "$ref": "#/$defs/identifier" }
+      },
+      "additionalProperties": false
+    },
+    "metric": {
+      "type": "object",
+      "required": ["code", "value"],
+      "properties": {
+        "code": { "$ref": "#/$defs/identifier" },
+        "value": { "$ref": "#/$defs/measurement" }
+      },
+      "additionalProperties": false
+    },
+    "muscleContribution": {
+      "type": "object",
+      "required": ["muscleId", "role"],
+      "properties": {
+        "muscleId": { "$ref": "#/$defs/identifier" },
+        "role": {
+          "enum": ["primary", "secondary", "stabilizer", "custom"]
+        },
+        "weight": { "$ref": "#/$defs/decimal" }
+      },
+      "additionalProperties": false
+    },
+    "exercise": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "name": { "type": "string" },
+        "equipmentIds": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/identifier" },
+          "uniqueItems": true
+        },
+        "movementTags": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/identifier" },
+          "uniqueItems": true
+        },
+        "muscleContributions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/muscleContribution" }
+        },
+        "unilateral": { "type": "boolean" },
+        "aliases": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        },
+        "attributes": { "$ref": "#/$defs/openObject" }
+      },
+      "additionalProperties": false
+    },
+    "muscleEmphasis": {
+      "type": "object",
+      "required": ["muscleId", "weight"],
+      "properties": {
+        "muscleId": { "$ref": "#/$defs/identifier" },
+        "weight": { "$ref": "#/$defs/decimal" }
+      },
+      "additionalProperties": false
+    },
+    "constraint": {
+      "type": "object",
+      "required": ["code"],
+      "properties": {
+        "code": { "$ref": "#/$defs/identifier" },
+        "subjectId": { "$ref": "#/$defs/identifier" },
+        "details": { "$ref": "#/$defs/openObject" }
+      },
+      "additionalProperties": false
+    },
+    "athlete": {
+      "type": "object",
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "preferences": {
+          "type": "object",
+          "properties": {
+            "preferredExerciseIds": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+            "dislikedExerciseIds": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+            "avoidedEquipmentIds": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+            "muscleEmphasis": { "type": "array", "items": { "$ref": "#/$defs/muscleEmphasis" } }
+          },
+          "additionalProperties": false
+        },
+        "restrictions": {
+          "type": "object",
+          "properties": {
+            "excludedExerciseIds": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+            "excludedMovementTags": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+            "equipmentLimitations": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+            "constraints": { "type": "array", "items": { "$ref": "#/$defs/constraint" } }
+          },
+          "additionalProperties": false
+        },
+        "capabilities": { "$ref": "#/$defs/openObject" },
+        "readiness": { "$ref": "#/$defs/openObject" }
+      },
+      "additionalProperties": false
+    },
+    "completedSet": {
+      "type": "object",
+      "required": ["kind", "actualMetrics", "status"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "kind": { "$ref": "#/$defs/identifier" },
+        "actualMetrics": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/metric" }
+        },
+        "targetMetrics": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/metric" }
+        },
+        "completedAt": { "$ref": "#/$defs/timestamp" },
+        "status": {
+          "enum": ["completed", "partial", "skipped", "failed"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "completedExercise": {
+      "type": "object",
+      "required": ["exerciseId", "sets"],
+      "properties": {
+        "exerciseId": { "$ref": "#/$defs/identifier" },
+        "sets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/completedSet" }
+        },
+        "tags": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/identifier" },
+          "uniqueItems": true
+        },
+        "notes": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "completedWorkout": {
+      "type": "object",
+      "required": ["id", "startedAt", "completedAt", "exercises"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "startedAt": { "$ref": "#/$defs/timestamp" },
+        "completedAt": { "$ref": "#/$defs/timestamp" },
+        "exercises": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/completedExercise" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "history": {
+      "type": "object",
+      "properties": {
+        "workouts": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/completedWorkout" }
+        },
+        "summaries": { "$ref": "#/$defs/openObject" }
+      },
+      "additionalProperties": false
+    },
+    "session": {
+      "type": "object",
+      "properties": {
+        "availableMinutes": { "type": "integer", "minimum": 0 },
+        "availableEquipmentIds": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+        "goals": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+        "minExercises": { "type": "integer", "minimum": 0 },
+        "maxExercises": { "type": "integer", "minimum": 0 },
+        "maxSets": { "type": "integer", "minimum": 0 },
+        "excludedExerciseIds": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+        "requiredExerciseIds": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+        "locationTags": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+        "readiness": { "$ref": "#/$defs/openObject" }
+      },
+      "additionalProperties": false
+    },
+    "methodologyRef": {
+      "type": "object",
+      "required": ["id", "configVersion", "config"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "versionRequirement": { "type": "string", "minLength": 1 },
+        "configVersion": { "type": "integer", "minimum": 1 },
+        "config": { "$ref": "#/$defs/openObject" }
+      },
+      "additionalProperties": false
+    },
+    "methodologyState": {
+      "type": "object",
+      "required": ["schemaVersion", "data"],
+      "properties": {
+        "schemaVersion": { "type": "integer", "minimum": 1 },
+        "data": { "$ref": "#/$defs/openObject" }
+      },
+      "additionalProperties": false
+    },
+    "requestCommon": {
+      "type": "object",
+      "required": ["schemaVersion", "asOf", "methodology", "catalog"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "asOf": { "$ref": "#/$defs/timestamp" },
+        "methodology": { "$ref": "#/$defs/methodologyRef" },
+        "methodologyState": { "$ref": "#/$defs/methodologyState" },
+        "catalog": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/exercise" }
+        },
+        "athlete": { "$ref": "#/$defs/athlete" },
+        "history": { "$ref": "#/$defs/history" }
+      }
+    },
+    "recommendationRequest": {
+      "title": "RecommendationRequest",
+      "unevaluatedProperties": false,
+      "allOf": [
+        { "$ref": "#/$defs/requestCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "session": { "$ref": "#/$defs/session" },
+            "alternativeLimit": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "tieBreakSeed": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "evaluationRequest": {
+      "title": "EvaluationRequest",
+      "unevaluatedProperties": false,
+      "allOf": [
+        { "$ref": "#/$defs/requestCommon" },
+        {
+          "type": "object",
+          "required": ["completedWorkout"],
+          "properties": {
+            "completedWorkout": { "$ref": "#/$defs/completedWorkout" }
+          }
+        }
+      ]
+    },
+    "issue": {
+      "type": "object",
+      "required": ["code", "path", "message", "severity"],
+      "properties": {
+        "code": { "$ref": "#/$defs/identifier" },
+        "path": { "type": "string" },
+        "message": { "type": "string" },
+        "severity": { "enum": ["info", "warning", "error"] },
+        "parameters": { "$ref": "#/$defs/openObject" }
+      },
+      "additionalProperties": false
+    },
+    "explanation": {
+      "type": "object",
+      "required": ["id", "code", "category", "summary", "severity"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "code": { "$ref": "#/$defs/identifier" },
+        "category": { "$ref": "#/$defs/identifier" },
+        "summary": { "type": "string" },
+        "subject": {
+          "type": "object",
+          "properties": {
+            "exerciseId": { "$ref": "#/$defs/identifier" },
+            "setIndex": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": false
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path"],
+            "properties": { "path": { "type": "string" } },
+            "additionalProperties": false
+          }
+        },
+        "parameters": { "$ref": "#/$defs/openObject" },
+        "ruleId": { "$ref": "#/$defs/identifier" },
+        "severity": { "enum": ["info", "warning", "error"] }
+      },
+      "additionalProperties": false
+    },
+    "setRecommendation": {
+      "type": "object",
+      "required": ["kind", "targetMetrics"],
+      "properties": {
+        "kind": { "$ref": "#/$defs/identifier" },
+        "targetMetrics": { "type": "array", "items": { "$ref": "#/$defs/metric" } },
+        "restDuration": { "$ref": "#/$defs/measurement" },
+        "explanationRefs": { "type": "array", "items": { "$ref": "#/$defs/identifier" } }
+      },
+      "additionalProperties": false
+    },
+    "exerciseRecommendation": {
+      "type": "object",
+      "required": ["exerciseId", "sets"],
+      "properties": {
+        "exerciseId": { "$ref": "#/$defs/identifier" },
+        "sets": { "type": "array", "items": { "$ref": "#/$defs/setRecommendation" } },
+        "substitutionGroup": { "$ref": "#/$defs/identifier" },
+        "explanationRefs": { "type": "array", "items": { "$ref": "#/$defs/identifier" } }
+      },
+      "additionalProperties": false
+    },
+    "sessionRecommendation": {
+      "type": "object",
+      "required": ["exercises"],
+      "properties": {
+        "title": { "type": "string" },
+        "estimatedDuration": { "$ref": "#/$defs/measurement" },
+        "exercises": { "type": "array", "items": { "$ref": "#/$defs/exerciseRecommendation" } }
+      },
+      "additionalProperties": false
+    },
+    "performanceEvaluation": {
+      "type": "object",
+      "required": ["outcome", "exercises"],
+      "properties": {
+        "outcome": { "$ref": "#/$defs/identifier" },
+        "exercises": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["exerciseId", "outcome"],
+            "properties": {
+              "exerciseId": { "$ref": "#/$defs/identifier" },
+              "outcome": { "$ref": "#/$defs/identifier" },
+              "explanationRefs": { "type": "array", "items": { "$ref": "#/$defs/identifier" } }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["engineVersion", "schemaVersion", "methodology", "inputFingerprint", "resultFingerprint"],
+      "properties": {
+        "engineVersion": { "type": "string" },
+        "schemaVersion": { "const": 1 },
+        "methodology": {
+          "type": "object",
+          "required": ["id", "version", "configVersion"],
+          "properties": {
+            "id": { "$ref": "#/$defs/identifier" },
+            "version": { "type": "string" },
+            "configVersion": { "type": "integer", "minimum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "inputFingerprint": { "type": "string", "minLength": 1 },
+        "resultFingerprint": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "resultCommon": {
+      "type": "object",
+      "required": ["ok", "metadata"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "nextMethodologyState": { "$ref": "#/$defs/methodologyState" },
+        "explanations": { "type": "array", "items": { "$ref": "#/$defs/explanation" } },
+        "warnings": { "type": "array", "items": { "$ref": "#/$defs/issue" } },
+        "issues": { "type": "array", "items": { "$ref": "#/$defs/issue" } },
+        "metadata": { "$ref": "#/$defs/metadata" }
+      }
+    },
+    "recommendationResult": {
+      "title": "RecommendationResult",
+      "unevaluatedProperties": false,
+      "allOf": [
+        { "$ref": "#/$defs/resultCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "recommendation": { "$ref": "#/$defs/sessionRecommendation" },
+            "alternatives": { "type": "array", "items": { "$ref": "#/$defs/sessionRecommendation" } }
+          }
+        }
+      ]
+    },
+    "evaluationResult": {
+      "title": "EvaluationResult",
+      "unevaluatedProperties": false,
+      "allOf": [
+        { "$ref": "#/$defs/resultCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "evaluation": { "$ref": "#/$defs/performanceEvaluation" }
+          }
+        }
+      ]
+    }
+  }
+}
