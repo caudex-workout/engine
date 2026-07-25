@@ -12,6 +12,16 @@
 
 ## 1. Product definition
 
+### Decision authority
+
+This plan implements the accepted ADRs in decision order. ADR-0002 supersedes
+ADR-0001's tracking-first scope, SQLite-first MVP, event-journal requirements,
+and implementation sequence. ADR-0003 supersedes any remaining implication that
+the core owns persistence or durable state. ADR-0001 remains authoritative for
+the functional-core discipline, deterministic calculations, explicit Zig
+boundaries, C ABI principles, exact measurements, and rejection of generalized
+functional-programming frameworks.
+
 ### One-sentence positioning
 
 > **Caudex Workout Engine is an open-source, embeddable strength and hypertrophy programming engine that lets fitness applications load different training methodologies and produce deterministic, explainable workout recommendations.**
@@ -1004,7 +1014,7 @@ For each canonical fixture, direct snapshot mode and adapter mode must produce m
 
 ## 13. Distribution and packages
 
-### 12.1 npm: first-class distribution
+### 13.1 npm: first-class distribution
 
 Proposed package:
 
@@ -1068,7 +1078,7 @@ Requirements:
 - Deprecation tests
 - Size report in releases
 
-### 12.2 Browser and Node WASM loader
+### 13.2 Browser and Node WASM loader
 
 The wrapper hides environment differences.
 
@@ -1084,7 +1094,7 @@ Requirements:
 - No fetch requirement in Node
 - No shared global singleton unless explicitly requested
 
-### 12.3 Zig package
+### 13.3 Zig package
 
 Requirements:
 
@@ -1096,7 +1106,7 @@ Requirements:
 - Custom methodology example
 - Clear supported Zig version policy
 
-### 12.4 C release
+### 13.4 C release
 
 Artifacts:
 
@@ -1117,7 +1127,7 @@ C API uses:
 - Explicit free function
 - No Zig layouts or errors across ABI
 
-### 12.5 Swift Package Manager
+### 13.5 Swift Package Manager
 
 After ABI stabilization:
 
@@ -1130,7 +1140,7 @@ After ABI stabilization:
 - iOS/macOS simulator and device CI
 - One sample app
 
-### 12.6 Maven Central / Android
+### 13.6 Maven Central / Android
 
 After ABI stabilization:
 
@@ -1143,7 +1153,7 @@ After ABI stabilization:
 - Gradle sample app
 - Instrumented smoke tests
 
-### 12.7 Package support policy
+### 13.7 Package support policy
 
 An ecosystem is “supported” only when CI verifies:
 
@@ -1157,7 +1167,7 @@ An ecosystem is “supported” only when CI verifies:
 
 ## 14. Developer-experience requirements
 
-### 13.1 Five-minute success path
+### 14.1 Five-minute success path
 
 The README begins with:
 
@@ -1170,7 +1180,7 @@ The README begins with:
 
 No architecture essay precedes the quickstart.
 
-### 13.2 Documentation layers
+### 14.2 Documentation layers
 
 #### Start
 
@@ -1198,7 +1208,19 @@ No architecture essay precedes the quickstart.
 - C ABI
 - Wrapper internals
 
-### 13.3 Error design
+### 14.3 Error design
+
+Expected validation and methodology outcomes are returned as structured issue
+values. Engine/runtime failures mean the calculation could not complete safely,
+for example because of allocation failure, corrupt artifacts, serialization
+failure, or an internal invariant violation. Persistence conflicts and adapter
+failures belong to optional adapters or host applications and must not be
+reported as core methodology issues.
+
+The `DomainIssue` and `EngineError` names shown in ADR-0001 describe conceptual
+categories; they do not preselect the public Zig type names. CWE-002 and CWE-004
+define the canonical result model, namespaces, and compatibility rules before
+implementation.
 
 Every issue includes:
 
@@ -1234,7 +1256,7 @@ Rules:
 - Multiple independent validation issues are returned together.
 - Internal errors do not masquerade as validation issues.
 
-### 13.4 Testing package
+### 14.4 Testing package
 
 `@caudex/workout-engine/testing` provides:
 
@@ -1257,7 +1279,7 @@ expect(result).toExplain("load.increased.rep_range_completed");
 
 Custom Jest/Vitest matchers are optional; framework-neutral functions come first.
 
-### 13.5 Playground
+### 14.5 Playground
 
 Create a documentation playground after the npm package works.
 
@@ -1274,6 +1296,11 @@ It should allow developers to:
 The playground uses the public npm package and no private APIs.
 
 ## 15. Repository structure
+
+This is the current target layout and supersedes ADR-0001's illustrative
+`src/domain`, `src/app`, and `src/storage` tree. Architectural rules attach to
+dependency and effect boundaries, not to a literal directory name. Create only
+the files needed by the current issue.
 
 ```text
 caudex/
@@ -1332,7 +1359,7 @@ Do not create empty directories simply to match this drawing.
 
 ## 16. Versioning and compatibility
 
-### 15.1 Version dimensions
+### 16.1 Version dimensions
 
 Track separately:
 
@@ -1345,7 +1372,7 @@ Track separately:
 - Methodology state version
 - Wrapper/package version
 
-### 15.2 v0.x release strategy
+### 16.2 v0.x release strategy
 
 Use lockstep versions for official core and wrappers initially:
 
@@ -1357,7 +1384,7 @@ Zig package tag         0.1.0
 
 First-party methodology versions are still recorded independently in results.
 
-### 15.3 Compatibility promises
+### 16.3 Compatibility promises
 
 Before 1.0:
 
@@ -1368,7 +1395,7 @@ Before 1.0:
 - Canonical fixtures document output changes.
 - Package migration guides accompany breaking releases.
 
-### 15.4 Result provenance
+### 16.4 Result provenance
 
 Every successful result includes:
 
@@ -1388,7 +1415,7 @@ Every successful result includes:
 
 ## 17. Quality strategy
 
-### 16.1 Domain tests
+### 17.1 Domain tests
 
 - Exact decimal arithmetic
 - Unit conversion
@@ -1398,7 +1425,7 @@ Every successful result includes:
 - Stable ordering
 - Explanation construction
 
-### 16.2 Methodology tests
+### 17.2 Methodology tests
 
 Every methodology has:
 
@@ -1412,7 +1439,7 @@ Every methodology has:
 - Explanation codes
 - State migration fixtures
 
-### 16.3 Golden fixtures
+### 17.3 Golden fixtures
 
 Fixtures include:
 
@@ -1428,7 +1455,7 @@ Fixtures include:
 - Stable tie breaking
 - Unit conversion
 
-### 16.4 Cross-language conformance
+### 17.4 Cross-language conformance
 
 The same fixtures run through:
 
@@ -1440,7 +1467,7 @@ The same fixtures run through:
 
 The canonical result must match after normalization.
 
-### 16.5 Fuzz and property tests
+### 17.5 Fuzz and property tests
 
 - Malformed canonical messages
 - Exact-decimal parsing
@@ -1451,7 +1478,7 @@ The canonical result must match after normalization.
 - Repeated recommendation determinism
 - ABI input buffers
 
-### 16.6 Package smoke tests
+### 17.6 Package smoke tests
 
 Test the packed/published artifact, not workspace imports.
 

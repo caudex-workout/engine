@@ -1,9 +1,19 @@
 # ADR-0001: Functional Core, Explicit Zig Shell, and Adapter Architecture
 
-- **Status:** Accepted
+- **Status:** Accepted, partially superseded by ADR-0002 and ADR-0003
 - **Date:** 2026-07-19
 - **Decision owners:** Workout Engine maintainers
 - **Applies to:** Engine v0.1 and later unless superseded by another ADR
+
+> **Supersession notice:** ADR-0002 supersedes this ADR's tracking-first
+> product scope, SQLite-first MVP, event-journal requirements, and
+> implementation sequence. ADR-0003 supersedes any remaining implication that
+> the core owns repositories, database schemas, migrations, transactions, or
+> durable state. This ADR remains authoritative for the functional-core
+> discipline, explicit idiomatic Zig shell, deterministic calculations, C ABI
+> principles, exact-measurement rules, and rejection of generalized
+> functional-programming frameworks. Do not use the superseded storage or
+> sequencing sections as current implementation requirements.
 
 ## Context
 
