@@ -163,6 +163,7 @@ pub const ValidationIssue = struct {
     message: []const u8,
     severity: Severity,
     parameters: ?std.json.Value = null,
+    suggestion: ?[]const u8 = null,
 };
 
 pub const ExplanationSubject = struct {

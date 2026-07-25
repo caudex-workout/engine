@@ -129,6 +129,7 @@ interface ValidationIssue {
   message: string;
   severity: Severity;
   parameters?: JsonObject;
+  suggestion?: string;
 }
 
 interface Explanation {
@@ -219,8 +220,9 @@ absent. Proposed next state is optional because a calculation need not advance
 methodology state.
 
 Human-readable messages and summaries are present for immediate usability, but
-codes and parameters are the compatibility surface. CWE-004 will define their
-namespace and localization conventions.
+codes and parameters are the compatibility surface. Their namespaces,
+compatibility, path, severity, and localization rules are defined in
+[`issues-and-explanations.md`](issues-and-explanations.md).
 
 ## Deliberate exclusions
 

@@ -14,6 +14,15 @@
       "minLength": 1,
       "maxLength": 200
     },
+    "code": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+      "maxLength": 200
+    },
+    "jsonPointer": {
+      "type": "string",
+      "pattern": "^(|/(?:[^~/]|~[01])*)*$"
+    },
     "decimal": {
       "type": "string",
       "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"
@@ -284,11 +293,12 @@
       "type": "object",
       "required": ["code", "path", "message", "severity"],
       "properties": {
-        "code": { "$ref": "#/$defs/identifier" },
-        "path": { "type": "string" },
+        "code": { "$ref": "#/$defs/code" },
+        "path": { "$ref": "#/$defs/jsonPointer" },
         "message": { "type": "string" },
         "severity": { "enum": ["info", "warning", "error"] },
-        "parameters": { "$ref": "#/$defs/openObject" }
+        "parameters": { "$ref": "#/$defs/openObject" },
+        "suggestion": { "type": "string" }
       },
       "additionalProperties": false
     },
@@ -297,7 +307,7 @@
       "required": ["id", "code", "category", "summary", "severity"],
       "properties": {
         "id": { "$ref": "#/$defs/identifier" },
-        "code": { "$ref": "#/$defs/identifier" },
+        "code": { "$ref": "#/$defs/code" },
         "category": { "$ref": "#/$defs/identifier" },
         "summary": { "type": "string" },
         "subject": {
@@ -313,7 +323,7 @@
           "items": {
             "type": "object",
             "required": ["path"],
-            "properties": { "path": { "type": "string" } },
+            "properties": { "path": { "$ref": "#/$defs/jsonPointer" } },
             "additionalProperties": false
           }
         },
