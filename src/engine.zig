@@ -1,6 +1,7 @@
 const std = @import("std");
 const canonical = @import("canonical.zig");
 const diagnostics = @import("diagnostics.zig");
+const double_progression_contract = @import("double_progression.zig");
 const methodology = @import("methodology.zig");
 const primitives = @import("primitives.zig");
 const training = @import("training.zig");
@@ -8,11 +9,7 @@ const training = @import("training.zig");
 pub const engine_version = "0.1.0-dev";
 pub const schema_version: u32 = 1;
 
-pub const DoubleProgressionConfig = struct {
-    rep_min: u16,
-    rep_max: u16,
-    working_sets: u16,
-};
+pub const DoubleProgressionConfig = double_progression_contract.Config;
 
 /// The typed, borrowed Zig request supported by the first vertical slice.
 ///
@@ -79,16 +76,13 @@ fn validateDoubleProgressionConfig(
     view: methodology.ConfigView,
     issues: *diagnostics.IssueWriter,
 ) diagnostics.IssueWriter.AppendError!void {
-    const config: *const DoubleProgressionConfig =
-        @ptrCast(@alignCast(view.context));
-    if (config.rep_min == 0 or
-        config.rep_min > config.rep_max or
-        config.working_sets != 1)
-    {
+    const config: *const DoubleProgressionConfig = @ptrCast(@alignCast(view.context));
+    try double_progression_contract.validateConfig(config.*, issues);
+    if (config.workingSets != 1) {
         try issues.append(.{
             .code = "methodology.config_invalid",
-            .path = "/methodology/config",
-            .message = "The first double-progression slice requires one working set and a valid rep range.",
+            .path = "/methodology/config/workingSets",
+            .message = "The first recommendation slice requires one working set.",
             .severity = .@"error",
         });
     }
@@ -109,7 +103,7 @@ fn recommendDoubleProgression(
     destination.output.rep_amount_len = (std.fmt.bufPrint(
         &destination.output.rep_amount,
         "{d}",
-        .{request.config.rep_min},
+        .{request.config.repRange.min},
     ) catch return error.OutputLimitReached).len;
     destination.output.metrics[0] = .{
         .code = "repetitions",
@@ -229,9 +223,7 @@ fn fingerprintRequest(request: RecommendationRequest, out: *[64]u8) void {
     updateU64(&hash, request.methodology_version.major);
     updateU64(&hash, request.methodology_version.minor);
     updateU64(&hash, request.methodology_version.patch);
-    updateU64(&hash, request.config.rep_min);
-    updateU64(&hash, request.config.rep_max);
-    updateU64(&hash, request.config.working_sets);
+    fingerprintConfig(&hash, request.config);
     for (request.catalog.exercises) |exercise| {
         hash.update(exercise.id.bytes);
         hash.update("\x00");
@@ -267,6 +259,73 @@ fn updateU64(hash: *std.crypto.hash.sha2.Sha256, value: anytype) void {
     var bytes: [8]u8 = undefined;
     std.mem.writeInt(u64, &bytes, @intCast(value), .big);
     hash.update(&bytes);
+}
+
+fn fingerprintConfig(
+    hash: *std.crypto.hash.sha2.Sha256,
+    config: DoubleProgressionConfig,
+) void {
+    updateU64(hash, config.repRange.min);
+    updateU64(hash, config.repRange.max);
+    updateU64(hash, config.workingSets);
+    updateU64(hash, config.advancementCriteria.minimumSuccessfulSets);
+    updateU64(hash, config.advancementCriteria.minimumRepetitions);
+    updateMeasurement(hash, config.loadIncrement);
+    hash.update(@tagName(config.failurePolicy.onPartial));
+    hash.update("\x00");
+    hash.update(@tagName(config.failurePolicy.onFailure));
+    hash.update("\x00");
+    updateMeasurement(hash, config.failurePolicy.regressionAmount);
+    hash.update(@tagName(config.rounding.mode));
+    hash.update("\x00");
+    updateMeasurement(hash, config.rounding.quantum);
+    for (config.exerciseOverrides) |override| {
+        hash.update(override.exerciseId);
+        hash.update("\x00");
+        updatePresence(hash, override.repRange != null);
+        if (override.repRange) |rep_range| {
+            updateU64(hash, rep_range.min);
+            updateU64(hash, rep_range.max);
+        }
+        updatePresence(hash, override.workingSets != null);
+        if (override.workingSets) |working_sets| updateU64(hash, working_sets);
+        updatePresence(hash, override.advancementCriteria != null);
+        if (override.advancementCriteria) |advancement| {
+            updateU64(hash, advancement.minimumSuccessfulSets);
+            updateU64(hash, advancement.minimumRepetitions);
+        }
+        updatePresence(hash, override.loadIncrement != null);
+        if (override.loadIncrement) |measurement| updateMeasurement(hash, measurement);
+        updatePresence(hash, override.failurePolicy != null);
+        if (override.failurePolicy) |failure_policy| {
+            hash.update(@tagName(failure_policy.onPartial));
+            hash.update("\x00");
+            hash.update(@tagName(failure_policy.onFailure));
+            hash.update("\x00");
+            updateMeasurement(hash, failure_policy.regressionAmount);
+        }
+        updatePresence(hash, override.rounding != null);
+        if (override.rounding) |rounding| {
+            hash.update(@tagName(rounding.mode));
+            hash.update("\x00");
+            updateMeasurement(hash, rounding.quantum);
+        }
+        hash.update("\xff");
+    }
+}
+
+fn updatePresence(hash: *std.crypto.hash.sha2.Sha256, present: bool) void {
+    hash.update(if (present) "\x01" else "\x00");
+}
+
+fn updateMeasurement(
+    hash: *std.crypto.hash.sha2.Sha256,
+    measurement: canonical.Measurement,
+) void {
+    hash.update(measurement.amount);
+    hash.update("\x00");
+    hash.update(measurement.unit);
+    hash.update("\x00");
 }
 
 fn finishHex(hash: *std.crypto.hash.sha2.Sha256, out: *[64]u8) void {
@@ -305,7 +364,7 @@ test "one exercise recommendation repeats identically" {
         .as_of = try .parse("2026-07-25T14:00:00Z"),
         .methodology_id = try .parse("caudex.double-progression"),
         .methodology_version = .{ .major = 0, .minor = 1, .patch = 0 },
-        .config = .{ .rep_min = 8, .rep_max = 12, .working_sets = 1 },
+        .config = testConfig(),
         .catalog = .{ .exercises = &exercises },
         .available_equipment_ids = &equipment,
     };
@@ -322,4 +381,25 @@ test "one exercise recommendation repeats identically" {
     );
     try std.testing.expectEqual(@as(usize, 64), first.metadata.inputFingerprint.len);
     try std.testing.expectEqual(@as(usize, 64), first.metadata.resultFingerprint.len);
+}
+
+fn testConfig() DoubleProgressionConfig {
+    return .{
+        .repRange = .{ .min = 8, .max = 12 },
+        .workingSets = 1,
+        .advancementCriteria = .{
+            .minimumSuccessfulSets = 1,
+            .minimumRepetitions = 12,
+        },
+        .loadIncrement = .{ .amount = "5", .unit = "lb" },
+        .failurePolicy = .{
+            .onPartial = .hold,
+            .onFailure = .regress,
+            .regressionAmount = .{ .amount = "5", .unit = "lb" },
+        },
+        .rounding = .{
+            .mode = .nearest,
+            .quantum = .{ .amount = "2.5", .unit = "lb" },
+        },
+    };
 }

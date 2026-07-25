@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://caudex.dev/schemas/methodologies/double-progression-state-v1.schema.json",
+  "title": "Caudex double-progression state v1",
+  "$defs": {
+    "identifier": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "decimal": { "type": "string", "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$" },
+    "measurement": {
+      "type": "object",
+      "required": ["amount", "unit"],
+      "properties": {
+        "amount": { "$ref": "#/$defs/decimal" },
+        "unit": { "$ref": "#/$defs/identifier" }
+      },
+      "additionalProperties": false
+    },
+    "exerciseState": {
+      "type": "object",
+      "required": ["exerciseId", "load", "targetRepetitions"],
+      "properties": {
+        "exerciseId": { "$ref": "#/$defs/identifier" },
+        "load": { "$ref": "#/$defs/measurement" },
+        "targetRepetitions": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "type": "object",
+  "required": ["schemaVersion", "data"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "data": {
+      "type": "object",
+      "required": ["exercises"],
+      "properties": {
+        "exercises": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/exerciseState" }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

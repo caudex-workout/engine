@@ -2,6 +2,7 @@ const std = @import("std");
 
 pub const canonical = @import("canonical.zig");
 pub const diagnostics = @import("diagnostics.zig");
+pub const double_progression = @import("double_progression.zig");
 pub const duration = @import("duration.zig");
 pub const engine = @import("engine.zig");
 pub const filtering = @import("filtering.zig");

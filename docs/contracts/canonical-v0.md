@@ -231,6 +231,9 @@ revision, transaction, synchronization, UI, device, or acceptance-status field.
 Hosts may correlate canonical IDs with their own data, but storage and
 application lifecycle remain outside the core.
 
-The contract also does not define the contents of first-party methodology
-configuration or state. Those schemas belong to CWE-030 and CWE-040. It does not
-define parsing limits or wire encoding behavior, which belong to CWE-050.
+First-party methodology configuration and state remain methodology-owned rather
+than shared canonical definitions. Double progression v1 is defined in
+[`double-progression-v1.md`](../methodologies/double-progression-v1.md) and its
+dedicated schemas. Other methodology contracts are added by their corresponding
+implementation issues. This contract does not define parsing limits or wire
+encoding behavior, which belong to CWE-050.

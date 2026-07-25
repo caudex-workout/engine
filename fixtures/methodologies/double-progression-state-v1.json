@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "data": {
+    "exercises": [
+      {
+        "exerciseId": "barbell-squat",
+        "load": { "amount": "225", "unit": "lb" },
+        "targetRepetitions": 6
+      }
+    ]
+  }
+}

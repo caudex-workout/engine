@@ -41,6 +41,43 @@ test "canonical schemas are valid JSON documents" {
     }
 }
 
+test "double-progression config and state fixtures decode" {
+    inline for (.{
+        .{
+            caudex.double_progression.Config,
+            @embedFile("fixtures/methodologies/double-progression-config-v1.json"),
+        },
+        .{
+            caudex.double_progression.State,
+            @embedFile("fixtures/methodologies/double-progression-state-v1.json"),
+        },
+    }) |fixture| {
+        const parsed = try std.json.parseFromSlice(
+            fixture[0],
+            std.testing.allocator,
+            fixture[1],
+            .{},
+        );
+        defer parsed.deinit();
+    }
+}
+
+test "double-progression schemas are valid JSON documents" {
+    inline for (.{
+        @embedFile("schemas/methodologies/double-progression-config-v1.schema.json"),
+        @embedFile("schemas/methodologies/double-progression-state-v1.schema.json"),
+    }) |schema| {
+        const parsed = try std.json.parseFromSlice(
+            std.json.Value,
+            std.testing.allocator,
+            schema,
+            .{},
+        );
+        defer parsed.deinit();
+        try std.testing.expect(parsed.value == .object);
+    }
+}
+
 test "measurement rejects a JSON number at the decimal boundary" {
     const invalid = "{\"amount\":72.5,\"unit\":\"lb\"}";
     try std.testing.expectError(
@@ -159,7 +196,24 @@ test "deterministic recommendation matches the golden canonical fixture" {
         .as_of = try .parse("2026-07-25T14:00:00Z"),
         .methodology_id = try .parse("caudex.double-progression"),
         .methodology_version = .{ .major = 0, .minor = 1, .patch = 0 },
-        .config = .{ .rep_min = 8, .rep_max = 12, .working_sets = 1 },
+        .config = .{
+            .repRange = .{ .min = 8, .max = 12 },
+            .workingSets = 1,
+            .advancementCriteria = .{
+                .minimumSuccessfulSets = 1,
+                .minimumRepetitions = 12,
+            },
+            .loadIncrement = .{ .amount = "5", .unit = "lb" },
+            .failurePolicy = .{
+                .onPartial = .hold,
+                .onFailure = .regress,
+                .regressionAmount = .{ .amount = "5", .unit = "lb" },
+            },
+            .rounding = .{
+                .mode = .nearest,
+                .quantum = .{ .amount = "2.5", .unit = "lb" },
+            },
+        },
         .catalog = .{ .exercises = &exercises },
         .available_equipment_ids = &equipment,
     };

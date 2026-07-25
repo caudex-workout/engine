@@ -1,0 +1,33 @@
+{
+  "repRange": { "min": 8, "max": 12 },
+  "workingSets": 3,
+  "advancementCriteria": {
+    "minimumSuccessfulSets": 3,
+    "minimumRepetitions": 12
+  },
+  "loadIncrement": { "amount": "5", "unit": "lb" },
+  "failurePolicy": {
+    "onPartial": "hold",
+    "onFailure": "regress",
+    "regressionAmount": { "amount": "5", "unit": "lb" }
+  },
+  "rounding": {
+    "mode": "nearest",
+    "quantum": { "amount": "2.5", "unit": "lb" }
+  },
+  "exerciseOverrides": [
+    {
+      "exerciseId": "barbell-squat",
+      "repRange": { "min": 5, "max": 8 },
+      "advancementCriteria": {
+        "minimumSuccessfulSets": 3,
+        "minimumRepetitions": 8
+      },
+      "loadIncrement": { "amount": "10", "unit": "lb" },
+      "rounding": {
+        "mode": "nearest",
+        "quantum": { "amount": "5", "unit": "lb" }
+      }
+    }
+  ]
+}
