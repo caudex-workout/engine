@@ -4,14 +4,16 @@ const caudex = @import("caudex");
 test "public root exports are intentional" {
     const declarations = std.meta.declarations(caudex);
 
-    try std.testing.expectEqual(@as(usize, 1), declarations.len);
+    try std.testing.expectEqual(@as(usize, 2), declarations.len);
     try std.testing.expectEqualStrings("canonical", declarations[0].name);
+    try std.testing.expectEqualStrings("primitives", declarations[1].name);
 }
 
 test "core source has no forbidden effect or dependency imports" {
     const sources = .{
         @embedFile("src/root.zig"),
         @embedFile("src/canonical.zig"),
+        @embedFile("src/primitives.zig"),
     };
     const forbidden = .{
         "std.fs",
@@ -21,6 +23,9 @@ test "core source has no forbidden effect or dependency imports" {
         "std.posix",
         "linkLibC",
         "linkSystemLibrary",
+        "parseFloat",
+        "f32",
+        "f64",
         "sqlite",
         "zig-cats",
     };
