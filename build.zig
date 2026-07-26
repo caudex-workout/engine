@@ -402,6 +402,18 @@ pub fn build(b: *std.Build) void {
     );
     data_mapping_guide_step.dependOn(&data_mapping_guide_test.step);
 
+    const custom_repository_test = b.addSystemCommand(&.{
+        "node",
+        "tests/custom_repository_example_test.mjs",
+    });
+    custom_repository_test.step.dependOn(&npm_package_build.step);
+    custom_repository_test.step.dependOn(&persistence_package_build.step);
+    const custom_repository_step = b.step(
+        "test-custom-repository",
+        "Compile and run the custom repository integration example",
+    );
+    custom_repository_step.dependOn(&custom_repository_test.step);
+
     const testing_utilities_test = b.addSystemCommand(&.{
         "node",
         "tests/testing_utilities_test.mjs",
@@ -482,6 +494,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&docs_quickstart_test.step);
     test_step.dependOn(&methodology_guides_test.step);
     test_step.dependOn(&data_mapping_guide_test.step);
+    test_step.dependOn(&custom_repository_test.step);
     test_step.dependOn(&testing_utilities_test.step);
     test_step.dependOn(&npm_examples_test.step);
     test_step.dependOn(&zig_package_consumer_test.step);

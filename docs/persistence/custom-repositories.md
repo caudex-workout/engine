@@ -10,7 +10,10 @@ The primary contract is the Zig module
 context/function tables and caller-supplied allocators. Loaded values borrow
 storage allocated from that allocator, so an arena is a convenient ownership
 boundary for assembling one request snapshot. The TypeScript package mirrors
-the same capabilities for npm hosts.
+the same capabilities for npm hosts. The executable
+[`examples/custom-repository`](../../examples/custom-repository/README.md)
+sample applies those capabilities to deliberately non-canonical legacy records
+and verifies that only methodology state is written.
 
 ## Choose only the capabilities you need
 
