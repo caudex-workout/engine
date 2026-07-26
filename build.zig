@@ -455,14 +455,55 @@ pub fn build(b: *std.Build) void {
         \\Caudex Workout Engine reference client
         \\
         \\Usage:
+        \\  caudex [--database PATH] [--format human|json] database info
         \\  caudex --help
         \\  caudex version
+        \\
+        \\Environment:
+        \\  CAUDEX_DATABASE  Database path used when --database is omitted
         \\
     );
 
     const cli_version = b.addRunArtifact(cli);
     cli_version.addArg("version");
     cli_version.expectStdOutEqual("caudex 0.1.0\n");
+
+    const cli_database_human = b.addRunArtifact(cli);
+    cli_database_human.addArgs(&.{ "--database", ":memory:", "database", "info" });
+    cli_database_human.expectStdOutEqual(
+        \\Database: :memory:
+        \\Kind: memory
+        \\Adapter version: 0.1.0
+        \\Schema version: 2
+        \\Supported schema: 1-2
+        \\Compatibility: current
+        \\
+    );
+
+    const cli_database_json = b.addRunArtifact(cli);
+    cli_database_json.addArgs(&.{
+        "--database",
+        ":memory:",
+        "--format",
+        "json",
+        "database",
+        "info",
+    });
+    cli_database_json.expectStdOutEqual(
+        "{\"kind\":\"caudex.database-info\",\"schema_version\":1," ++
+            "\"database_path\":\":memory:\",\"database_kind\":\"memory\"," ++
+            "\"adapter_version\":\"0.1.0\",\"database_schema_version\":2," ++
+            "\"minimum_schema_version\":1,\"latest_schema_version\":2," ++
+            "\"compatibility\":\"current\"}\n",
+    );
+
+    const cli_invalid = b.addRunArtifact(cli);
+    cli_invalid.addArgs(&.{ "database", "unknown" });
+    cli_invalid.expectExitCode(2);
+    cli_invalid.expectStdOutEqual("");
+    cli_invalid.expectStdErrEqual(
+        "error: invalid arguments; run 'caudex --help'\n",
+    );
 
     const architecture_probe_files = b.addWriteFiles();
     const private_import_probe = architecture_probe_files.add("caudex_private_import.zig",
@@ -484,6 +525,9 @@ pub fn build(b: *std.Build) void {
     cli_test_step.dependOn(&run_cli_tests.step);
     cli_test_step.dependOn(&cli_help.step);
     cli_test_step.dependOn(&cli_version.step);
+    cli_test_step.dependOn(&cli_database_human.step);
+    cli_test_step.dependOn(&cli_database_json.step);
+    cli_test_step.dependOn(&cli_invalid.step);
     cli_test_step.dependOn(&private_import_check.step);
 
     const npm_package_test = b.addSystemCommand(&.{
@@ -645,6 +689,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_cli_tests.step);
     test_step.dependOn(&cli_help.step);
     test_step.dependOn(&cli_version.step);
+    test_step.dependOn(&cli_database_human.step);
+    test_step.dependOn(&cli_database_json.step);
+    test_step.dependOn(&cli_invalid.step);
     test_step.dependOn(&private_import_check.step);
     test_step.dependOn(&npm_clean_smoke.step);
     test_step.dependOn(&npm_release_test.step);
