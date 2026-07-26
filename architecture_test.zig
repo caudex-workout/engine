@@ -72,4 +72,7 @@ test "core npm package has no persistence adapter dependency" {
     try std.testing.expect(
         std.mem.indexOf(u8, manifest, "indexeddb") == null,
     );
+    try std.testing.expect(
+        std.mem.indexOf(u8, manifest, "sqlite") == null,
+    );
 }

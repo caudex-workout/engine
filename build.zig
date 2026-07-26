@@ -308,6 +308,35 @@ pub fn build(b: *std.Build) void {
     indexeddb_test_step.dependOn(&indexeddb_adapter_test.step);
     indexeddb_test_step.dependOn(&indexeddb_clean_smoke.step);
 
+    const sqlite_module = b.createModule(.{
+        .root_source_file = b.path("adapters/sqlite.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "caudex", .module = module },
+            .{ .name = "persistence", .module = persistence_module },
+        },
+    });
+    sqlite_module.link_libc = true;
+    sqlite_module.linkSystemLibrary("sqlite3", .{});
+    const sqlite_adapter_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("sqlite_adapter_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "persistence", .module = persistence_module },
+                .{ .name = "sqlite", .module = sqlite_module },
+            },
+        }),
+    });
+    const run_sqlite_adapter_tests = b.addRunArtifact(sqlite_adapter_tests);
+    const sqlite_test_step = b.step(
+        "test-persistence-sqlite",
+        "Build and test the optional SQLite persistence adapter",
+    );
+    sqlite_test_step.dependOn(&run_sqlite_adapter_tests.step);
+
     const npm_package_test = b.addSystemCommand(&.{
         "node",
         "tests/npm_package_artifact_test.mjs",
@@ -447,6 +476,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&npm_package_test.step);
     test_step.dependOn(&indexeddb_adapter_test.step);
     test_step.dependOn(&indexeddb_clean_smoke.step);
+    test_step.dependOn(&run_sqlite_adapter_tests.step);
     test_step.dependOn(&npm_clean_smoke.step);
     test_step.dependOn(&npm_release_test.step);
     test_step.dependOn(&docs_quickstart_test.step);
