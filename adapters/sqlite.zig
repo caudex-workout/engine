@@ -12,7 +12,7 @@ const c = @cImport({
 });
 
 pub const adapter_version = "0.1.0";
-pub const schema_version: u32 = 3;
+pub const schema_version: u32 = 4;
 pub const minimum_schema_version: u32 = 1;
 
 pub const Options = struct {
@@ -141,6 +141,28 @@ pub const Adapter = opaque {
         return changeTrackedExercises(self, allocator, .{ .reorder = command });
     }
 
+    pub fn addSet(self: *Adapter, allocator: std.mem.Allocator, command: tracking.AddSetCommand) TrackingError!tracking.CommandResult {
+        return changeTrackedSets(self, allocator, .{ .add = command });
+    }
+    pub fn completeSet(self: *Adapter, allocator: std.mem.Allocator, command: tracking.CompleteSetCommand) TrackingError!tracking.CommandResult {
+        return changeTrackedSets(self, allocator, .{ .complete = command });
+    }
+    pub fn logSet(self: *Adapter, allocator: std.mem.Allocator, command: tracking.LogSetCommand) TrackingError!tracking.CommandResult {
+        return self.completeSet(allocator, command);
+    }
+    pub fn skipSet(self: *Adapter, allocator: std.mem.Allocator, command: tracking.SkipSetCommand) TrackingError!tracking.CommandResult {
+        return changeTrackedSets(self, allocator, .{ .skip = command });
+    }
+    pub fn reopenSet(self: *Adapter, allocator: std.mem.Allocator, command: tracking.ReopenSetCommand) TrackingError!tracking.CommandResult {
+        return changeTrackedSets(self, allocator, .{ .reopen = command });
+    }
+    pub fn removeSet(self: *Adapter, allocator: std.mem.Allocator, command: tracking.RemoveSetCommand) TrackingError!tracking.CommandResult {
+        return changeTrackedSets(self, allocator, .{ .remove = command });
+    }
+    pub fn reorderSet(self: *Adapter, allocator: std.mem.Allocator, command: tracking.ReorderSetCommand) TrackingError!tracking.CommandResult {
+        return changeTrackedSets(self, allocator, .{ .reorder = command });
+    }
+
     pub fn replaceCatalog(
         self: *Adapter,
         allocator: std.mem.Allocator,
@@ -226,6 +248,10 @@ pub const Adapter = opaque {
         if (current < 3) try self.applyMigration(
             3,
             @embedFile("sqlite/migrations/003_tracking_exercises.sql"),
+        );
+        if (current < 4) try self.applyMigration(
+            4,
+            @embedFile("sqlite/migrations/004_tracking_sets.sql"),
         );
     }
 
@@ -416,6 +442,167 @@ const ExerciseChange = union(enum) {
     }
 };
 
+fn setChangeScope(change: tracking.SetCommand) tracking.Scope {
+    return switch (change) {
+        inline else => |command| command.scope,
+    };
+}
+
+fn setChangeWorkoutId(change: tracking.SetCommand) tracking.Id {
+    return switch (change) {
+        inline else => |command| command.workout_id,
+    };
+}
+
+fn setChangeCommandId(change: tracking.SetCommand) tracking.Id {
+    return switch (change) {
+        inline else => |command| command.metadata.command_id,
+    };
+}
+
+fn changeTrackedSets(
+    self: *Adapter,
+    allocator: std.mem.Allocator,
+    change: tracking.SetCommand,
+) TrackingError!tracking.CommandResult {
+    const payload = try encodeAlloc(allocator, change);
+    defer allocator.free(payload);
+    try self.execute("BEGIN IMMEDIATE");
+    errdefer self.execute("ROLLBACK") catch {};
+    const scope = setChangeScope(change);
+    const workout_id = setChangeWorkoutId(change);
+    const command_id = setChangeCommandId(change);
+
+    if (try loadSetReceipt(self, allocator, scope, command_id)) |prior_payload| {
+        if (!std.mem.eql(u8, prior_payload, payload)) {
+            var issue: [1]tracking.Issue = .{.{
+                .code = tracking.issue_codes.command_payload_conflict,
+                .category = .conflict,
+                .severity = .@"error",
+                .message = "The command ID was already used with another payload.",
+            }};
+            const owned = try ownRejected(allocator, .{
+                .command_id = command_id,
+                .issues = &issue,
+            });
+            try self.execute("ROLLBACK");
+            return owned;
+        }
+        const current = (try loadTrackedWorkout(
+            self,
+            allocator,
+            scope,
+            workout_id,
+        )) orelse return error.InvalidData;
+        const accepted = try ownAccepted(allocator, .{
+            .command_id = command_id,
+            .disposition = .replayed,
+            .workout = current,
+        });
+        try self.execute("COMMIT");
+        return .{ .accepted = accepted };
+    }
+
+    const workout = try loadTrackedWorkout(self, allocator, scope, workout_id);
+    const workouts = if (workout) |value| &.{value} else &.{};
+    const exercise_count = if (workout) |value| value.exercises.len else 0;
+    var set_count: usize = 0;
+    if (workout) |value| {
+        const membership_id = switch (change) {
+            inline else => |command| command.membership_id,
+        };
+        if (findTrackedMembership(value.exercises, membership_id)) |index|
+            set_count = value.exercises[index].sets.len;
+    }
+    const exercise_storage = try allocator.alloc(
+        tracking.ExerciseMembership,
+        exercise_count,
+    );
+    const set_storage = try allocator.alloc(
+        tracking.TrackedSet,
+        set_count + switch (change) {
+            .add => @as(usize, 1),
+            else => 0,
+        },
+    );
+    var issues: [1]tracking.Issue = undefined;
+    const decided = tracking.applySetCommand(
+        .{ .workouts = workouts },
+        change,
+        exercise_storage,
+        set_storage,
+        &issues,
+    ) catch |err| switch (err) {
+        error.IssueBufferTooSmall,
+        error.ExerciseBufferTooSmall,
+        error.SetBufferTooSmall,
+        error.RevisionOverflow,
+        => return error.InvalidData,
+    };
+    const proposed = switch (decided) {
+        .accepted => |accepted| accepted,
+        .rejected => |rejected| {
+            const owned = try ownRejected(allocator, rejected);
+            try self.execute("ROLLBACK");
+            return owned;
+        },
+    };
+    const accepted = try ownAccepted(allocator, proposed);
+    try persistWorkoutState(self, allocator, accepted.workout);
+    try insertSetReceipt(self, scope, command_id, workout_id, payload);
+    try self.execute("COMMIT");
+    return .{ .accepted = accepted };
+}
+
+fn loadSetReceipt(
+    self: *Adapter,
+    allocator: std.mem.Allocator,
+    scope: tracking.Scope,
+    command_id: tracking.Id,
+) TrackingError!?[]const u8 {
+    var statement = try self.prepare(
+        \\SELECT payload_json FROM tracking_set_command_receipts
+        \\WHERE host_scope_key = ?1 AND athlete_id = ?2 AND command_id = ?3
+    );
+    defer statement.finalize();
+    try statement.bindText(1, scope.host_scope_key.bytes);
+    try statement.bindText(2, athleteKey(scope));
+    try statement.bindText(3, command_id.bytes);
+    if (!try statement.row()) return null;
+    return try dupeColumn(allocator, statement.raw, 0);
+}
+
+fn insertSetReceipt(
+    self: *Adapter,
+    scope: tracking.Scope,
+    command_id: tracking.Id,
+    workout_id: tracking.Id,
+    payload: []const u8,
+) persistence.AdapterError!void {
+    var statement = try self.prepare(
+        \\INSERT INTO tracking_set_command_receipts
+        \\  (host_scope_key, athlete_id, command_id, payload_json, workout_id)
+        \\VALUES (?1, ?2, ?3, ?4, ?5)
+    );
+    defer statement.finalize();
+    try statement.bindText(1, scope.host_scope_key.bytes);
+    try statement.bindText(2, athleteKey(scope));
+    try statement.bindText(3, command_id.bytes);
+    try statement.bindText(4, payload);
+    try statement.bindText(5, workout_id.bytes);
+    try statement.done();
+}
+
+fn findTrackedMembership(
+    exercises: []const tracking.ExerciseMembership,
+    membership_id: tracking.Id,
+) ?usize {
+    for (exercises, 0..) |membership, index| {
+        if (membership.id.eql(membership_id)) return index;
+    }
+    return null;
+}
+
 fn changeTrackedExercises(
     self: *Adapter,
     allocator: std.mem.Allocator,
@@ -480,6 +667,7 @@ fn changeTrackedExercises(
     } catch |err| switch (err) {
         error.IssueBufferTooSmall,
         error.ExerciseBufferTooSmall,
+        error.SetBufferTooSmall,
         error.RevisionOverflow,
         => return error.InvalidData,
     };
@@ -492,7 +680,7 @@ fn changeTrackedExercises(
         },
     };
     const accepted = try ownAccepted(allocator, proposed);
-    try persistExerciseOrdering(self, accepted.workout);
+    try persistWorkoutState(self, allocator, accepted.workout);
     try self.execute("COMMIT");
     return .{ .accepted = accepted };
 }
@@ -519,10 +707,11 @@ fn loadExerciseCatalogEntry(
     };
 }
 
-fn persistExerciseOrdering(
+fn persistWorkoutState(
     self: *Adapter,
+    allocator: std.mem.Allocator,
     workout: tracking.Workout,
-) persistence.AdapterError!void {
+) persistence.CapabilityError!void {
     var update = try self.prepare(
         \\UPDATE tracking_workouts SET revision = ?1
         \\WHERE host_scope_key = ?2 AND athlete_id = ?3 AND workout_id = ?4
@@ -533,6 +722,16 @@ fn persistExerciseOrdering(
     try update.bindText(3, athleteKey(workout.scope));
     try update.bindText(4, workout.id.bytes);
     try update.done();
+
+    var delete_sets = try self.prepare(
+        \\DELETE FROM tracking_workout_sets
+        \\WHERE host_scope_key = ?1 AND athlete_id = ?2 AND workout_id = ?3
+    );
+    defer delete_sets.finalize();
+    try delete_sets.bindText(1, workout.scope.host_scope_key.bytes);
+    try delete_sets.bindText(2, athleteKey(workout.scope));
+    try delete_sets.bindText(3, workout.id.bytes);
+    try delete_sets.done();
 
     var delete = try self.prepare(
         \\DELETE FROM tracking_workout_exercises
@@ -560,6 +759,39 @@ fn persistExerciseOrdering(
         try insert.bindInt(6, ordinal);
         try insert.done();
         try insert.reset();
+    }
+
+    var insert_set = try self.prepare(
+        \\INSERT INTO tracking_workout_sets
+        \\  (host_scope_key, athlete_id, workout_id, membership_id, set_id,
+        \\   kind, target_metrics_json, actual_metrics_json, status,
+        \\   recorded_at, ordinal)
+        \\VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+    );
+    defer insert_set.finalize();
+    for (workout.exercises) |membership| {
+        for (membership.sets, 0..) |set, ordinal| {
+            const targets = try encodeAlloc(allocator, set.target_metrics);
+            defer allocator.free(targets);
+            const actuals = try encodeAlloc(allocator, set.actual_metrics);
+            defer allocator.free(actuals);
+            try insert_set.bindText(1, workout.scope.host_scope_key.bytes);
+            try insert_set.bindText(2, athleteKey(workout.scope));
+            try insert_set.bindText(3, workout.id.bytes);
+            try insert_set.bindText(4, membership.id.bytes);
+            try insert_set.bindText(5, set.id.bytes);
+            try insert_set.bindText(6, set.kind.bytes);
+            try insert_set.bindText(7, targets);
+            try insert_set.bindText(8, actuals);
+            try insert_set.bindText(9, setStatusText(set.status));
+            if (set.recorded_at) |recorded|
+                try insert_set.bindText(10, recorded.bytes)
+            else
+                try insert_set.bindNull(10);
+            try insert_set.bindInt(11, ordinal);
+            try insert_set.done();
+            try insert_set.reset();
+        }
     }
 }
 
@@ -635,6 +867,64 @@ fn loadTrackedExercises(
         try values.append(allocator, .{
             .id = membership_id,
             .exercise_id = exercise_id,
+            .sets = try loadTrackedSets(
+                self,
+                allocator,
+                scope,
+                workout_id,
+                membership_id,
+            ),
+        });
+    }
+    return values.toOwnedSlice(allocator);
+}
+
+fn loadTrackedSets(
+    self: *Adapter,
+    allocator: std.mem.Allocator,
+    scope: tracking.Scope,
+    workout_id: tracking.Id,
+    membership_id: tracking.Id,
+) TrackingError![]const tracking.TrackedSet {
+    var statement = try self.prepare(
+        \\SELECT set_id, kind, target_metrics_json, actual_metrics_json,
+        \\       status, recorded_at
+        \\FROM tracking_workout_sets
+        \\WHERE host_scope_key = ?1 AND athlete_id = ?2 AND workout_id = ?3
+        \\  AND membership_id = ?4
+        \\ORDER BY ordinal
+    );
+    defer statement.finalize();
+    try statement.bindText(1, scope.host_scope_key.bytes);
+    try statement.bindText(2, athleteKey(scope));
+    try statement.bindText(3, workout_id.bytes);
+    try statement.bindText(4, membership_id.bytes);
+    var values: std.ArrayList(tracking.TrackedSet) = .empty;
+    errdefer values.deinit(allocator);
+    while (try statement.row()) {
+        const recorded = column(statement.raw, 5);
+        try values.append(allocator, .{
+            .id = .{ .bytes = try dupeColumn(allocator, statement.raw, 0) },
+            .kind = .{ .bytes = try dupeColumn(allocator, statement.raw, 1) },
+            .target_metrics = try parseColumn(
+                []const tracking.Metric,
+                allocator,
+                statement.raw,
+                2,
+            ),
+            .actual_metrics = try parseColumn(
+                []const tracking.Metric,
+                allocator,
+                statement.raw,
+                3,
+            ),
+            .status = try parseSetStatus(
+                column(statement.raw, 4) orelse return error.InvalidData,
+            ),
+            .recorded_at = if (recorded) |value|
+                .{ .bytes = try allocator.dupe(u8, value) }
+            else
+                null,
         });
     }
     return values.toOwnedSlice(allocator);
@@ -793,8 +1083,41 @@ fn ownExerciseMemberships(
         owned[index] = .{
             .id = try ownId(allocator, membership.id),
             .exercise_id = try ownId(allocator, membership.exercise_id),
-            .sets = membership.sets,
+            .sets = try ownTrackedSets(allocator, membership.sets),
         };
+    }
+    return owned;
+}
+
+fn ownTrackedSets(
+    allocator: std.mem.Allocator,
+    sets: []const tracking.TrackedSet,
+) std.mem.Allocator.Error![]const tracking.TrackedSet {
+    const owned = try allocator.alloc(tracking.TrackedSet, sets.len);
+    for (sets, 0..) |set, index| {
+        owned[index] = .{
+            .id = try ownId(allocator, set.id),
+            .kind = try ownId(allocator, set.kind),
+            .target_metrics = try ownMetrics(allocator, set.target_metrics),
+            .actual_metrics = try ownMetrics(allocator, set.actual_metrics),
+            .status = set.status,
+            .recorded_at = if (set.recorded_at) |timestamp|
+                .{ .bytes = try allocator.dupe(u8, timestamp.bytes) }
+            else
+                null,
+        };
+    }
+    return owned;
+}
+
+fn ownMetrics(
+    allocator: std.mem.Allocator,
+    metrics: []const tracking.Metric,
+) std.mem.Allocator.Error![]const tracking.Metric {
+    const owned = try allocator.alloc(tracking.Metric, metrics.len);
+    for (metrics, 0..) |metric, index| {
+        owned[index] = metric;
+        owned[index].code = try ownId(allocator, metric.code);
     }
     return owned;
 }
@@ -836,6 +1159,18 @@ fn parseWorkoutStatus(value: []const u8) persistence.AdapterError!tracking.Worko
     return error.InvalidData;
 }
 
+fn setStatusText(status: tracking.SetStatus) []const u8 {
+    return @tagName(status);
+}
+
+fn parseSetStatus(value: []const u8) persistence.AdapterError!tracking.SetStatus {
+    inline for (std.meta.fields(tracking.SetStatus)) |field| {
+        if (std.mem.eql(u8, value, field.name))
+            return @enumFromInt(field.value);
+    }
+    return error.InvalidData;
+}
+
 const Statement = struct {
     raw: *c.sqlite3_stmt,
 
@@ -871,6 +1206,11 @@ const Statement = struct {
         value: anytype,
     ) persistence.AdapterError!void {
         const status = c.sqlite3_bind_int64(self.raw, index, @intCast(value));
+        if (status != c.SQLITE_OK) return mapStatus(status);
+    }
+
+    fn bindNull(self: Statement, index: c_int) persistence.AdapterError!void {
+        const status = c.sqlite3_bind_null(self.raw, index);
         if (status != c.SQLITE_OK) return mapStatus(status);
     }
 

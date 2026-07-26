@@ -7,12 +7,21 @@
 const std = @import("std");
 const caudex = @import("caudex");
 
-pub const contract_version: u32 = 2;
+pub const contract_version: u32 = 3;
 
 pub const Id = caudex.primitives.Id;
 pub const Timestamp = caudex.primitives.Timestamp;
 pub const Metric = caudex.training.Metric;
-pub const SetStatus = caudex.training.SetStatus;
+pub const Measurement = caudex.primitives.Measurement;
+pub const Decimal = caudex.primitives.Decimal;
+
+pub const metric_codes = struct {
+    pub const repetitions = "repetitions";
+    pub const load = "load";
+    pub const rir = "rir";
+    pub const rpe = "rpe";
+    pub const duration = "duration";
+};
 
 /// Identifies host-owned workout data without defining an athlete repository.
 pub const Scope = struct {
@@ -31,14 +40,24 @@ pub const WorkoutStatus = enum {
     completed,
 };
 
-pub const LoggedSet = struct {
-    id: Id,
-    recorded_at: Timestamp,
-    kind: Id,
-    actual_metrics: []const Metric,
-    target_metrics: []const Metric = &.{},
-    status: SetStatus,
+pub const SetStatus = enum {
+    open,
+    completed,
+    partial,
+    failed,
+    skipped,
 };
+
+pub const TrackedSet = struct {
+    id: Id,
+    kind: Id,
+    target_metrics: []const Metric = &.{},
+    actual_metrics: []const Metric = &.{},
+    status: SetStatus = .open,
+    recorded_at: ?Timestamp = null,
+};
+
+pub const LoggedSet = TrackedSet;
 
 pub const ExerciseMembership = struct {
     id: Id,
@@ -48,6 +67,13 @@ pub const ExerciseMembership = struct {
 
 /// A semantic insertion point. Numeric persistence positions are private.
 pub const ExerciseAnchor = union(enum) {
+    beginning,
+    end,
+    before: Id,
+    after: Id,
+};
+
+pub const SetAnchor = union(enum) {
     beginning,
     end,
     before: Id,
@@ -110,14 +136,62 @@ pub const ReorderExerciseCommand = struct {
     anchor: ExerciseAnchor,
 };
 
-pub const LogSetCommand = struct {
+pub const AddSetCommand = struct {
     metadata: CommandMetadata,
     scope: Scope,
     workout_id: Id,
     expected_revision: u64,
     membership_id: Id,
-    set: LoggedSet,
+    set_id: Id,
+    kind: Id,
+    target_metrics: []const Metric = &.{},
+    anchor: SetAnchor,
 };
+
+pub const CompleteSetCommand = struct {
+    metadata: CommandMetadata,
+    scope: Scope,
+    workout_id: Id,
+    expected_revision: u64,
+    membership_id: Id,
+    set_id: Id,
+    actual_metrics: []const Metric,
+    status: SetStatus = .completed,
+    completed_at: Timestamp,
+};
+
+pub const SkipSetCommand = struct {
+    metadata: CommandMetadata,
+    scope: Scope,
+    workout_id: Id,
+    expected_revision: u64,
+    membership_id: Id,
+    set_id: Id,
+    skipped_at: Timestamp,
+};
+
+pub const ReopenSetCommand = struct {
+    metadata: CommandMetadata,
+    scope: Scope,
+    workout_id: Id,
+    expected_revision: u64,
+    membership_id: Id,
+    set_id: Id,
+};
+
+pub const RemoveSetCommand = ReopenSetCommand;
+
+pub const ReorderSetCommand = struct {
+    metadata: CommandMetadata,
+    scope: Scope,
+    workout_id: Id,
+    expected_revision: u64,
+    membership_id: Id,
+    set_id: Id,
+    anchor: SetAnchor,
+};
+
+pub const LogSetCommand = CompleteSetCommand;
 
 /// Completes an active workout even when it has no exercises or completed sets.
 pub const CompleteWorkoutCommand = struct {
@@ -133,7 +207,13 @@ pub const Command = union(enum) {
     add_exercise: AddExerciseCommand,
     remove_exercise: RemoveExerciseCommand,
     reorder_exercise: ReorderExerciseCommand,
+    add_set: AddSetCommand,
     log_set: LogSetCommand,
+    complete_set: CompleteSetCommand,
+    skip_set: SkipSetCommand,
+    reopen_set: ReopenSetCommand,
+    remove_set: RemoveSetCommand,
+    reorder_set: ReorderSetCommand,
     complete_workout: CompleteWorkoutCommand,
 };
 
@@ -174,6 +254,11 @@ pub const issue_codes = struct {
     pub const membership_id_conflict = "tracking.membership_id_conflict";
     pub const membership_not_found = "tracking.membership_not_found";
     pub const invalid_exercise_anchor = "tracking.invalid_exercise_anchor";
+    pub const set_id_conflict = "tracking.set_id_conflict";
+    pub const set_not_found = "tracking.set_not_found";
+    pub const invalid_set_anchor = "tracking.invalid_set_anchor";
+    pub const invalid_set_transition = "tracking.invalid_set_transition";
+    pub const invalid_metric = "tracking.invalid_metric";
 };
 
 pub const CommandDisposition = enum {
@@ -243,6 +328,7 @@ pub const LifecycleSnapshot = struct {
 pub const DecisionError = error{
     IssueBufferTooSmall,
     ExerciseBufferTooSmall,
+    SetBufferTooSmall,
     RevisionOverflow,
 };
 pub const QueryError = error{OutputBufferTooSmall};
@@ -526,6 +612,208 @@ pub fn reorderExercise(
     );
 }
 
+pub const SetCommand = union(enum) {
+    add: AddSetCommand,
+    complete: CompleteSetCommand,
+    skip: SkipSetCommand,
+    reopen: ReopenSetCommand,
+    remove: RemoveSetCommand,
+    reorder: ReorderSetCommand,
+};
+
+/// Applies one explicit set lifecycle transition without allocation or mutation.
+pub fn applySetCommand(
+    snapshot: LifecycleSnapshot,
+    command: SetCommand,
+    exercise_storage: []ExerciseMembership,
+    set_storage: []TrackedSet,
+    issue_storage: []Issue,
+) DecisionError!CommandResult {
+    const common = setCommandCommon(command);
+    if (try validateExerciseCommand(
+        snapshot,
+        common.metadata,
+        common.scope,
+        common.workout_id,
+        common.expected_revision,
+        issue_storage,
+    )) |rejected| return rejected;
+    if (!validId(common.membership_id) or !validId(common.set_id)) {
+        return reject(common.metadata.command_id, issue_storage, invalidIdIssue());
+    }
+    const workout = findWorkout(snapshot, common.scope, common.workout_id).?;
+    const membership_index =
+        findMembership(workout.exercises, common.membership_id) orelse
+        return reject(common.metadata.command_id, issue_storage, .{
+            .code = issue_codes.membership_not_found,
+            .category = .not_found,
+            .severity = .@"error",
+            .message = "The exercise membership does not exist.",
+        });
+    const membership = workout.exercises[membership_index];
+    const existing_index = findSet(membership.sets, common.set_id);
+    const next_len = switch (command) {
+        .add => membership.sets.len + 1,
+        .remove => if (existing_index == null)
+            membership.sets.len
+        else
+            membership.sets.len - 1,
+        else => membership.sets.len,
+    };
+    if (exercise_storage.len < workout.exercises.len)
+        return error.ExerciseBufferTooSmall;
+    if (set_storage.len < next_len) return error.SetBufferTooSmall;
+
+    switch (command) {
+        .add => |add| {
+            if (!validId(add.kind) or !validMetrics(add.target_metrics))
+                return reject(common.metadata.command_id, issue_storage, .{
+                    .code = issue_codes.invalid_metric,
+                    .category = .validation,
+                    .severity = .@"error",
+                    .message = "A set kind or target metric is invalid.",
+                });
+            if (existing_index != null)
+                return reject(common.metadata.command_id, issue_storage, .{
+                    .code = issue_codes.set_id_conflict,
+                    .category = .conflict,
+                    .severity = .@"error",
+                    .message = "The set ID already exists in this exercise.",
+                });
+            const insertion = resolveSetAnchor(membership.sets, add.anchor, null) orelse
+                return reject(common.metadata.command_id, issue_storage, .{
+                    .code = issue_codes.invalid_set_anchor,
+                    .category = .not_found,
+                    .severity = .@"error",
+                    .message = "The set anchor does not match a set.",
+                });
+            @memcpy(set_storage[0..insertion], membership.sets[0..insertion]);
+            set_storage[insertion] = .{
+                .id = add.set_id,
+                .kind = add.kind,
+                .target_metrics = add.target_metrics,
+            };
+            @memcpy(
+                set_storage[insertion + 1 .. next_len],
+                membership.sets[insertion..],
+            );
+        },
+        .complete => |complete| {
+            const index = existing_index orelse
+                return reject(common.metadata.command_id, issue_storage, setNotFoundIssue());
+            if (membership.sets[index].status != .open or
+                (complete.status != .completed and complete.status != .partial and
+                    complete.status != .failed))
+            {
+                return reject(common.metadata.command_id, issue_storage, transitionIssue());
+            }
+            if (!validTimestamp(complete.completed_at) or
+                !validMetrics(complete.actual_metrics))
+                return reject(common.metadata.command_id, issue_storage, .{
+                    .code = issue_codes.invalid_metric,
+                    .category = .validation,
+                    .severity = .@"error",
+                    .message = "A completion timestamp or actual metric is invalid.",
+                });
+            @memcpy(set_storage[0..membership.sets.len], membership.sets);
+            set_storage[index].actual_metrics = complete.actual_metrics;
+            set_storage[index].status = complete.status;
+            set_storage[index].recorded_at = complete.completed_at;
+        },
+        .skip => |skip| {
+            const index = existing_index orelse
+                return reject(common.metadata.command_id, issue_storage, setNotFoundIssue());
+            if (membership.sets[index].status != .open)
+                return reject(common.metadata.command_id, issue_storage, transitionIssue());
+            if (!validTimestamp(skip.skipped_at))
+                return reject(common.metadata.command_id, issue_storage, .{
+                    .code = issue_codes.invalid_timestamp,
+                    .category = .validation,
+                    .severity = .@"error",
+                    .message = "The skipped-at timestamp is invalid.",
+                });
+            @memcpy(set_storage[0..membership.sets.len], membership.sets);
+            set_storage[index].status = .skipped;
+            set_storage[index].recorded_at = skip.skipped_at;
+        },
+        .reopen => {
+            const index = existing_index orelse
+                return reject(common.metadata.command_id, issue_storage, setNotFoundIssue());
+            if (membership.sets[index].status == .open)
+                return reject(common.metadata.command_id, issue_storage, transitionIssue());
+            @memcpy(set_storage[0..membership.sets.len], membership.sets);
+            set_storage[index].status = .open;
+            set_storage[index].recorded_at = null;
+            set_storage[index].actual_metrics = &.{};
+        },
+        .remove => {
+            const index = existing_index orelse
+                return reject(common.metadata.command_id, issue_storage, setNotFoundIssue());
+            @memcpy(set_storage[0..index], membership.sets[0..index]);
+            @memcpy(set_storage[index .. membership.sets.len - 1], membership.sets[index + 1 ..]);
+        },
+        .reorder => |reorder| {
+            const index = existing_index orelse
+                return reject(common.metadata.command_id, issue_storage, setNotFoundIssue());
+            const destination = resolveSetAnchor(
+                membership.sets,
+                reorder.anchor,
+                reorder.set_id,
+            ) orelse return reject(
+                common.metadata.command_id,
+                issue_storage,
+                .{
+                    .code = issue_codes.invalid_set_anchor,
+                    .category = .not_found,
+                    .severity = .@"error",
+                    .message = "The set anchor does not match another set.",
+                },
+            );
+            var written: usize = 0;
+            for (membership.sets, 0..) |set, set_index| {
+                if (set_index == index) continue;
+                set_storage[written] = set;
+                written += 1;
+            }
+            std.mem.copyBackwards(
+                TrackedSet,
+                set_storage[destination + 1 .. membership.sets.len],
+                set_storage[destination .. membership.sets.len - 1],
+            );
+            set_storage[destination] = membership.sets[index];
+        },
+    }
+    @memcpy(exercise_storage[0..workout.exercises.len], workout.exercises);
+    exercise_storage[membership_index].sets = set_storage[0..next_len];
+    return acceptExerciseChange(
+        common.metadata.command_id,
+        workout,
+        exercise_storage[0..workout.exercises.len],
+    );
+}
+
+pub fn addSet(snapshot: LifecycleSnapshot, command: AddSetCommand, exercises: []ExerciseMembership, sets: []TrackedSet, issues: []Issue) DecisionError!CommandResult {
+    return applySetCommand(snapshot, .{ .add = command }, exercises, sets, issues);
+}
+pub fn completeSet(snapshot: LifecycleSnapshot, command: CompleteSetCommand, exercises: []ExerciseMembership, sets: []TrackedSet, issues: []Issue) DecisionError!CommandResult {
+    return applySetCommand(snapshot, .{ .complete = command }, exercises, sets, issues);
+}
+pub fn logSet(snapshot: LifecycleSnapshot, command: LogSetCommand, exercises: []ExerciseMembership, sets: []TrackedSet, issues: []Issue) DecisionError!CommandResult {
+    return completeSet(snapshot, command, exercises, sets, issues);
+}
+pub fn skipSet(snapshot: LifecycleSnapshot, command: SkipSetCommand, exercises: []ExerciseMembership, sets: []TrackedSet, issues: []Issue) DecisionError!CommandResult {
+    return applySetCommand(snapshot, .{ .skip = command }, exercises, sets, issues);
+}
+pub fn reopenSet(snapshot: LifecycleSnapshot, command: ReopenSetCommand, exercises: []ExerciseMembership, sets: []TrackedSet, issues: []Issue) DecisionError!CommandResult {
+    return applySetCommand(snapshot, .{ .reopen = command }, exercises, sets, issues);
+}
+pub fn removeSet(snapshot: LifecycleSnapshot, command: RemoveSetCommand, exercises: []ExerciseMembership, sets: []TrackedSet, issues: []Issue) DecisionError!CommandResult {
+    return applySetCommand(snapshot, .{ .remove = command }, exercises, sets, issues);
+}
+pub fn reorderSet(snapshot: LifecycleSnapshot, command: ReorderSetCommand, exercises: []ExerciseMembership, sets: []TrackedSet, issues: []Issue) DecisionError!CommandResult {
+    return applySetCommand(snapshot, .{ .reorder = command }, exercises, sets, issues);
+}
+
 /// Reads one workout from an explicit host snapshot.
 pub fn readWorkout(
     snapshot: LifecycleSnapshot,
@@ -688,6 +976,111 @@ fn findMembership(exercises: []const ExerciseMembership, id: Id) ?usize {
         if (membership.id.eql(id)) return index;
     }
     return null;
+}
+
+const SetCommandCommon = struct {
+    metadata: CommandMetadata,
+    scope: Scope,
+    workout_id: Id,
+    expected_revision: u64,
+    membership_id: Id,
+    set_id: Id,
+};
+
+fn setCommandCommon(command: SetCommand) SetCommandCommon {
+    return switch (command) {
+        inline else => |value| .{
+            .metadata = value.metadata,
+            .scope = value.scope,
+            .workout_id = value.workout_id,
+            .expected_revision = value.expected_revision,
+            .membership_id = value.membership_id,
+            .set_id = value.set_id,
+        },
+    };
+}
+
+fn findSet(sets: []const TrackedSet, id: Id) ?usize {
+    for (sets, 0..) |set, index| {
+        if (set.id.eql(id)) return index;
+    }
+    return null;
+}
+
+fn resolveSetAnchor(
+    sets: []const TrackedSet,
+    anchor: SetAnchor,
+    excluded: ?Id,
+) ?usize {
+    const remaining = sets.len - @intFromBool(excluded != null);
+    return switch (anchor) {
+        .beginning => 0,
+        .end => remaining,
+        .before => |id| resolveSetRelative(sets, id, excluded, 0),
+        .after => |id| resolveSetRelative(sets, id, excluded, 1),
+    };
+}
+
+fn resolveSetRelative(
+    sets: []const TrackedSet,
+    anchor_id: Id,
+    excluded: ?Id,
+    offset: usize,
+) ?usize {
+    if (excluded != null and anchor_id.eql(excluded.?)) return null;
+    var position: usize = 0;
+    for (sets) |set| {
+        if (excluded != null and set.id.eql(excluded.?)) continue;
+        if (set.id.eql(anchor_id)) return position + offset;
+        position += 1;
+    }
+    return null;
+}
+
+fn validMetrics(metrics: []const Metric) bool {
+    for (metrics) |metric| {
+        if (!validId(metric.code) or metric.value.value.scale > Decimal.max_scale)
+            return false;
+        const dimension = metric.value.unit.dimension();
+        if (std.mem.eql(u8, metric.code.bytes, metric_codes.repetitions) and
+            dimension != .count) return false;
+        if (std.mem.eql(u8, metric.code.bytes, metric_codes.load) and
+            dimension != .mass) return false;
+        if (std.mem.eql(u8, metric.code.bytes, metric_codes.rir) and
+            dimension != .rir) return false;
+        if (std.mem.eql(u8, metric.code.bytes, metric_codes.rpe) and
+            dimension != .rpe) return false;
+        if (std.mem.eql(u8, metric.code.bytes, metric_codes.duration) and
+            dimension != .duration) return false;
+    }
+    return true;
+}
+
+fn invalidIdIssue() Issue {
+    return .{
+        .code = issue_codes.invalid_identifier,
+        .category = .validation,
+        .severity = .@"error",
+        .message = "A tracking identifier is invalid.",
+    };
+}
+
+fn setNotFoundIssue() Issue {
+    return .{
+        .code = issue_codes.set_not_found,
+        .category = .not_found,
+        .severity = .@"error",
+        .message = "The set does not exist in this exercise.",
+    };
+}
+
+fn transitionIssue() Issue {
+    return .{
+        .code = issue_codes.invalid_set_transition,
+        .category = .conflict,
+        .severity = .@"error",
+        .message = "The set cannot make the requested lifecycle transition.",
+    };
 }
 
 fn resolveAnchor(

@@ -265,6 +265,153 @@ test "missing archived and invalid anchor exercises are structured issues" {
     ), tracking.issue_codes.invalid_exercise_anchor);
 }
 
+test "set lifecycle preserves exact targets and actuals" {
+    const repetitions: tracking.Metric = .{
+        .code = .{ .bytes = "repetitions" },
+        .value = .{ .value = .{ .mantissa = 8, .scale = 0 }, .unit = .count },
+    };
+    const load: tracking.Metric = .{
+        .code = .{ .bytes = "load" },
+        .value = .{ .value = .{ .mantissa = 1025, .scale = 1 }, .unit = .kg },
+    };
+    const rir: tracking.Metric = .{
+        .code = .{ .bytes = "rir" },
+        .value = .{ .value = .{ .mantissa = 25, .scale = 1 }, .unit = .rir },
+    };
+    const rpe: tracking.Metric = .{
+        .code = .{ .bytes = "rpe" },
+        .value = .{ .value = .{ .mantissa = 85, .scale = 1 }, .unit = .rpe },
+    };
+    const duration: tracking.Metric = .{
+        .code = .{ .bytes = "duration" },
+        .value = .{ .value = .{ .mantissa = 455, .scale = 1 }, .unit = .s },
+    };
+    const membership: tracking.ExerciseMembership = .{
+        .id = .{ .bytes = "bench-membership" },
+        .exercise_id = .{ .bytes = "bench" },
+    };
+    const workout: tracking.Workout = .{
+        .id = command.workout_id,
+        .scope = scope,
+        .revision = 1,
+        .status = .active,
+        .started_at = command.started_at,
+        .exercises = &.{membership},
+    };
+    var issues: [1]tracking.Issue = undefined;
+    var exercise_a: [1]tracking.ExerciseMembership = undefined;
+    var exercise_b: [1]tracking.ExerciseMembership = undefined;
+    var sets_a: [2]tracking.TrackedSet = undefined;
+    var sets_b: [2]tracking.TrackedSet = undefined;
+
+    const added = (try tracking.addSet(.{ .workouts = &.{workout} }, .{
+        .metadata = metadata("add-set"),
+        .scope = scope,
+        .workout_id = workout.id,
+        .expected_revision = 1,
+        .membership_id = membership.id,
+        .set_id = .{ .bytes = "set-1" },
+        .kind = .{ .bytes = "working" },
+        .target_metrics = &.{ repetitions, load, rir, duration },
+        .anchor = .end,
+    }, &exercise_a, &sets_a, &issues)).accepted.workout;
+    try std.testing.expectEqual(tracking.SetStatus.open, added.exercises[0].sets[0].status);
+    try std.testing.expectEqual(@as(i64, 1025), added.exercises[0].sets[0].target_metrics[1].value.value.mantissa);
+
+    const completed = (try tracking.completeSet(.{ .workouts = &.{added} }, .{
+        .metadata = metadata("complete-set"),
+        .scope = scope,
+        .workout_id = workout.id,
+        .expected_revision = 2,
+        .membership_id = membership.id,
+        .set_id = .{ .bytes = "set-1" },
+        .actual_metrics = &.{ repetitions, load, rpe, duration },
+        .status = .completed,
+        .completed_at = .{ .bytes = "2026-07-26T12:02:00Z" },
+    }, &exercise_b, &sets_b, &issues)).accepted.workout;
+    try std.testing.expectEqual(tracking.SetStatus.completed, completed.exercises[0].sets[0].status);
+    try std.testing.expectEqual(@as(u8, 1), completed.exercises[0].sets[0].actual_metrics[1].value.value.scale);
+
+    const reopened = (try tracking.reopenSet(.{ .workouts = &.{completed} }, .{
+        .metadata = metadata("reopen-set"),
+        .scope = scope,
+        .workout_id = workout.id,
+        .expected_revision = 3,
+        .membership_id = membership.id,
+        .set_id = .{ .bytes = "set-1" },
+    }, &exercise_a, &sets_a, &issues)).accepted.workout;
+    try std.testing.expectEqual(tracking.SetStatus.open, reopened.exercises[0].sets[0].status);
+    try std.testing.expectEqual(@as(usize, 0), reopened.exercises[0].sets[0].actual_metrics.len);
+
+    const skipped = (try tracking.skipSet(.{ .workouts = &.{reopened} }, .{
+        .metadata = metadata("skip-set"),
+        .scope = scope,
+        .workout_id = workout.id,
+        .expected_revision = 4,
+        .membership_id = membership.id,
+        .set_id = .{ .bytes = "set-1" },
+        .skipped_at = .{ .bytes = "2026-07-26T12:03:00Z" },
+    }, &exercise_b, &sets_b, &issues)).accepted.workout;
+    try std.testing.expectEqual(tracking.SetStatus.skipped, skipped.exercises[0].sets[0].status);
+
+    try expectRejectedCode(try tracking.completeSet(.{ .workouts = &.{skipped} }, .{
+        .metadata = metadata("invalid-complete"),
+        .scope = scope,
+        .workout_id = workout.id,
+        .expected_revision = 5,
+        .membership_id = membership.id,
+        .set_id = .{ .bytes = "set-1" },
+        .actual_metrics = &.{repetitions},
+        .completed_at = .{ .bytes = "2026-07-26T12:04:00Z" },
+    }, &exercise_a, &sets_a, &issues), tracking.issue_codes.invalid_set_transition);
+    try std.testing.expectEqual(tracking.SetStatus.skipped, skipped.exercises[0].sets[0].status);
+}
+
+test "sets reorder and remove only by semantic identity" {
+    const sets = [_]tracking.TrackedSet{
+        .{ .id = .{ .bytes = "set-1" }, .kind = .{ .bytes = "working" } },
+        .{ .id = .{ .bytes = "set-2" }, .kind = .{ .bytes = "working" } },
+    };
+    const membership: tracking.ExerciseMembership = .{
+        .id = .{ .bytes = "membership-1" },
+        .exercise_id = .{ .bytes = "bench" },
+        .sets = &sets,
+    };
+    const workout: tracking.Workout = .{
+        .id = command.workout_id,
+        .scope = scope,
+        .revision = 1,
+        .status = .active,
+        .started_at = command.started_at,
+        .exercises = &.{membership},
+    };
+    var issues: [1]tracking.Issue = undefined;
+    var exercises_a: [1]tracking.ExerciseMembership = undefined;
+    var exercises_b: [1]tracking.ExerciseMembership = undefined;
+    var sets_a: [2]tracking.TrackedSet = undefined;
+    var sets_b: [2]tracking.TrackedSet = undefined;
+    const reordered = (try tracking.reorderSet(.{ .workouts = &.{workout} }, .{
+        .metadata = metadata("reorder-set"),
+        .scope = scope,
+        .workout_id = workout.id,
+        .expected_revision = 1,
+        .membership_id = membership.id,
+        .set_id = .{ .bytes = "set-2" },
+        .anchor = .beginning,
+    }, &exercises_a, &sets_a, &issues)).accepted.workout;
+    try std.testing.expectEqualStrings("set-2", reordered.exercises[0].sets[0].id.bytes);
+    const removed = (try tracking.removeSet(.{ .workouts = &.{reordered} }, .{
+        .metadata = metadata("remove-set"),
+        .scope = scope,
+        .workout_id = workout.id,
+        .expected_revision = 2,
+        .membership_id = membership.id,
+        .set_id = .{ .bytes = "set-1" },
+    }, &exercises_b, &sets_b, &issues)).accepted.workout;
+    try std.testing.expectEqual(@as(usize, 1), removed.exercises[0].sets.len);
+    try std.testing.expectEqualStrings("set-2", removed.exercises[0].sets[0].id.bytes);
+}
+
 fn metadata(command_id: []const u8) tracking.CommandMetadata {
     return .{
         .command_id = .{ .bytes = command_id },

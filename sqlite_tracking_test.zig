@@ -271,6 +271,111 @@ test "adapter distinguishes archived and missing catalog exercises" {
     try expectRejected(missing, tracking.issue_codes.exercise_not_found);
 }
 
+test "set lifecycle is exact idempotent and transactional" {
+    const database = try sqlite.openInMemory(.{});
+    defer database.close();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    try database.replaceCatalog(allocator, .{
+        .host_scope_key = scope.host_scope_key.bytes,
+        .as_of = start.started_at.bytes,
+    }, &.{persistence.canonical.Exercise{ .id = "bench" }});
+    _ = try database.startWorkout(allocator, start);
+    _ = try database.addExercise(allocator, .{
+        .metadata = metadata("add-bench"),
+        .scope = scope,
+        .workout_id = start.workout_id,
+        .expected_revision = 1,
+        .membership_id = .{ .bytes = "bench-membership" },
+        .exercise_id = .{ .bytes = "bench" },
+        .anchor = .end,
+    });
+    const target: tracking.Metric = .{
+        .code = .{ .bytes = "load" },
+        .value = .{ .value = .{ .mantissa = 1025, .scale = 1 }, .unit = .kg },
+    };
+    const actual: tracking.Metric = .{
+        .code = .{ .bytes = "rpe" },
+        .value = .{ .value = .{ .mantissa = 85, .scale = 1 }, .unit = .rpe },
+    };
+    const add: tracking.AddSetCommand = .{
+        .metadata = metadata("add-set-1"),
+        .scope = scope,
+        .workout_id = start.workout_id,
+        .expected_revision = 2,
+        .membership_id = .{ .bytes = "bench-membership" },
+        .set_id = .{ .bytes = "set-1" },
+        .kind = .{ .bytes = "working" },
+        .target_metrics = &.{target},
+        .anchor = .end,
+    };
+    const applied = try database.addSet(allocator, add);
+    try std.testing.expectEqual(tracking.CommandDisposition.applied, applied.accepted.disposition);
+    const replayed = try database.addSet(allocator, add);
+    try std.testing.expectEqual(tracking.CommandDisposition.replayed, replayed.accepted.disposition);
+    try std.testing.expectEqual(@as(u64, 3), replayed.accepted.workout.revision);
+
+    var conflicting = add;
+    conflicting.kind = .{ .bytes = "warmup" };
+    try expectRejected(
+        try database.addSet(allocator, conflicting),
+        tracking.issue_codes.command_payload_conflict,
+    );
+    var stale = add;
+    stale.metadata = metadata("stale-add");
+    stale.set_id = .{ .bytes = "set-stale" };
+    stale.expected_revision = 2;
+    try expectRejected(
+        try database.addSet(allocator, stale),
+        tracking.issue_codes.revision_conflict,
+    );
+
+    const completed = try database.completeSet(allocator, .{
+        .metadata = metadata("complete-set-1"),
+        .scope = scope,
+        .workout_id = start.workout_id,
+        .expected_revision = 3,
+        .membership_id = .{ .bytes = "bench-membership" },
+        .set_id = .{ .bytes = "set-1" },
+        .actual_metrics = &.{actual},
+        .completed_at = .{ .bytes = "2026-07-26T12:02:00Z" },
+    });
+    const stored_set = completed.accepted.workout.exercises[0].sets[0];
+    try std.testing.expectEqual(tracking.SetStatus.completed, stored_set.status);
+    try std.testing.expectEqual(@as(i64, 1025), stored_set.target_metrics[0].value.value.mantissa);
+    try std.testing.expectEqual(@as(i64, 85), stored_set.actual_metrics[0].value.value.mantissa);
+
+    try expectRejected(try database.skipSet(allocator, .{
+        .metadata = metadata("invalid-skip"),
+        .scope = scope,
+        .workout_id = start.workout_id,
+        .expected_revision = 4,
+        .membership_id = .{ .bytes = "bench-membership" },
+        .set_id = .{ .bytes = "set-1" },
+        .skipped_at = .{ .bytes = "2026-07-26T12:03:00Z" },
+    }), tracking.issue_codes.invalid_set_transition);
+    const unchanged = try database.readWorkout(allocator, .{
+        .scope = scope,
+        .workout_id = start.workout_id,
+    });
+    try std.testing.expectEqual(@as(u64, 4), unchanged.found.revision);
+    try std.testing.expectEqual(tracking.SetStatus.completed, unchanged.found.exercises[0].sets[0].status);
+    try std.testing.expectEqual(@as(i64, 1025), unchanged.found.exercises[0].sets[0].target_metrics[0].value.value.mantissa);
+    try std.testing.expectEqual(@as(i64, 85), unchanged.found.exercises[0].sets[0].actual_metrics[0].value.value.mantissa);
+
+    const reopened = try database.reopenSet(allocator, .{
+        .metadata = metadata("reopen-set-1"),
+        .scope = scope,
+        .workout_id = start.workout_id,
+        .expected_revision = 4,
+        .membership_id = .{ .bytes = "bench-membership" },
+        .set_id = .{ .bytes = "set-1" },
+    });
+    try std.testing.expectEqual(tracking.SetStatus.open, reopened.accepted.workout.exercises[0].sets[0].status);
+    try std.testing.expectEqual(@as(usize, 0), reopened.accepted.workout.exercises[0].sets[0].actual_metrics.len);
+}
+
 fn metadata(command_id: []const u8) tracking.CommandMetadata {
     return .{
         .command_id = .{ .bytes = command_id },

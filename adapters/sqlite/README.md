@@ -62,8 +62,14 @@ omitted by a later `replaceCatalog` call remain archived so adding an archived
 exercise can be distinguished from adding an ID that never existed. Catalog
 loads return active entries only.
 
-Set logging, completion, and broader history queries remain later
-capabilities.
+Schema version 4 adds atomic set lifecycle persistence. `addSet`, `completeSet`,
+`skipSet`, `reopenSet`, `removeSet`, and `reorderSet` share the deterministic
+tracking rules. Targets and actuals retain exact decimal measurements and
+explicit units. Accepted set commands store idempotency receipts in the same
+transaction; payload reuse conflicts and rejected transitions do not mutate
+the workout.
+
+Workout completion and broader history queries remain later capabilities.
 
 ## SQL and concurrency
 
