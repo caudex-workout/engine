@@ -3,6 +3,8 @@ const builtin = @import("builtin");
 const caudex = @import("caudex");
 const persistence = @import("caudex_persistence");
 const sqlite = @import("caudex_sqlite");
+const errors = @import("errors.zig");
+const output = @import("output.zig");
 
 const version = "0.1.0";
 
@@ -10,7 +12,7 @@ const help_text =
     \\Caudex Workout Engine reference client
     \\
     \\Usage:
-    \\  caudex [--database PATH] [--format human|json] database info
+    \\  caudex [--database PATH] [--format human|json] [--color auto|always|never] database info
     \\  caudex --help
     \\  caudex version
     \\
@@ -19,11 +21,10 @@ const help_text =
     \\
 ;
 
-const OutputFormat = enum { human, json };
-
 const DatabaseInfoOptions = struct {
     explicit_path: ?[]const u8 = null,
-    format: OutputFormat = .human,
+    format: output.Format = .human,
+    color: output.Color = .auto,
 };
 
 const PathEnvironment = struct {
@@ -52,13 +53,17 @@ pub fn main(init: std.process.Init) !void {
     var stderr_writer = std.Io.File.stderr().writer(init.io, &stderr_buffer);
     const stderr = &stderr_writer.interface;
 
+    const requested_format = output.requestedFormat(args);
     run(init.io, init.arena.allocator(), init.environ_map, args, stdout) catch |err| {
-        const failure = failureFor(err);
-        try stderr.writeAll(failure.message);
-        try stderr.flush();
-        std.process.exit(failure.exit_code);
+        const failure = errors.fromError(err);
+        output.writeFailure(stderr, requested_format, failure) catch {};
+        stderr_writer.flush() catch {};
+        std.process.exit(@intFromEnum(failure.exit_class));
     };
-    try stdout.flush();
+    stdout_writer.flush() catch |err| switch (err) {
+        error.BrokenPipe => return,
+        else => |unexpected| return unexpected,
+    };
 }
 
 fn run(
@@ -72,12 +77,12 @@ fn run(
         (args.len == 2 and
             (std.mem.eql(u8, args[1], "--help") or std.mem.eql(u8, args[1], "help"))))
     {
-        try stdout.writeAll(help_text);
+        try output.writeHelp(stdout, help_text);
         return;
     }
 
     if (args.len == 2 and std.mem.eql(u8, args[1], "version")) {
-        try stdout.print("caudex {s}\n", .{version});
+        try output.writeVersion(stdout, version);
         return;
     }
 
@@ -100,10 +105,22 @@ fn run(
     defer adapter.close();
     const metadata = try adapter.metadata();
 
-    switch (options.format) {
-        .human => try writeHumanDatabaseInfo(stdout, path, metadata),
-        .json => try writeJsonDatabaseInfo(stdout, path, metadata),
-    }
+    const no_color = environ.get("NO_COLOR") != null;
+    const is_terminal = std.Io.File.stdout().isTty(io) catch false;
+    try output.writeDatabaseInfo(stdout, .{
+        .format = options.format,
+        .color = options.color,
+        .is_terminal = is_terminal,
+        .no_color = no_color,
+    }, .{
+        .path = path,
+        .database_kind = @tagName(metadata.database_kind),
+        .adapter_version = metadata.adapter_version,
+        .database_schema_version = metadata.schema_version,
+        .minimum_schema_version = metadata.minimum_schema_version,
+        .latest_schema_version = metadata.latest_schema_version,
+        .compatibility = @tagName(metadata.compatibility),
+    });
 }
 
 fn parseDatabaseInfo(args: []const []const u8) !DatabaseInfoOptions {
@@ -121,6 +138,17 @@ fn parseDatabaseInfo(args: []const []const u8) !DatabaseInfoOptions {
                 .human
             else if (std.mem.eql(u8, args[index], "json"))
                 .json
+            else
+                return error.InvalidArguments;
+        } else if (std.mem.eql(u8, args[index], "--color")) {
+            index += 1;
+            if (index >= args.len) return error.InvalidArguments;
+            options.color = if (std.mem.eql(u8, args[index], "auto"))
+                .auto
+            else if (std.mem.eql(u8, args[index], "always"))
+                .always
+            else if (std.mem.eql(u8, args[index], "never"))
+                .never
             else
                 return error.InvalidArguments;
         } else {
@@ -179,49 +207,6 @@ fn ensureDatabaseDirectory(io: std.Io, path: []const u8) !void {
     try std.Io.Dir.cwd().createDirPath(io, parent);
 }
 
-fn writeHumanDatabaseInfo(
-    writer: *std.Io.Writer,
-    path: []const u8,
-    metadata: sqlite.Metadata,
-) !void {
-    try writer.print(
-        \\Database: {s}
-        \\Kind: {s}
-        \\Adapter version: {s}
-        \\Schema version: {d}
-        \\Supported schema: {d}-{d}
-        \\Compatibility: {s}
-        \\
-    , .{
-        path,
-        @tagName(metadata.database_kind),
-        metadata.adapter_version,
-        metadata.schema_version,
-        metadata.minimum_schema_version,
-        metadata.latest_schema_version,
-        @tagName(metadata.compatibility),
-    });
-}
-
-fn writeJsonDatabaseInfo(
-    writer: *std.Io.Writer,
-    path: []const u8,
-    metadata: sqlite.Metadata,
-) !void {
-    try std.json.Stringify.value(.{
-        .kind = "caudex.database-info",
-        .schema_version = 1,
-        .database_path = path,
-        .database_kind = @tagName(metadata.database_kind),
-        .adapter_version = metadata.adapter_version,
-        .database_schema_version = metadata.schema_version,
-        .minimum_schema_version = metadata.minimum_schema_version,
-        .latest_schema_version = metadata.latest_schema_version,
-        .compatibility = @tagName(metadata.compatibility),
-    }, .{}, writer);
-    try writer.writeByte('\n');
-}
-
 fn nonEmpty(value: ?[]const u8) ?[]const u8 {
     const bytes = value orelse return null;
     return if (bytes.len == 0) null else bytes;
@@ -232,39 +217,6 @@ fn nativePlatform() Platform {
         .macos => .macos,
         .windows => .windows,
         else => .unix,
-    };
-}
-
-const Failure = struct {
-    exit_code: u8,
-    message: []const u8,
-};
-
-fn failureFor(err: anyerror) Failure {
-    return switch (err) {
-        error.InvalidArguments => .{
-            .exit_code = 2,
-            .message = "error: invalid arguments; run 'caudex --help'\n",
-        },
-        error.Busy => .{
-            .exit_code = 7,
-            .message = "error: database is busy\n",
-        },
-        error.Corrupt,
-        error.MigrationFailed,
-        error.UnsupportedSchema,
-        => .{
-            .exit_code = 8,
-            .message = "error: database is incompatible or corrupt\n",
-        },
-        error.DataDirectoryUnavailable => .{
-            .exit_code = 70,
-            .message = "error: platform data directory is unavailable\n",
-        },
-        else => .{
-            .exit_code = 70,
-            .message = "error: database operation failed\n",
-        },
     };
 }
 
@@ -404,18 +356,24 @@ test "client source imports only approved public packages" {
                 std.mem.eql(u8, name, "builtin") or
                 std.mem.eql(u8, name, "caudex") or
                 std.mem.eql(u8, name, "caudex_persistence") or
-                std.mem.eql(u8, name, "caudex_sqlite"),
+                std.mem.eql(u8, name, "caudex_sqlite") or
+                std.mem.eql(u8, name, "errors.zig") or
+                std.mem.eql(u8, name, "output.zig"),
         );
 
         import_count += 1;
         remainder = tail[name_end + 1 ..];
     }
 
-    try std.testing.expectEqual(@as(usize, 5), import_count);
+    try std.testing.expectEqual(@as(usize, 7), import_count);
 }
 
-test "client source contains no SQL or private path imports" {
-    const source = @embedFile("main.zig");
+test "client sources contain no SQL or private path imports" {
+    const sources = [_][]const u8{
+        @embedFile("main.zig"),
+        @embedFile("errors.zig"),
+        @embedFile("output.zig"),
+    };
     const forbidden = [_][]const u8{
         ".." ++ "/",
         "core/" ++ "src/",
@@ -427,7 +385,9 @@ test "client source contains no SQL or private path imports" {
         "DEL" ++ "ETE ",
     };
 
-    for (forbidden) |needle| {
-        try std.testing.expect(std.mem.indexOf(u8, source, needle) == null);
+    for (sources) |source| {
+        for (forbidden) |needle| {
+            try std.testing.expect(std.mem.indexOf(u8, source, needle) == null);
+        }
     }
 }

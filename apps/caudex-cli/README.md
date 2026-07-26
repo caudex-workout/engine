@@ -33,3 +33,9 @@ platform default:
 - Windows uses `%LOCALAPPDATA%\Caudex\caudex.sqlite`.
 
 Missing parent directories are created when the database is opened.
+
+`--format human|json` selects human output or a versioned JSON envelope.
+Diagnostics use stderr and the same selected format; requested data remains on
+stdout. `--color auto|always|never` controls human styling, while JSON and
+non-terminal automatic output never contain ANSI sequences. `NO_COLOR`
+disables styling.

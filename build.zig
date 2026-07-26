@@ -455,7 +455,7 @@ pub fn build(b: *std.Build) void {
         \\Caudex Workout Engine reference client
         \\
         \\Usage:
-        \\  caudex [--database PATH] [--format human|json] database info
+        \\  caudex [--database PATH] [--format human|json] [--color auto|always|never] database info
         \\  caudex --help
         \\  caudex version
         \\
@@ -490,11 +490,11 @@ pub fn build(b: *std.Build) void {
         "info",
     });
     cli_database_json.expectStdOutEqual(
-        "{\"kind\":\"caudex.database-info\",\"schema_version\":1," ++
-            "\"database_path\":\":memory:\",\"database_kind\":\"memory\"," ++
-            "\"adapter_version\":\"0.1.0\",\"database_schema_version\":2," ++
-            "\"minimum_schema_version\":1,\"latest_schema_version\":2," ++
-            "\"compatibility\":\"current\"}\n",
+        "{\"schemaVersion\":1,\"kind\":\"caudex.database.info\",\"data\":{" ++
+            "\"databasePath\":\":memory:\",\"databaseKind\":\"memory\"," ++
+            "\"adapterVersion\":\"0.1.0\",\"databaseSchemaVersion\":2," ++
+            "\"minimumSchemaVersion\":1,\"latestSchemaVersion\":2," ++
+            "\"compatibility\":\"current\"}}\n",
     );
 
     const cli_invalid = b.addRunArtifact(cli);
@@ -502,7 +502,44 @@ pub fn build(b: *std.Build) void {
     cli_invalid.expectExitCode(2);
     cli_invalid.expectStdOutEqual("");
     cli_invalid.expectStdErrEqual(
-        "error: invalid arguments; run 'caudex --help'\n",
+        "error: Invalid arguments; run 'caudex --help'.\n",
+    );
+
+    const cli_invalid_json = b.addRunArtifact(cli);
+    cli_invalid_json.addArgs(&.{ "--format", "json", "database", "unknown" });
+    cli_invalid_json.expectExitCode(2);
+    cli_invalid_json.expectStdOutEqual("");
+    cli_invalid_json.expectStdErrEqual(
+        "{\"schemaVersion\":1,\"kind\":\"caudex.error\",\"error\":{" ++
+            "\"code\":\"client.invalid_arguments\",\"category\":\"syntax\"," ++
+            "\"message\":\"Invalid arguments; run 'caudex --help'.\"}}\n",
+    );
+
+    const cli_broken_pipe = b.addSystemCommand(&.{
+        "bash",
+        "-o",
+        "pipefail",
+        "-c",
+        "\"$1\" --database .zig-cache/cwe112-broken-pipe.sqlite database info | true",
+        "_",
+    });
+    cli_broken_pipe.addArtifactArg(cli);
+    const cli_after_broken_pipe = b.addRunArtifact(cli);
+    cli_after_broken_pipe.addArgs(&.{
+        "--database",
+        ".zig-cache/cwe112-broken-pipe.sqlite",
+        "--format",
+        "json",
+        "database",
+        "info",
+    });
+    cli_after_broken_pipe.step.dependOn(&cli_broken_pipe.step);
+    cli_after_broken_pipe.expectStdOutEqual(
+        "{\"schemaVersion\":1,\"kind\":\"caudex.database.info\",\"data\":{" ++
+            "\"databasePath\":\".zig-cache/cwe112-broken-pipe.sqlite\"," ++
+            "\"databaseKind\":\"file\",\"adapterVersion\":\"0.1.0\"," ++
+            "\"databaseSchemaVersion\":2,\"minimumSchemaVersion\":1," ++
+            "\"latestSchemaVersion\":2,\"compatibility\":\"current\"}}\n",
     );
 
     const architecture_probe_files = b.addWriteFiles();
@@ -528,6 +565,8 @@ pub fn build(b: *std.Build) void {
     cli_test_step.dependOn(&cli_database_human.step);
     cli_test_step.dependOn(&cli_database_json.step);
     cli_test_step.dependOn(&cli_invalid.step);
+    cli_test_step.dependOn(&cli_invalid_json.step);
+    cli_test_step.dependOn(&cli_after_broken_pipe.step);
     cli_test_step.dependOn(&private_import_check.step);
 
     const npm_package_test = b.addSystemCommand(&.{
@@ -692,6 +731,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&cli_database_human.step);
     test_step.dependOn(&cli_database_json.step);
     test_step.dependOn(&cli_invalid.step);
+    test_step.dependOn(&cli_invalid_json.step);
+    test_step.dependOn(&cli_after_broken_pipe.step);
     test_step.dependOn(&private_import_check.step);
     test_step.dependOn(&npm_clean_smoke.step);
     test_step.dependOn(&npm_release_test.step);
