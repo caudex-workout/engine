@@ -1,8 +1,10 @@
 //! Public, database-independent contracts for host-owned workout tracking.
 //!
-//! This package defines borrowed command, query, state, and result values. It
-//! performs no storage, I/O, allocation, clock reads, or command execution.
+//! This package defines borrowed command, query, state, and result values plus
+//! deterministic lifecycle calculations over explicit snapshots. It performs
+//! no storage, I/O, allocation, clock reads, or hidden mutation.
 
+const std = @import("std");
 const caudex = @import("caudex");
 
 pub const contract_version: u32 = 1;
@@ -122,7 +124,10 @@ pub const Issue = struct {
 };
 
 pub const issue_codes = struct {
+    pub const invalid_identifier = "tracking.invalid_identifier";
+    pub const invalid_timestamp = "tracking.invalid_timestamp";
     pub const invalid_timestamp_order = "tracking.invalid_timestamp_order";
+    pub const workout_id_conflict = "tracking.workout_id_conflict";
     pub const workout_not_found = "tracking.workout_not_found";
     pub const revision_conflict = "tracking.revision_conflict";
     pub const command_payload_conflict = "tracking.command_payload_conflict";
@@ -179,3 +184,202 @@ pub const Query = union(enum) {
     read_workout: ReadWorkoutQuery,
     list_active_workouts: ListActiveWorkoutsQuery,
 };
+
+/// A host-persisted receipt supplied explicitly for deterministic retry checks.
+pub const StartReceipt = struct {
+    command: StartWorkoutCommand,
+    accepted: AcceptedCommand,
+};
+
+/// Complete borrowed state visible to the minimal lifecycle calculations.
+pub const LifecycleSnapshot = struct {
+    workouts: []const Workout = &.{},
+    start_receipts: []const StartReceipt = &.{},
+};
+
+pub const DecisionError = error{IssueBufferTooSmall};
+pub const QueryError = error{OutputBufferTooSmall};
+
+/// Proposes a new active workout or returns a structured rejection.
+///
+/// The function does not allocate, mutate the snapshot, persist a receipt, or
+/// obtain IDs or timestamps. The host decides whether to accept and store the
+/// returned value and receipt.
+pub fn startWorkout(
+    snapshot: LifecycleSnapshot,
+    command: StartWorkoutCommand,
+    issue_storage: []Issue,
+) DecisionError!CommandResult {
+    if (!validId(command.metadata.command_id) or
+        !validId(command.scope.host_scope_key) or
+        (command.scope.athlete_id != null and
+            !validId(command.scope.athlete_id.?)) or
+        !validId(command.workout_id))
+    {
+        return reject(
+            command.metadata.command_id,
+            issue_storage,
+            .{
+                .code = issue_codes.invalid_identifier,
+                .category = .validation,
+                .severity = .@"error",
+                .message = "A tracking identifier is invalid.",
+            },
+        );
+    }
+    if (!validTimestamp(command.metadata.occurred_at) or
+        !validTimestamp(command.started_at))
+    {
+        return reject(
+            command.metadata.command_id,
+            issue_storage,
+            .{
+                .code = issue_codes.invalid_timestamp,
+                .category = .validation,
+                .severity = .@"error",
+                .message = "A command timestamp is not valid RFC 3339.",
+            },
+        );
+    }
+
+    for (snapshot.start_receipts) |receipt| {
+        if (!receipt.command.metadata.command_id.eql(command.metadata.command_id))
+            continue;
+        if (!startCommandsEqual(receipt.command, command)) {
+            return reject(
+                command.metadata.command_id,
+                issue_storage,
+                .{
+                    .code = issue_codes.command_payload_conflict,
+                    .category = .conflict,
+                    .severity = .@"error",
+                    .message = "The command ID was already used with another payload.",
+                },
+            );
+        }
+        var replayed = receipt.accepted;
+        replayed.disposition = .replayed;
+        return .{ .accepted = replayed };
+    }
+
+    for (snapshot.workouts) |workout| {
+        if (workout.id.eql(command.workout_id)) {
+            return reject(
+                command.metadata.command_id,
+                issue_storage,
+                .{
+                    .code = issue_codes.workout_id_conflict,
+                    .category = .conflict,
+                    .severity = .@"error",
+                    .message = "The workout ID already exists.",
+                },
+            );
+        }
+    }
+
+    return .{ .accepted = .{
+        .command_id = command.metadata.command_id,
+        .disposition = .applied,
+        .workout = .{
+            .id = command.workout_id,
+            .scope = command.scope,
+            .revision = 1,
+            .status = .active,
+            .started_at = command.started_at,
+        },
+    } };
+}
+
+/// Reads one workout from an explicit host snapshot.
+pub fn readWorkout(
+    snapshot: LifecycleSnapshot,
+    query: ReadWorkoutQuery,
+) ReadWorkoutResult {
+    for (snapshot.workouts) |workout| {
+        if (workout.id.eql(query.workout_id) and
+            scopesEqual(workout.scope, query.scope))
+        {
+            return .{ .found = workout };
+        }
+    }
+    return .{ .not_found = .{
+        .code = issue_codes.workout_not_found,
+        .category = .not_found,
+        .severity = .@"error",
+        .message = "No workout matched the requested scope and ID.",
+    } };
+}
+
+/// Selects active workouts without guessing when multiple matches exist.
+///
+/// Up to `query.max_results` ambiguous values are written to `output`. The
+/// function still detects ambiguity when the configured result bound is zero.
+pub fn selectActiveWorkouts(
+    snapshot: LifecycleSnapshot,
+    query: ListActiveWorkoutsQuery,
+    output: []Workout,
+) QueryError!ActiveWorkoutSelection {
+    var matching: usize = 0;
+    var first: ?Workout = null;
+    var written: usize = 0;
+    for (snapshot.workouts) |workout| {
+        if (workout.status != .active or !scopesEqual(workout.scope, query.scope))
+            continue;
+        matching += 1;
+        if (first == null) first = workout;
+        if (written < query.max_results) {
+            if (written >= output.len) return error.OutputBufferTooSmall;
+            output[written] = workout;
+            written += 1;
+        }
+    }
+    if (matching == 0) return .none;
+    if (matching == 1) return .{ .one = first.? };
+    return .{ .ambiguous = output[0..written] };
+}
+
+fn reject(
+    command_id: Id,
+    storage: []Issue,
+    issue: Issue,
+) DecisionError!CommandResult {
+    if (storage.len == 0) return error.IssueBufferTooSmall;
+    storage[0] = issue;
+    return .{ .rejected = .{
+        .command_id = command_id,
+        .issues = storage[0..1],
+    } };
+}
+
+fn validId(id: Id) bool {
+    _ = Id.parse(id.bytes) catch return false;
+    return true;
+}
+
+fn validTimestamp(timestamp: Timestamp) bool {
+    _ = Timestamp.parse(timestamp.bytes) catch return false;
+    return true;
+}
+
+fn startCommandsEqual(
+    left: StartWorkoutCommand,
+    right: StartWorkoutCommand,
+) bool {
+    return left.metadata.command_id.eql(right.metadata.command_id) and
+        timestampsEqual(left.metadata.occurred_at, right.metadata.occurred_at) and
+        scopesEqual(left.scope, right.scope) and
+        left.workout_id.eql(right.workout_id) and
+        timestampsEqual(left.started_at, right.started_at);
+}
+
+fn scopesEqual(left: Scope, right: Scope) bool {
+    if (!left.host_scope_key.eql(right.host_scope_key))
+        return false;
+    if (left.athlete_id == null or right.athlete_id == null)
+        return left.athlete_id == null and right.athlete_id == null;
+    return left.athlete_id.?.eql(right.athlete_id.?);
+}
+
+fn timestampsEqual(left: Timestamp, right: Timestamp) bool {
+    return std.mem.eql(u8, left.bytes, right.bytes);
+}

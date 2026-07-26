@@ -121,3 +121,10 @@ contract version and require migration guidance.
 
 No serialized wire format is approved by CWE-103. Field names are public Zig
 source API, not a promise of JSON compatibility.
+
+## Subsequent implementation
+
+CWE-104 subsequently adds deterministic start and query calculations to this
+package. They operate only on explicit `LifecycleSnapshot` values and
+caller-owned buffers; the dependency and effect boundaries approved here are
+unchanged.

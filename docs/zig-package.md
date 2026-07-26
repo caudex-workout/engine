@@ -66,8 +66,9 @@ without importing repository-relative source files.
 
 `caudex_tracking` defines the public, database-independent command, query,
 workout-state, and structured-issue values for host-owned workout tracking. It
-depends only on `caudex` and performs no command execution, allocation,
-persistence, clock access, or terminal behavior.
+depends only on `caudex`. Its minimal start and read calculations consume
+explicit borrowed snapshots and caller-owned buffers; they perform no
+allocation, persistence, clock access, or terminal behavior.
 
 The accepted [CWE-103 architecture review](tracking/architecture-review-cwe-103.md)
 documents package ownership, idempotency, revisions, short-workout completion,

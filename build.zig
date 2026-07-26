@@ -89,6 +89,18 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const run_tracking_contract_tests = b.addRunArtifact(tracking_contract_tests);
+    const tracking_lifecycle_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tracking_lifecycle_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "caudex_tracking", .module = tracking_module },
+            },
+        }),
+    });
+    const run_tracking_lifecycle_tests =
+        b.addRunArtifact(tracking_lifecycle_tests);
     const tracking_architecture_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("tracking_architecture_test.zig"),
@@ -106,6 +118,7 @@ pub fn build(b: *std.Build) void {
         "Test the public host-owned tracking contract",
     );
     tracking_contract_step.dependOn(&run_tracking_contract_tests.step);
+    tracking_contract_step.dependOn(&run_tracking_lifecycle_tests.step);
     tracking_contract_step.dependOn(&run_tracking_architecture_tests.step);
 
     const persistence_tests = b.addTest(.{
@@ -531,6 +544,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_contract_tests.step);
     test_step.dependOn(&run_architecture_tests.step);
     test_step.dependOn(&run_tracking_contract_tests.step);
+    test_step.dependOn(&run_tracking_lifecycle_tests.step);
     test_step.dependOn(&run_tracking_architecture_tests.step);
     test_step.dependOn(&run_persistence_tests.step);
     test_step.dependOn(&run_persistence_contract_kit_tests.step);
