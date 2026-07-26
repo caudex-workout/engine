@@ -5,6 +5,13 @@ persistence capabilities over a host-supplied SQLite database path. It links
 the platform SQLite library; neither the Caudex core nor the core npm package
 links SQLite.
 
+The module is currently wired only as a build-local test dependency. It is not
+included in the v0.1 Zig source-package allowlist and is not yet a supported
+external package root. The first-party reference-client plan requires a named
+public SQLite package, clean-consumer tests, metadata and compatibility
+inspection, and narrower error reporting before application code depends on it.
+Monorepo-relative importability does not make this file public API.
+
 ## Schema and migrations
 
 [`migrations/001_initial.sql`](migrations/001_initial.sql) is the adapter-private
@@ -12,6 +19,8 @@ reference schema. The adapter records applied versions in
 `schema_migrations`. Released migrations are immutable and future changes add a
 higher-numbered file; migrations run forward inside an immediate transaction.
 The physical tables are not canonical Caudex schemas.
+Clients must not read or mutate them directly; supported integration occurs
+through the adapter's eventual public host-facing API.
 
 Canonical exercises, workouts, and methodology state are stored as JSON
 payloads alongside narrow relational keys used for deterministic retrieval.

@@ -1,2481 +1,1318 @@
-# Caudex Workout Engine: Library-First Product and Implementation Plan
+# Caudex First-Party Zig Reference Client Implementation Plan
 
-- **Target core language:** Zig 0.16.0
-- **Primary audience:** Developers building fitness applications
-- **Initial distribution priority:** npm, Zig package, and C release artifacts
-- **Initial domain:** Strength and hypertrophy programming
-- **Product form:** Stateless, embeddable recommendation library
-- **Architecture:**
-  - [ADR-0001: Functional Core, Explicit Zig Shell, and Adapter Architecture](adr/ADR-0001-workout-engine-core-architecture.md)
-  - [ADR-0002: Library-First Product, Stateless Core, and Multi-Ecosystem Distribution](adr/ADR-0002-library-first-product-and-distribution.md)
-  - [ADR-0003: Persistence Is an Optional Adapter Outside the Core](adr/ADR-0003-persistence-as-optional-adapter.md)
+- **Status:** Planned
+- **Date:** 2026-07-26
+- **Architecture:** [ADR-0004](adr/ADR-0004-first-party-zig-reference-client.md)
+- **Predecessor:** [Completed v0.1 library-first implementation
+  plan](implementation-plans/completed/v0.1-library-first-implementation-plan.md)
 
 ## 1. Product definition
 
-### Decision authority
-
-This plan implements the accepted ADRs in decision order. ADR-0002 supersedes
-ADR-0001's tracking-first scope, SQLite-first MVP, event-journal requirements,
-and implementation sequence. ADR-0003 supersedes any remaining implication that
-the core owns persistence or durable state. ADR-0001 remains authoritative for
-the functional-core discipline, deterministic calculations, explicit Zig
-boundaries, C ABI principles, exact measurements, and rejection of generalized
-functional-programming frameworks.
-
-### One-sentence positioning
-
-> **Caudex Workout Engine is an open-source, embeddable strength and hypertrophy programming engine that lets fitness applications load different training methodologies and produce deterministic, explainable workout recommendations.**
-
-A shorter package description:
-
-> Headless strength-programming logic for fitness apps.
-
-### What Caudex sells developers
-
-Caudex saves application developers from repeatedly designing and debugging:
-
-- Strength-training domain types
-- Exercise and equipment constraints
-- Training-history interpretation
-- Progression rules
-- Session construction
-- Exercise selection and substitution
-- Set, rep, and load prescriptions
-- Time-constrained workout adaptation
-- Missed-session policies
-- Recommendation explanations
-- Deterministic testing fixtures
-- Cross-language model contracts
-
-A developer should be able to keep their own UI, database, authentication, sync, branding, and exercise data while delegating the programming logic to Caudex.
-
-### What Caudex is not
-
-Caudex is not:
-
-- A workout tracker application
-- A hosted fitness platform
-- A database
-- An authentication system
-- A comprehensive exercise-content service
-- A social network
-- A coach marketplace
-- A medical device
-- A black-box AI coach
-- One fixed training philosophy
-
-A first-party CLI or demo app may exist as an integration example, but it is not the core product.
-
-## 2. Product priorities
-
-1. **Developer experience**
-2. **Deterministic and explainable recommendations**
-3. **Methodology flexibility**
-4. **Correct strength/hypertrophy domain primitives**
-5. **Portable distribution**
-6. **API stability and compatibility**
-7. **Performance**
-8. **Optional convenience integrations**
-
-Performance matters, but this engine is not useful if developers cannot install, understand, test, and trust it.
-
-## 3. Primary developer jobs
-
-### Job 1: Recommend the next workout
-
-Given:
-
-- Recent training history
-- Current program state
-- Available equipment
-- Time available
-- Exercise restrictions and preferences
-- Optional readiness inputs
-- A selected methodology and configuration
-
-return a complete, structured workout recommendation.
-
-### Job 2: Evaluate completed performance
-
-Given:
-
-- The prescribed workout
-- What the athlete actually completed
-- Prior methodology state
-
-return:
-
-- Progression evaluation
-- Proposed next state
-- Load/rep/set changes
-- Warnings
-- Explanation trace
-
-### Job 3: Change methodologies safely
-
-A host can select a different methodology without replacing its account, storage, or UI architecture.
-
-Caudex validates whether the supplied history and state are sufficient and explicitly reports assumptions or migration requirements.
-
-### Job 4: Test fitness-product behavior
-
-A developer can put a request fixture in source control and assert:
-
-- The exact recommendation
-- Stable issue codes
-- Explanation codes
-- Methodology version
-- Deterministic fingerprints
-
-### Job 5: Ship across clients
-
-The same canonical request should produce the same result in:
-
-- Node
-- Browser
-- Zig
-- C
-- Swift
-- Kotlin/Android
-
-within the documented compatibility and version rules.
-
-## 4. Product principles
-
-### 4.1 Headless, storage agnostic, and usable without persistence
-
-The host owns persistence. Caudex accepts explicit snapshots and returns values.
-
-The core has no repository port, database driver, schema, migration runner, transaction manager, filesystem dependency, or implicit data-loading lifecycle.
-
-Applications may:
-
-- Call the core directly with in-memory values and persist nothing
-- Map existing repositories into canonical request snapshots
-- Use an optional SQLite adapter
-- Use an optional PostgreSQL adapter
-- Use an optional IndexedDB adapter
-- Implement the persistence capability interfaces over any custom storage
-
-Persistence adapters depend on Caudex; Caudex core never depends on them.
-
-There is no SQLite, PostgreSQL, IndexedDB, or other persistence requirement in the core or `@caudex/workout-engine` package.
-
-### 4.2 Methodology explicitness
-
-Every recommendation identifies the methodology and version that produced it.
-
-There is no invisible “Caudex algorithm” pretending to be universally correct.
-
-### 4.3 Determinism
-
-Time, randomness, user state, and methodology version are explicit inputs.
-
-The same canonical input produces the same canonical output.
-
-### 4.4 Explainability
-
-Every material recommendation should have structured reasons and evidence.
-
-“Because the algorithm said so” is not a valid result.
-
-### 4.5 Progressive disclosure
-
-The easiest use case should be easy:
-
-```ts
-const result = caudex.recommendSession(request);
-```
-
-Advanced users can inspect:
-
-- Validation
-- Candidate exclusions
-- Score components
-- History summaries
-- Methodology state
-- Alternative recommendations
-- Canonical fingerprints
-
-### 4.6 Idiomatic host APIs
-
-The Zig core is shared, but each ecosystem gets a facade that feels native.
-
-Developers should not manually manage WASM memory or C buffers in TypeScript, Swift, or Kotlin.
-
-### 4.7 No speculative abstraction framework
-
-Caudex uses functional programming as an architectural discipline, not a generalized FP abstraction framework.
-
-The core uses deterministic, effect-free calculations and explicit idiomatic Zig.
-
-## 5. Architecture
+`caudex-cli` is the first-party Zig reference client for Caudex Workout Engine.
+It is a useful, local workout tracker and an executable example of composing
+Caudex's intentionally public Zig packages.
+
+The installed command is:
 
 ```text
-                       Host applications
-        ┌───────────────┼───────────────┬──────────────┐
-        │               │               │              │
-     Node/Web          Zig             iOS          Android
-        │               │               │              │
- TypeScript API    Typed Zig API    Swift facade   Kotlin facade
-        │               │               │              │
-        └──── WASM ─────┼──── C ABI / native artifacts ┘
-                        │
-            Canonical request/result model
-                        │
-                Caudex Zig core
-        ┌───────────────┼────────────────┐
-        │               │                │
-   Validation       Shared analysis   Methodology registry
-        │               │                │
-        └───────────────┼────────────────┘
-                        │
-       Recommendation + explanation + proposed state
+caudex
 ```
 
-### Core modules
-
-#### Model
-
-- Exact decimal values and units
-- Exercise catalog
-- Muscle and movement taxonomy references
-- Equipment
-- Workout history
-- Program state
-- Session constraints
-- Recommendation results
-
-#### Validation
-
-- Schema and semantic validation
-- Cross-reference validation
-- Methodology configuration validation
-- Unit compatibility
-- Range and overflow checks
-
-#### History analysis
-
-- Last performance
-- Recent exercise exposure
-- Set and rep summaries
-- Estimated 1RM helpers
-- Compatible-unit volume summaries
-- Adherence/completion summaries
-- Recency calculations using explicit `as_of`
-
-#### Recommendation
-
-- Hard constraints
-- Candidate generation
-- Stable ordering
-- Alternative generation
-- Result assembly
-- Explanation collection
-
-#### Methodology
-
-- Registry
-- Metadata
-- Configuration schema
-- Recommendation entry point
-- Performance evaluation entry point
-- Methodology-specific state
-- Version compatibility
-
-#### Protocol
-
-- Canonical versioned request/result representation
-- JSON-compatible schema
-- Deterministic fixtures
-- C/WASM message boundary
-
-## 6. Functional architecture rule
-
-> Caudex Workout Engine uses functional programming as an architectural discipline rather than adopting a generalized functional-programming abstraction framework. Domain decisions and recommendation calculations are deterministic and effect-free. Application orchestration, allocation, serialization, package loading, and ABI handling use explicit idiomatic Zig.
-
-### Domain code may
-
-- Read supplied immutable views
-- Use explicit loops and local variables
-- Write to caller-provided result builders or buffers
-- Mutate caller-owned scratch state during deterministic calculation
-- Use checked arithmetic
-- Return tagged unions, error unions, and structured issues
-
-### Domain code may not
-
-- Read a database
-- Read a clock
-- Generate nondeterministic IDs
-- Use hidden random state
-- Access the filesystem or network
-- Access environment variables
-- Persist recommendations
-- Load plugins
-- Depend on global mutable state
-- Hide allocation behind generalized abstractions
-
-### Explicitly excluded framework styles
-
-- `zig-cats` in v0.x
-- Monad/functor/typeclass emulation
-- Generalized `.map` / `.filter` / `.reduce` frameworks
-- Free-monad effect interpreters
-- Persistent collection frameworks as a default
-- Runtime dependency-injection containers
-- Currying or point-free style as a project convention
-
-## 7. Canonical API
-
-### 7.1 Public operations for v0.1
+The package is:
 
 ```text
-createRuntime()
-listMethodologies()
-describeMethodology(methodology_id)
-validateMethodologyConfig(methodology_id, config)
-validateRecommendationRequest(request)
-recommendSession(request)
-evaluatePerformance(request)
+caudex-cli
 ```
 
-`createRuntime` is a wrapper concern for WASM/native loading. The semantic operations remain stateless.
-
-### 7.2 TypeScript quickstart
-
-```ts
-import {
-  createCaudex,
-  methodologies,
-  type RecommendationRequest,
-} from "@caudex/workout-engine";
-
-const caudex = await createCaudex();
-
-const methodology = methodologies.doubleProgression({
-  repRange: { min: 8, max: 12 },
-  workingSets: 3,
-  loadIncrement: { amount: "5", unit: "lb" },
-});
-
-const request: RecommendationRequest = {
-  schemaVersion: 1,
-  asOf: "2026-07-20T22:00:00Z",
-  methodology,
-  catalog: [
-    {
-      id: "incline-dumbbell-press",
-      name: "Incline Dumbbell Press",
-      equipmentIds: ["dumbbell", "adjustable-bench"],
-      movementTags: ["horizontal-push"],
-      muscleContributions: [
-        { muscleId: "pectoralis-major", role: "primary" },
-        { muscleId: "triceps", role: "secondary" },
-      ],
-    },
-  ],
-  athlete: {
-    preferences: {
-      dislikedExerciseIds: [],
-      preferredExerciseIds: ["incline-dumbbell-press"],
-    },
-  },
-  history: [],
-  programState: null,
-  session: {
-    availableMinutes: 35,
-    availableEquipmentIds: ["dumbbell", "adjustable-bench"],
-    goals: ["hypertrophy"],
-  },
-};
-
-const result = caudex.recommendSession(request);
-
-if (!result.ok) {
-  console.error(result.issues);
-} else {
-  console.log(result.recommendation);
-  console.log(result.explanations);
-  console.log(result.nextProgramState);
-}
-```
-
-### 7.3 API behavior rules
-
-- WebAssembly initialization may be asynchronous.
-- Recommendation and evaluation calls are synchronous after initialization.
-- Expected validation failures return result values, not thrown exceptions.
-- Initialization, corrupt artifacts, and internal invariant failures may throw typed wrapper errors.
-- Inputs are not mutated.
-- Outputs are newly owned ordinary host-language values.
-- The core has no implicit current athlete or active program.
-- Every result includes engine and methodology metadata.
-- Unknown fields and version negotiation follow documented schema rules.
-- The TypeScript facade must never expose raw WASM pointers.
-
-## 8. Core data model
-
-### 8.1 Exact values
-
-```text
-Decimal
-- amount: signed integer mantissa
-- scale: nonnegative integer
-
-Measurement
-- amount
-- unit
-```
-
-JSON and TypeScript use decimal strings for authoritative non-integer measurements:
-
-```ts
-{ amount: "72.5", unit: "lb" }
-```
-
-Built-in dimensions:
-
-- Count
-- Mass
-- Duration
-- Distance
-- RPE
-- RIR
-- Resistance level
-- Percentage
-
-Rules:
-
-- No silent floating-point rounding
-- Checked conversions
-- Explicit incompatible-unit issues
-- `i128` intermediates where required
-- Original entered value preserved
-
-### 8.2 Exercise catalog
-
-```text
-Exercise
-- id
-- name?
-- equipment_ids[]
-- movement_tags[]
-- muscle_contributions[]
-- unilateral?
-- aliases[]
-- attributes
-```
-
-```text
-MuscleContribution
-- muscle_id
-- role: primary | secondary | stabilizer | custom
-- optional methodology-neutral weight
-```
-
-IDs and taxonomies are host supplied. Caudex may publish a separate optional starter catalog later.
-
-The core does not require one universal anatomical taxonomy. A methodology declares which tags or muscle references it needs.
-
-### 8.3 Athlete inputs
-
-```text
-Athlete
-- optional stable host id
-- preferences
-- restrictions
-- optional capability data
-- optional readiness
-```
-
-Preferences may include:
-
-- Preferred exercises
-- Disliked exercises
-- Exercise substitutions
-- Avoided equipment
-- Session length preferences
-- Per-muscle emphasis
-- Frequency preferences
-
-Restrictions may include:
-
-- Excluded exercises
-- Excluded movement tags
-- Equipment limitations
-- Host-supplied injury or discomfort constraints
-
-Caudex treats restrictions as programming inputs, not medical diagnoses.
-
-### 8.4 Training history
-
-```text
-CompletedWorkout
-- id
-- started_at
-- completed_at
-- exercises[]
-
-CompletedExercise
-- exercise_id
-- sets[]
-- notes or host tags
-
-CompletedSet
-- kind
-- actual metrics
-- target metrics?
-- completed_at?
-- completion status
-```
-
-The host can supply:
-
-- Raw recent history
-- A precomputed `HistorySnapshot`
-- Both, when a methodology requires detailed evidence
-
-The engine validates that the methodology received the required history shape.
-
-### 8.5 Session context
-
-```text
-SessionContext
-- available_minutes?
-- available_equipment_ids[]
-- goals[]
-- exercise count limits?
-- set count limits?
-- excluded exercise ids[]
-- required exercise ids[]
-- location tags[]
-- optional readiness override
-```
-
-### 8.6 Methodology reference
-
-```text
-MethodologyRef
-- id
-- version requirement?
-- config version
-- config object
-```
-
-The runtime resolves the exact installed methodology version and records it in the result.
-
-### 8.7 Methodology state
-
-Methodology state is opaque to the core's shared programming logic but structured and versioned at the canonical boundary.
-
-Examples:
-
-- Current load and rep target by exercise
-- Progression stage
-- Exposure counters
-- Deload state
-- Last accepted recommendation identity
-
-The host persists this state.
-
-A methodology must provide:
-
-- State schema version
-- Initial-state behavior
-- State validation
-- State migration behavior or a structured unsupported-state issue
-- Proposed next state
-
-### 8.8 Recommendation result
-
-```text
-RecommendationResult
-- ok
-- recommendation?
-- alternatives[]
-- next_program_state?
-- explanations[]
-- warnings[]
-- issues[]
-- metadata
-```
-
-```text
-SessionRecommendation
-- title?
-- estimated_duration?
-- exercises[]
-
-ExerciseRecommendation
-- exercise_id
-- sets[]
-- substitution_group?
-- explanation_refs[]
-
-SetRecommendation
-- kind
-- target_metrics[]
-- rest_duration?
-- explanation_refs[]
-```
-
-```text
-ResultMetadata
-- engine_version
-- schema_version
-- methodology_id
-- methodology_version
-- methodology_config_version
-- input_fingerprint
-- result_fingerprint
-```
-
-## 9. Explainability design
-
-Explanations are structured records:
-
-```text
-Explanation
-- id
-- code
-- category
-- summary
-- subject
-- evidence[]
-- parameters
-- rule_id?
-- severity
-```
-
-Categories:
-
-- Selection
-- Exclusion
-- Progression
-- Load
-- Repetitions
-- Sets
-- Recovery
-- Time constraint
-- Preference
-- Methodology state
-- Missing data
-- Alternative
-
-Evidence references point to canonical input locations or derived summaries.
-
-Example:
-
-```json
-{
-  "code": "load.increased.rep_range_completed",
-  "category": "progression",
-  "summary": "Load increased because all working sets reached the top of the configured rep range.",
-  "subject": { "exerciseId": "incline-dumbbell-press" },
-  "evidence": [
-    { "workoutId": "w-103", "setIds": ["s-1", "s-2", "s-3"] }
-  ],
-  "parameters": {
-    "previousLoad": { "amount": "65", "unit": "lb" },
-    "recommendedLoad": { "amount": "70", "unit": "lb" }
-  },
-  "ruleId": "double-progression.advance-load"
-}
-```
-
-Requirements:
-
-- Codes and parameters are stable contracts.
-- Human summaries may improve without a breaking change.
-- Methodology authors document their rule codes.
-- Debug traces that expose unstable internal details remain separate from public explanations.
-- Hosts can localize summaries from codes and parameters.
-
-## 10. Determinism and reproducibility
-
-A request includes:
-
-- Explicit `asOf`
-- Explicit methodology and configuration
-- Explicit program state
-- Optional seed if seeded tie breaking is requested
-
-Rules:
-
-1. Canonicalize maps and unordered sets before hashing.
-2. Do not rely on input iteration order unless semantically documented.
-3. Sort ties by stable identifiers or use an explicit seeded policy.
-4. Record exact engine and methodology versions.
-5. Provide canonical request/result fixtures.
-6. Run the same fixtures through Zig, npm/WASM, C, Swift, and Kotlin wrappers.
-7. Treat result changes as reviewed artifacts, not incidental test churn.
-
-## 11. Methodology system
-
-### 11.1 v0.x Zig interface
-
-Conceptually:
-
-```zig
-pub const Methodology = struct {
-    metadata: Metadata,
-    validateConfig: *const fn (
-        config: ConfigView,
-        issues: *IssueWriter,
-    ) void,
-    validateState: *const fn (
-        state: StateView,
-        issues: *IssueWriter,
-    ) void,
-    recommendSession: *const fn (
-        request: RecommendationView,
-        scratch: *Scratch,
-        out: *RecommendationWriter,
-    ) MethodologyError!void,
-    evaluatePerformance: *const fn (
-        request: EvaluationView,
-        scratch: *Scratch,
-        out: *EvaluationWriter,
-    ) MethodologyError!void,
-};
-```
-
-The exact implementation may use compile-time registration and generate a runtime registry.
-
-The interface should not force methodologies through one universal candidate-scoring pipeline.
-
-Shared helpers are available, but a methodology may implement a different calculation shape.
-
-### 11.2 First-party methodology 1: Double progression
-
-Configurable dimensions:
-
-- Rep range
-- Working-set count
-- Success criteria
-- Load increment
-- Failure/hold policy
-- Optional backoff behavior
-- Exercise-level overrides
-
-Capabilities:
-
-- Recommend target load and reps from history/state
-- Advance load when top-of-range criteria are met
-- Hold or regress according to configured policy
-- Explain each progression decision
-- Evaluate completed performance
-- Produce next methodology state
-
-### 11.3 First-party methodology 2: RPE top set plus backoffs
-
-Purpose: prove the methodology interface can support a meaningfully different programming model.
-
-Configurable dimensions:
-
-- Top-set target reps
-- Target RPE
-- Backoff percentage or RPE
-- Backoff set count
-- Load rounding
-- Overshoot/undershoot policy
-
-Capabilities:
-
-- Use recent e1RM evidence
-- Recommend a top set
-- Derive backoff prescriptions
-- Adjust based on completed RPE
-- Explain estimation and adjustment
-
-Do not claim full periodization support in v0.1.
-
-### 11.4 Custom methodologies
-
-#### Zig consumers
-
-Can compile a custom methodology into their runtime and run the conformance suite.
-
-#### npm consumers in v0.1
-
-Can select/configure official compiled methodologies.
-
-#### Future portable bundles
-
-After the first two methodologies stabilize, evaluate a portable Methodology Bundle format containing:
-
-- Manifest
-- Configuration schema
-- State schema
-- Rule representation or bytecode
-- Explanation-code catalog
-- Engine compatibility range
-- Signature/checksum
-
-Do not design this format until concrete commonality is visible.
-
-## 12. Optional persistence and repository adapters
-
-Persistence is outside the core and is never required to calculate a recommendation.
-
-### 12.1 Direct snapshot mode
-
-The primary API receives host-supplied values:
-
-```ts
-const result = caudex.recommendSession({
-  catalog,
-  history,
-  programState,
-  methodology,
-  session,
-  asOf,
-});
-```
-
-This path works with:
-
-- In-memory data
-- Test fixtures
-- Data fetched over an API
-- Existing application repositories
-- No persistence at all
-
-It remains the semantic reference for all adapter-based integrations.
-
-### 12.2 Optional orchestration package
-
-A separate package may provide repository orchestration:
-
-```text
-@caudex/persistence
-```
-
-Conceptually:
-
-```ts
-const integration = createCaudexIntegration({
-  engine: caudex,
-  catalogSource,
-  historySource,
-  methodologyStateStore,
-  recommendationJournal,
-});
-
-const result = await integration.recommendSession(query);
-
-// Calculation does not persist.
-await integration.persistAcceptedResult({
-  query,
-  result,
-  expectedStateRevision,
-});
-```
-
-The host explicitly accepts a result before persistence. Previewing, simulating, rejecting, or editing a recommendation has no storage side effect.
-
-### 12.3 Narrow persistence capabilities
-
-Do not require one monolithic repository interface.
-
-Optional integrations use narrow capabilities:
-
-```text
-CatalogSource
-- loadCatalog(scope)
-
-HistorySource
-- loadHistory(query)
-
-MethodologyStateStore
-- loadState(key)
-- compareAndSetState(key, expected_revision, next_state)
-
-RecommendationJournal (optional)
-- appendAcceptedRecommendation(record)
-
-CompletedWorkoutSink (optional)
-- appendCompletedWorkout(workout)
-```
-
-Rules:
-
-- Applications implement only what they need.
-- Catalog and workout history remain host-owned.
-- Methodology state is opaque and versioned at the storage boundary.
-- Adapter failures are infrastructure errors, not methodology issues.
-- The core never imports or calls these interfaces.
-- Adapter orchestration must construct the same canonical request used by direct snapshot mode.
-
-### 12.4 Optional adapter packages
-
-Proposed packages:
-
-```text
-@caudex/persistence
-@caudex/persistence-indexeddb
-@caudex/persistence-sqlite
-@caudex/persistence-postgres
-```
-
-Names remain provisional until availability is verified.
-
-#### SQLite
-
-A reference local/native adapter may provide:
-
-- Optional schema and migrations
-- Prepared statements
-- Transactional compare-and-set
-- Explicit busy handling
-- File and in-memory modes
-
-#### PostgreSQL
-
-A server adapter may provide:
-
-- Optional SQL migrations
-- Transactional accepted-result persistence
-- Optimistic state revisions
-- Host-supplied connection-pool integration
-- Low-level driver support without requiring one ORM
-
-#### IndexedDB
-
-A browser adapter may provide:
-
-- Object-store versioning
-- Indexed history retrieval
-- Browser transaction handling
-- Quota and lifecycle guidance
-- Offline-first examples
-
-#### Custom repositories
-
-Applications may implement the capability interfaces over:
-
-- Existing SQL/ORM repositories
-- DynamoDB
-- MongoDB
-- REST or GraphQL APIs
-- Event streams
-- Durable Objects
-- Files
-- In-memory maps
-
-A custom-repository guide and contract test kit must exist before the common interfaces are marked stable.
-
-### 12.5 Reference schema is not the core model
-
-Database-specific reference schemas are private to their adapter packages.
-
-The canonical request/result model is a computation contract, not:
-
-- A SQL schema
-- An ORM entity model
-- A required document layout
-- A synchronization protocol
-
-Applications do not need to copy their workout history into a Caudex-owned database.
-
-### 12.6 Adapter concurrency and transactions
-
-Methodology-state persistence should support optimistic revisions:
-
-```text
-MethodologyStateRecord
-- host_scope_key
-- methodology_id
-- methodology_version
-- state_schema_version
-- state
-- revision
-- updated_at
-```
-
-Saving `nextProgramState` includes the revision used to build the recommendation. A mismatch is a persistence conflict handled by the application.
-
-Adapters may provide explicit transactional units of work. Guarantees are documented per database rather than pretending all storage technologies behave identically.
-
-### 12.7 Adapter testing
-
-`@caudex/persistence` should provide a reusable contract suite covering:
-
-- Catalog and history loading
-- Methodology-state round trips
-- Compare-and-set success and conflict
-- Optional recommendation journaling
-- Rollback where advertised
-- State-version handling
-- Canonical request equivalence
-
-For each canonical fixture, direct snapshot mode and adapter mode must produce matching recommendation fingerprints.
-
-## 13. Distribution and packages
-
-### 13.1 npm: first-class distribution
-
-Proposed package:
-
-```text
-@caudex/workout-engine
-```
-
-Reserve and verify the npm scope before publishing. Keep a fallback naming plan.
-
-Package contents:
-
-```text
-dist/
-├── index.js
-├── index.cjs                 # only if maintained and tested
-├── index.d.ts
-├── caudex.wasm
-├── methodologies/
-├── schema/
-└── testing/
-```
-
-Public exports:
-
-```json
-{
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
-    },
-    "./methodologies": {
-      "types": "./dist/methodologies/index.d.ts",
-      "import": "./dist/methodologies/index.js",
-      "require": "./dist/methodologies/index.cjs"
-    },
-    "./schema": "./dist/schema/index.js",
-    "./testing": "./dist/testing/index.js"
-  }
-}
-```
-
-Final CommonJS support should be included only if its WASM loading behavior is reliable and covered by CI. ESM is mandatory.
-
-Requirements:
-
-- `npm install @caudex/workout-engine`
-- No postinstall script
-- No local compilation
-- No Zig installation
-- No database dependency
-- TypeScript declarations included
-- `sideEffects: false` when accurate
-- Package `files` allowlist
-- `npm pack` artifact inspection
-- Smoke tests in clean Node and browser fixture projects
-- Bundler tests for documented bundlers
-- Published with provenance
-- Semver and changelog
-- Deprecation tests
-- Size report in releases
-
-### 13.2 Browser and Node WASM loader
-
-The wrapper hides environment differences.
-
-Requirements:
-
-- Async initialization
-- Node loading from package asset
-- Browser loading compatible with common bundlers
-- Streaming instantiation where available
-- ArrayBuffer fallback
-- Helpful CSP/MIME troubleshooting
-- Exactly one public initialization path unless a second path solves a demonstrated need
-- No fetch requirement in Node
-- No shared global singleton unless explicitly requested
-
-### 13.3 Zig package
-
-Requirements:
-
-- Tagged source releases
-- `build.zig.zon`
-- Public module import
-- Minimal dependency graph
-- Example consumer project tested in CI
-- Custom methodology example
-- Clear supported Zig version policy
-
-### 13.4 C release
-
-Artifacts:
-
-- `caudex.h`
-- Static libraries
-- Shared libraries where appropriate
-- Checksums
-- License and notices
-- Target matrix
-- Source-build instructions
-
-C API uses:
-
-- Opaque runtime handle
-- Length-delimited canonical messages
-- Stable status codes
-- Engine-owned output buffer
-- Explicit free function
-- No Zig layouts or errors across ABI
-
-### 13.5 Swift Package Manager
-
-After ABI stabilization:
-
-- XCFramework
-- Swift package binary target
-- Idiomatic Swift value types
-- `async` initialization only where required
-- Swift errors mapped from engine/runtime failures
-- Validation results returned as values
-- iOS/macOS simulator and device CI
-- One sample app
-
-### 13.6 Maven Central / Android
-
-After ABI stabilization:
-
-- Android AAR
-- Kotlin facade
-- Native libraries for documented ABIs
-- JNI boundary kept private
-- No C++ runtime collision if avoidable
-- Maven Central publication
-- Gradle sample app
-- Instrumented smoke tests
-
-### 13.7 Package support policy
-
-An ecosystem is “supported” only when CI verifies:
-
-1. Installation from the produced package artifact
-2. Quickstart compilation
-3. Canonical recommendation fixture
-4. Error fixture
-5. Version metadata
-6. Resource cleanup
-7. Release artifact contents
-
-## 14. Developer-experience requirements
-
-### 14.1 Five-minute success path
-
-The README begins with:
-
-1. Install
-2. Import
-3. Initialize
-4. Construct a small request
-5. Print a recommendation
-6. Inspect explanations
-
-No architecture essay precedes the quickstart.
-
-### 14.2 Documentation layers
-
-#### Start
-
-- Quickstart
-- Concepts in ten minutes
-- Choosing a methodology
-- Data mapping guide
-
-#### Build
-
-- API reference
-- Request model
-- Result model
-- Methodology configuration
-- Explanation codes
-- Testing guide
-
-#### Deep reference
-
-- Determinism
-- Exact units
-- Versioning
-- Methodology state
-- Custom Zig methodologies
-- C ABI
-- Wrapper internals
-
-### 14.3 Error design
-
-Expected validation and methodology outcomes are returned as structured issue
-values. Engine/runtime failures mean the calculation could not complete safely,
-for example because of allocation failure, corrupt artifacts, serialization
-failure, or an internal invariant violation. Persistence conflicts and adapter
-failures belong to optional adapters or host applications and must not be
-reported as core methodology issues.
-
-The `DomainIssue` and `EngineError` names shown in ADR-0001 describe conceptual
-categories; they do not preselect the public Zig type names. CWE-002 and CWE-004
-define the canonical result model, namespaces, and compatibility rules before
-implementation.
-
-Every issue includes:
-
-```text
-code
-path
-message
-severity
-details
-suggestion?
-```
-
-Example:
-
-```json
-{
-  "code": "history.exercise_reference_missing",
-  "path": "/history/2/exercises/0/exerciseId",
-  "message": "The completed exercise references an exercise absent from the supplied catalog.",
-  "severity": "error",
-  "details": {
-    "exerciseId": "incline-dumbbell-press"
-  },
-  "suggestion": "Include the referenced exercise in catalog or provide a history snapshot that does not require catalog resolution."
-}
-```
-
-Rules:
-
-- Codes are stable.
-- Paths use a documented pointer format.
-- Messages are actionable.
-- Multiple independent validation issues are returned together.
-- Internal errors do not masquerade as validation issues.
-
-### 14.4 Testing package
-
-`@caudex/workout-engine/testing` provides:
-
-- Request builders
-- Small exercise fixtures
-- History fixtures
-- Canonicalization helpers
-- Result matchers
-- Determinism assertion
-- Methodology conformance helper
-- Fixture serialization
-
-Example:
-
-```ts
-expectDeterministic(caudex, request);
-expect(result).toRecommendExercise("incline-dumbbell-press");
-expect(result).toExplain("load.increased.rep_range_completed");
-```
-
-Custom Jest/Vitest matchers are optional; framework-neutral functions come first.
-
-### 14.5 Playground
-
-Create a documentation playground after the npm package works.
-
-It should allow developers to:
-
-- Select methodology
-- Edit JSON request
-- Run recommendation locally in browser
-- Inspect result
-- Inspect explanation trace
-- Copy code
-- Download fixtures
-
-The playground uses the public npm package and no private APIs.
-
-## 15. Repository structure
-
-This is the current target layout and supersedes ADR-0001's illustrative
-`src/domain`, `src/app`, and `src/storage` tree. Architectural rules attach to
-dependency and effect boundaries, not to a literal directory name. Create only
-the files needed by the current issue.
+The client is external in architecture and colocated in the monorepo. It starts
+with stable one-shot commands, grows into a strong shell integration, and then
+adds a full TUI without retiring the scriptable interface.
+
+## 2. Repository baseline
+
+Planning is based on the completed repository, not the old plan's projected
+tree.
+
+### 2.1 Public boundaries today
+
+- `caudex` is the only root `b.addModule` package and the only Zig module in the
+  tagged source-package allowlist.
+- `caudex` exports typed recommendation/evaluation, canonical models and JSON,
+  training snapshots, primitives, methodologies, diagnostics, filtering,
+  ordering, history, duration, and load arithmetic.
+- `adapters/persistence.zig` defines useful Zig capability contracts, but the
+  root build creates it only as the build-local module `persistence`.
+- `adapters/sqlite.zig` is tested as the build-local module `sqlite`; neither it
+  nor its migrations are included in `build.zig.zon`'s distributable paths.
+- JavaScript persistence packages do not satisfy a Zig-only application.
+
+### 2.2 Existing SQLite lifecycle
+
+The adapter currently supports:
+
+- Open/create from a sentinel path
+- Busy-timeout option
+- Automatic forward migration to schema version 1
+- Catalog replacement and loading
+- Completed-workout append and history loading
+- Methodology-state load and compare-and-set
+- File and `:memory:` databases
+- Close
+
+It does not yet provide:
+
+- A distributable public Zig package
+- Explicit public metadata/compatibility inspection
+- Detailed busy, corruption, migration, and newer-schema errors
+- Tracker application-service construction
+- Active-workout or catalog-management commands and queries
+- Integrity, backup, or restore APIs
+
+### 2.3 Public capability gap
+
+The current engine represents completed workout snapshots for recommendation
+and evaluation. It does not implement a mutable tracking domain. The client
+cannot legitimately implement the illustrative command tree until public
+packages add the relevant operations.
+
+Each requested feature is classified as:
+
+1. **Engine/application contract:** reusable workout rules, commands, queries,
+   idempotency, revisions, and stable issues.
+2. **SQLite adapter:** durable implementation, migrations, transactions,
+   indexed queries, integrity, backup, or compatibility.
+3. **Client:** parsing, resolution, presentation, configuration, paths,
+   prompts, terminal behavior, and shared use-case orchestration.
+4. **Out of scope:** capabilities unsupported by the engine and not approved as
+   a focused engine expansion.
+
+The client never fills category 1 or 2 gaps with raw SQL or duplicated rules.
+
+## 3. Scope
+
+### 3.1 Included
+
+- Public Zig persistence and SQLite package readiness
+- A line-oriented CLI with human, quiet, and JSON output
+- Local catalog and workout tracking supported by approved public contracts
+- Active-workout ambiguity handling across processes
+- History, last-performance, and correction workflows
+- Shell completion, command docs, batch input, and diagnostics
+- A full Zig TUI focused first on live workout execution
+- Release packaging and third-party Zig integration documentation
+- Measured, justified public engine/adapter improvements required by the client
+
+### 3.2 Excluded
+
+- Browser reference client
+- JavaScript, TypeScript, Node.js, npm wrappers, or npm packages
+- Mobile, desktop GUI, hosted service, accounts, billing, or cloud sync
+- A generic GUI toolkit or plugin marketplace
+- Direct table editing or an alternate workout schema
+- Workout generation, periodization, recovery modeling, or unsupported
+  recommendation/methodology UI
+- Cardio, mobility, medical, or rehabilitation behavior
+- A TUI framework before concrete terminal needs exist
+
+## 4. Proposed monorepo structure
+
+Create only the files required by the current issue:
 
 ```text
 caudex/
 ├── build.zig
 ├── build.zig.zon
-├── package.json
-├── LICENSE
-├── README.md
-├── CHANGELOG.md
-├── docs/
-│   ├── adr/
-│   ├── concepts/
-│   ├── guides/
-│   ├── methodologies/
-│   └── reference/
-├── core/
-│   └── src/
-│       ├── root.zig
-│       ├── model/
-│       ├── validation/
-│       ├── history/
-│       ├── recommendation/
-│       ├── explanation/
-│       ├── methodology/
-│       └── protocol/
-├── methodologies/
-│   ├── double_progression/
-│   └── rpe_top_set_backoff/
-├── bindings/
-│   ├── c/
-│   ├── wasm/
-│   ├── swift/
-│   └── android/
-├── packages/
-│   ├── npm/
-│   │   └── workout-engine/
-│   └── persistence/            # optional; created only when implemented
-│       ├── contract/
-│       ├── indexeddb/
-│       ├── sqlite/
-│       └── postgres/
-├── schemas/
-├── fixtures/
-├── examples/
-│   ├── typescript-node/
-│   ├── browser/
-│   ├── zig/
-│   └── c/
-└── tools/
-    └── release/
+├── adapters/
+│   ├── persistence.zig
+│   ├── sqlite.zig
+│   └── sqlite/
+├── apps/
+│   └── caudex-cli/
+│       ├── README.md
+│       └── src/
+│           └── main.zig
+└── src/
+    └── root.zig
 ```
 
-Use npm workspaces for the small JavaScript portion unless another workspace tool demonstrates clear value.
-
-Do not create empty directories simply to match this drawing.
-
-## 16. Versioning and compatibility
-
-### 16.1 Version dimensions
-
-Track separately:
-
-- Engine version
-- Canonical schema version
-- C ABI version
-- Methodology ID
-- Methodology implementation version
-- Methodology configuration version
-- Methodology state version
-- Wrapper/package version
-
-### 16.2 v0.x release strategy
-
-Use lockstep versions for official core and wrappers initially:
+Expected growth after concrete features exist:
 
 ```text
-@caudex/workout-engine 0.1.0
-Caudex C artifacts      0.1.0
-Zig package tag         0.1.0
+apps/caudex-cli/
+├── README.md
+├── src/
+│   ├── main.zig
+│   ├── app.zig
+│   ├── command_line/
+│   ├── output/
+│   └── tui/
+└── tests/
 ```
 
-First-party methodology versions are still recorded independently in results.
+The root build graph owns app build, install, run, and focused test steps.
+Initially there is no app-local build file or duplicate package manifest.
 
-### 16.3 Compatibility promises
+The Phase 0 package review decides whether adapter source remains under
+`adapters/` or moves to a package subtree. The decision is based on package
+publication and visibility, not aesthetic directory symmetry.
 
-Before 1.0:
+## 5. Public dependency diagram
 
-- Breaking changes are allowed only in minor versions.
-- Patch versions must not intentionally change public recommendation semantics for unchanged methodology versions.
-- A changed algorithm increments the methodology version.
-- Deprecations include a replacement and removal target.
-- Canonical fixtures document output changes.
-- Package migration guides accompany breaking releases.
+```text
+                          ┌──────────────────────────┐
+                          │ apps/caudex-cli          │
+                          │ args, output, config, UI │
+                          └────────────┬─────────────┘
+                                       │ named public imports only
+                  ┌────────────────────┼────────────────────┐
+                  ▼                    ▼                    ▼
+       ┌──────────────────┐ ┌────────────────────┐ ┌──────────────────┐
+       │ caudex_tracking  │ │ caudex_sqlite      │ │ caudex           │
+       │ commands/queries │ │ durable adapter    │ │ recommendation   │
+       └────────┬─────────┘ └──────────┬─────────┘ │ and evaluation   │
+                │                      │           └──────────────────┘
+                └──────────┬───────────┘
+                           ▼
+                 ┌────────────────────┐
+                 │ caudex_persistence │
+                 │ host contracts     │
+                 └─────────┬──────────┘
+                           ▼
+                 ┌────────────────────┐
+                 │ caudex public data │
+                 └────────────────────┘
+```
 
-### 16.4 Result provenance
+`caudex_tracking` is a working package name, not an authorized implementation
+detail. CWE-103 resolves its need and name without reviving ADR-0001's
+superseded persistence-owned core.
 
-Every successful result includes:
+## 6. Build and package policy
+
+- Root `build.zig` registers every public module explicitly.
+- The app module import table contains only approved package names.
+- Private implementation roots are not supplied to the app.
+- Root steps provide `caudex-cli`, `run-caudex-cli`, and `test-caudex-cli`.
+- `zig build` remains simple and installs intentional release artifacts.
+- Adapter consumer smoke tests copy only declared package paths.
+- A future app manifest requires a concrete independent-distribution need.
+- System SQLite remains the initial driver dependency; supported platforms and
+  development headers are documented.
+
+## 7. Command grammar principles
+
+Syntax:
+
+```text
+caudex [global-options] <noun> <verb> [arguments] [options]
+```
+
+Principles:
+
+- Long noun/verb forms are canonical; aliases never replace them.
+- `--help` works at the root, noun, and command levels.
+- Explicit IDs work everywhere relevant.
+- Friendly lookup checks exact ID, exact alias/name, then documented search.
+- Ambiguous lookup reports candidates and exits 5.
+- IDs are always present in JSON entities.
+- Global `--database`, `--format`, `--color`, `--quiet`, and scope selection
+  precede nouns and have documented precedence.
+- Commands do not prompt unless explicitly interactive.
+- Destructive commands use confirmation on a TTY and `--yes` for automation.
+- Metric shorthand maps to exact public measurements and rejects ambiguity.
+- One invocation performs one coherent operation.
+
+## 8. Capability-gated command tree
+
+The tree is a target, not evidence that the current engine supports every
+command.
+
+### 8.1 Walking skeleton
+
+```text
+caudex --help
+caudex version
+caudex database info
+```
+
+### 8.2 Essential tracking
+
+```text
+caudex workout start
+caudex workout show [--workout ID]
+caudex workout add-exercise EXERCISE [--workout ID]
+caudex set log [--workout ID] [--exercise ID] [METRICS...]
+caudex set skip [--workout ID] [--set ID]
+caudex set reopen [--workout ID] --set ID
+caudex workout finish [--workout ID]
+caudex workout cancel [--workout ID] [--yes]
+```
+
+### 8.3 Catalog and history
+
+```text
+caudex athlete create|list|show
+caudex equipment add|list|edit|archive|restore
+caudex exercise add|list|show|edit|archive|restore
+caudex history list|show|exercise|correct-set
+```
+
+Athlete and equipment commands ship only if accepted public models require
+them. Otherwise the CLI uses a documented host-scope ID and equipment IDs
+embedded in public exercises.
+
+### 8.4 Mature integration
+
+```text
+caudex completion bash|zsh|fish
+caudex config path|show|set
+caudex database info|check|backup|restore
+caudex batch
+caudex doctor
+caudex tui
+```
+
+Import/export commands are added only for stable public engine formats. Backup
+is not described as export.
+
+### 8.5 Shorthand
+
+Frequent commands may gain aliases after usability tests. Examples such as
+`caudex set log 70kg 8r @2rir` are accepted only when every token maps
+unambiguously to exact public metric code, amount, and unit. Long explicit
+options remain available.
+
+## 9. Active-workout selection
+
+Client selection is a pure, unit-tested policy over public query results:
+
+```text
+explicit --workout ID ──► use or not-found
+no explicit ID
+    ├── zero active ─────► not-found
+    ├── one active ──────► use it
+    └── multiple ────────► ambiguity with candidate IDs
+```
+
+The selected athlete or scope is explicit or comes from inspectable
+configuration. The client stores no domain current-workout pointer.
+
+## 10. Streams, JSON, and exit contracts
+
+### 10.1 Standard streams
+
+- Requested successful output: stdout
+- Diagnostics, warnings, and errors: stderr
+- No unsolicited ANSI when stdout/stderr is not an appropriate terminal
+- No partial success JSON followed by plain-text errors
+- Clean `EPIPE` handling
+- Structured stdin accepted only by documented commands
+
+### 10.2 Formats
+
+`--format human` is the default for terminals. `--format json` emits one
+versioned JSON document per ordinary invocation. Batch mode may use documented
+newline-delimited JSON.
+
+Example envelope:
 
 ```json
 {
-  "engineVersion": "0.1.0",
   "schemaVersion": 1,
-  "methodology": {
-    "id": "caudex.double-progression",
-    "version": "0.1.0",
-    "configVersion": 1
-  },
-  "inputFingerprint": "...",
-  "resultFingerprint": "..."
+  "kind": "caudex.workout.show",
+  "data": {
+    "id": "workout-01...",
+    "status": "in_progress"
+  }
 }
 ```
 
-## 17. Quality strategy
-
-### 17.1 Domain tests
-
-- Exact decimal arithmetic
-- Unit conversion
-- Validation paths
-- History summaries
-- Candidate filtering
-- Stable ordering
-- Explanation construction
-
-### 17.2 Methodology tests
-
-Every methodology has:
-
-- Configuration validation
-- Initial-state behavior
-- Success progression
-- Failure/hold behavior
-- Missing-history behavior
-- Time/equipment constraints
-- Determinism
-- Explanation codes
-- State migration fixtures
-
-### 17.3 Golden fixtures
-
-Fixtures include:
-
-- Minimal first workout
-- Double-progression success
-- Double-progression hold
-- RPE top set and backoffs
-- Missing equipment
-- Disliked exercise
-- Insufficient history
-- Short minimum-viable session
-- Conflicting constraints
-- Stable tie breaking
-- Unit conversion
-
-### 17.4 Cross-language conformance
-
-The same fixtures run through:
-
-- Direct Zig API
-- C ABI
-- npm/WASM
-- Swift wrapper when released
-- Kotlin wrapper when released
-
-The canonical result must match after normalization.
-
-### 17.5 Fuzz and property tests
-
-- Malformed canonical messages
-- Exact-decimal parsing
-- Unit conversion overflow
-- Random catalog/reference graphs
-- Constraint combinations
-- Candidate ordering
-- Repeated recommendation determinism
-- ABI input buffers
-
-### 17.6 Package smoke tests
-
-Test the packed/published artifact, not workspace imports.
-
-npm CI:
-
-1. Build package
-2. Run `npm pack`
-3. Install tarball in clean Node example
-4. Install tarball in clean browser example
-5. Compile TypeScript
-6. Run canonical fixture
-7. Verify only allowed files are included
-
-Native CI follows the equivalent artifact-first rule.
-
-## 18. Security and trust
-
-- No npm install scripts
-- No network calls by the core
-- No dynamic native plugin loading in v0.x
-- Request size and nesting limits
-- Bounded explanation and alternative counts
-- Checked arithmetic
-- No panic across C/WASM boundaries
-- Fuzzed parsers
-- Release checksums
-- npm provenance
-- Dependency review and license inventory
-- Reproducible release process where practical
-
-Caudex recommendations are programming suggestions, not medical advice. The API and documentation must not represent injury restrictions or readiness inputs as clinical assessments.
-
-## 19. MVP scope
-
-### v0.1 must include
-
-- Stateless Zig core
-- Exact measurements and units
-- Exercise, equipment, muscle/movement references
-- History representation and common summaries
-- Session context and constraints
-- Methodology registry
-- Double-progression methodology
-- RPE top-set/backoff methodology
-- Session recommendation
-- Performance evaluation
-- Proposed next methodology state
-- Structured explanations
-- Validation and stable issues
-- Canonical schema
-- Typed Zig API
-- C ABI
-- npm/WASM package
-- Node and browser examples
-- Zig and C examples
-- Cross-language conformance fixtures
-- Package publishing pipeline
-- Developer documentation
-
-### v0.1 excludes
-
-- Persistence inside the core
-- Required repository interfaces
-- SQLite, PostgreSQL, IndexedDB, or other database drivers in the core
-- Optional persistence adapter implementations in the core v0.1 release
-- Event sourcing
-- User accounts
-- Sync
-- CLI as a product
-- Hosted API
-- Mobile UI
-- React Native wrapper
-- SwiftPM and Maven production releases unless the ABI is ready early
-- Arbitrary runtime plugins
-- Portable methodology bytecode/DSL
-- Full periodization
-- Long-term calendar generation
-- Cardio programming
-- Mobility programming
-- HealthKit/Health Connect
-- Comprehensive exercise catalog
-- AI/LLM-generated recommendations
-- Medical or rehabilitation logic
-
-## 20. Milestones and Codex-ready issues
-
-Sizes:
-
-- **S:** one focused commit
-- **M:** one to two focused commits
-- **L:** independently testable vertical slice, potentially several commits
-
-### Epic 0 — Product and API contract
-
-#### CWE-001: Add ADR-0002 and rewrite project positioning — S
-
-Acceptance:
-
-- README uses the library-first product statement.
-- Tracking-app language is removed from the primary positioning.
-- ADR-0001 remains linked for functional architecture.
-- ADR-0002 clearly supersedes SQLite-first and tracking-first decisions.
-- Core non-goals are documented.
-
-#### CWE-002: Define the canonical v0 request and result model — L
-
-Deliver:
-
-- `RecommendationRequest`
-- `EvaluationRequest`
-- `RecommendationResult`
-- `EvaluationResult`
-- Validation issue
-- Explanation
-- Result metadata
-- Methodology reference/state envelope
-
-Acceptance:
-
-- Models are represented in Zig and JSON Schema.
-- Example TypeScript types are reviewed before implementation proceeds.
-- Exact decimal strings are used at the JSON boundary.
-- Optional versus required fields are justified.
-- No database or app-specific fields appear.
-- Two realistic request fixtures validate.
-
-#### CWE-003: Write the npm-first quickstart before implementation — S
-
-Acceptance:
-
-- Quickstart is under roughly thirty lines excluding sample catalog data.
-- API names are understandable without reading architecture docs.
-- Initialization and result handling are explicit.
-- The example includes methodology selection and explanations.
-- The code is saved as a future executable documentation test.
-
-#### CWE-004: Define stable issue and explanation conventions — M
-
-Acceptance:
-
-- Code namespaces are documented.
-- Path format is documented.
-- Severity levels are documented.
-- Human message compatibility is distinguished from code compatibility.
-- At least twenty representative codes are cataloged.
-- Localization behavior is considered.
-
-### Epic 1 — Core walking skeleton
-
-#### CWE-010: Scaffold Zig 0.16 library and architecture tests — S
-
-Acceptance:
-
-- Core builds and tests with Zig 0.16.0.
-- Domain-only tests require no libc, filesystem, or network.
-- Public exports are intentional.
-- No generalized FP dependency is present.
-- Build can target native and `wasm32-freestanding`.
-
-#### CWE-011: Implement IDs, exact decimals, units, and timestamps — M
-
-Acceptance:
-
-- Parsing and formatting round-trip.
-- Unit dimensions are validated.
-- Checked arithmetic covers overflow.
-- Timestamps are explicit inputs.
-- No floating-point authoritative path exists.
-- WASM-safe layouts are considered without exposing layouts publicly.
-
-#### CWE-012: Implement canonical issue and explanation writers — M
-
-Acceptance:
-
-- Callers provide buffers/allocators.
-- Multiple validation issues can be collected.
-- Explanations reference subjects and evidence.
-- Limits prevent unbounded output.
-- Stable canonical serialization fixtures exist.
-
-#### CWE-013: Implement minimal exercise catalog and history models — M
+Example error:
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "caudex.error",
+  "error": {
+    "code": "client.reference.ambiguous",
+    "category": "ambiguity",
+    "message": "More than one workout is active.",
+    "details": {
+      "workoutIds": ["workout-a", "workout-b"]
+    }
+  }
+}
+```
+
+Exact measurements remain strings plus units. JSON key order may be
+deterministic for golden tests but consumers must not rely on it.
+
+### 10.3 Exit codes
+
+| Code | Contract |
+| ---: | --- |
+| 0 | Success |
+| 2 | Invocation/input syntax |
+| 3 | Validation/domain rejection |
+| 4 | Not found |
+| 5 | Ambiguous selection |
+| 6 | Revision/idempotency conflict |
+| 7 | Busy/temporarily unavailable |
+| 8 | Migration/corruption/incompatibility |
+| 70 | Internal/runtime failure |
+| 130 | SIGINT-style interruption where applicable |
+
+Exit mapping is centralized and golden-tested. Public issue codes are preserved
+in JSON rather than inferred from human strings.
+
+## 11. Configuration and database-path policy
+
+Database precedence:
+
+1. `--database`
+2. `CAUDEX_DATABASE`
+3. client configuration
+4. platform data directory
+
+Defaults:
+
+- Unix-like/XDG: `$XDG_DATA_HOME/caudex/caudex.sqlite`, otherwise the
+  documented user data fallback
+- macOS: user Application Support under `Caudex`
+- Windows: user-local application data under `Caudex`
+
+Implementation uses platform APIs and safe path joining, never shell command
+construction. Relative explicit paths are allowed but shown clearly by
+diagnostic commands.
+
+Configuration contains only client preferences:
+
+- Default host scope/athlete selector
+- Display units
+- Human table and color preferences
+- Future theme/keybinding preferences
+
+It never stores workouts, sets, history, exercise aliases already owned by the
+engine, or hidden domain selection state. Writes use a temporary sibling,
+flush where appropriate, and atomic replacement. Permissions are restrictive
+where controllable.
+
+## 12. Testing strategy
+
+### 12.1 Unit tests
+
+- Tokenization and command parsing
+- Help routing and option precedence
+- Exact unit/metric shorthand
+- Human tables and terminal escaping
+- JSON encoding and error envelopes
+- Platform database-path resolution
+- Active-workout selection
+- Exit mapping
+- Config parsing and atomic-write planning
+- TUI event/update functions
+- TUI render models and width behavior
+
+### 12.2 Integration tests
+
+Compile and run `caudex` as a subprocess against temporary SQLite files:
+
+- Assert stdout, stderr, and exit status separately.
+- Execute related operations in separate processes.
+- Verify persisted results through public APIs.
+- Cover validation, ambiguity, conflicts, busy databases, newer schema, and
+  failed/interrupted operations.
+- Run with piped stdout, closed stdout, empty environment overrides, and
+  non-terminal descriptors.
+- Never inspect or mutate tables directly.
+
+### 12.3 Architecture tests
+
+- Record allowed app imports by package name.
+- Do not provide private modules to the app build.
+- Scan app imports for relative traversal and forbidden internal names.
+- Build from a package view containing only declared public paths.
+- Deliberately review additions to `src/root.zig` and all adapter roots.
+
+### 12.4 Golden tests
+
+Use selective, reviewed fixtures for:
+
+- Root and command help
+- JSON output and stable JSON errors
+- Exit-code examples
+- Completion scripts
+- Important TUI render states
+
+Avoid freezing every human sentence, spacing choice, or adaptive table.
+
+### 12.5 Required end-to-end scenarios
+
+1. Create/open a local database.
+2. Create required public catalog records.
+3. Start a workout.
+4. Add exercises.
+5. Log several sets.
+6. Complete a short workout without treating shortness as failure.
+7. Query it from a new process.
+8. Display last exercise performance.
+9. Correct a historical mistake.
+10. Retry an idempotent command without duplication.
+11. Create two active workouts and verify the client refuses to guess.
+12. Run the same live-workout flow through the TUI.
+
+## 13. Release and packaging
+
+- Root builds produce the `caudex` executable for supported targets.
+- A release issue defines the initial target matrix after SQLite and terminal
+  support are verified.
+- Artifacts include license, notices, checksums, build metadata, and install
+  instructions.
+- Homebrew, system packages, or other channels are evaluated only after direct
+  archives are reproducible.
+- Client and library releases may share repository tags during 0.x but publish
+  independent version fields.
+- Database migrations remain adapter-owned, immutable after release, and tested
+  from every supported predecessor.
+- Release smoke tests run from unpacked artifacts with a temporary user data
+  directory.
+
+## 14. Documentation strategy
+
+Documentation grows with shipped capability:
+
+- `apps/caudex-cli/README.md`: install, first workout, database path, and scope
+- Command reference and exit codes
+- Shell aliases, pipes, JSON, cron, and batch examples
+- Database metadata, backup, restore, and compatibility guidance
+- TUI keybindings and terminal recovery
+- Architecture guide for third-party Zig hosts
+- Explicit public-package dependency example
+- Guide to building another client by reusing engine/adapter packages rather
+  than copying CLI presentation
+- Troubleshooting and bug-report diagnostics
+
+Generated command docs and man pages come from the same command metadata only
+after the command tree is stable enough to justify generation.
+
+## 15. Compatibility policy
+
+| Boundary | 0.x policy |
+| --- | --- |
+| Client semantic version | SemVer with explicit breaking-change notes |
+| Engine Zig API | Engine release/version policy |
+| Tracking contract | Independently versioned public contract |
+| SQLite adapter API | Independently documented source compatibility |
+| Database schema | Forward migration; reject unsupported newer versions |
+| CLI grammar | Long forms stable within documented support window |
+| JSON output | Versioned; breaking changes require schema/version change |
+| Exit codes | Stable classes with compatibility tests |
+| Human output | May improve without compatibility promise |
+| TUI keys/layout | Documented but allowed to evolve during early 0.x |
+
+`version` and `doctor` report dimensions separately.
+
+## 16. Performance and startup
+
+Establish baselines, not speculative optimization:
+
+- Process startup to first output
+- Database open plus no-op migration check
+- `database info`
+- Workout show and set log
+- Exercise search
+- Last-performance query
+- Paginated history list
+- TUI initial render and input-to-render latency
+- Representative large local history
+
+Initial budgets are measured in CWE-154 before release. Common repeated workout
+commands should feel immediate on supported local hardware. Queries should use
+adapter-owned indexes and bounds; the client must not load the entire database
+or replay all history when a public indexed query exists.
+
+Profiling precedes caching. Client caches cannot become workout-domain truth.
+
+## 17. Security and data integrity
+
+- Treat database, config, import, export, and backup paths as untrusted input.
+- Never form shell commands or SQL from user values.
+- Use prepared/bound SQL only inside the adapter.
+- Apply restrictive file permissions when creating local data where supported.
+- Document symlink behavior; never silently overwrite backup/export targets.
+- Atomically replace client configuration.
+- Escape terminal control sequences in names and notes.
+- Bound arguments, stdin, notes, JSON, query limits, and render allocations.
+- Treat closed stdout as normal and stop unnecessary work.
+- Restore the terminal after error, panic, signal, and ordinary exit.
+- Avoid secrets and full unnecessary paths in diagnostic bundles.
+- Use adapter transactions for every multi-write command.
+- Verify interrupted and rejected commands leave no partial accepted state.
+- Do not offer a raw-table editing escape hatch.
+
+## 18. Accessibility and terminal compatibility
+
+- Keyboard-only operation
+- Discoverable help overlay
+- No meaning conveyed by color alone
+- `NO_COLOR` and explicit color policy
+- Sensible monochrome rendering
+- Resize recovery without data loss
+- Documented Unicode-width behavior and safe fallback
+- Narrow-terminal behavior that preserves critical IDs and metrics
+- Screen-reader-friendly line CLI as a permanent alternative
+- Configurable units and, later, keybindings only when understandable
+- Terminal restoration tests using a fake terminal boundary
+
+## 19. Phased roadmap and Codex-ready issues
+
+Issue IDs continue the repository's `CWE` sequence after the completed v0.1
+plan. Each issue is independently testable and must obey the repository-wide
+definition of done.
+
+### Phase 0 — Public-package and adapter readiness
+
+#### CWE-102: Publish the Zig persistence contract as a named package — S
+
+**Class:** Missing public SQLite-adapter prerequisite.
+
+**Work:**
+
+- Decide the public Zig name, provisionally `caudex_persistence`.
+- Register only the database-independent root in the build.
+- Document ownership, allocator, error, and compatibility semantics.
+- Add a clean external Zig consumer smoke test.
+
+**Acceptance criteria:**
+
+- A consumer imports the named package without repository-relative paths.
+- The package depends only on public `caudex`.
+- Test utilities remain a separate test-only package.
+- Existing contract tests pass unchanged or with reviewed naming updates.
+
+#### CWE-103: Define the minimum public tracking command/query contract — L
+
+**Class:** Missing public engine capability.
+
+**Work:**
+
+- Review ADR-0002/0003 and prevent restoration of the superseded
+  persistence-owned core.
+- Define the minimum types for a host-owned local tracker: scope, active workout,
+  exercise membership, set logging, completion, stable IDs, command IDs,
+  timestamps, revisions, issues, and queries.
+- Decide whether this is a new `caudex_tracking` package or narrow extensions
+  to another intentionally public application contract.
+- Specify idempotency, short-workout completion, ambiguity, and correction
+  prerequisites.
+- Do not implement storage or CLI behavior.
 
-Acceptance:
+**Acceptance criteria:**
 
-- Cross references validate.
-- Equipment and taxonomy identifiers are host-defined.
-- Completed workouts represent targets and actuals.
-- Catalog names are optional for machine-only hosts.
-- Models do not assume one methodology.
-
-#### CWE-014: Implement a minimal methodology registry — M
-
-Acceptance:
-
-- Stable methodology ID/version lookup.
-- Configuration validation callback.
-- Session recommendation callback.
-- Performance evaluation callback.
-- Duplicate IDs fail at build/test time where possible.
-- Runtime selection is deterministic.
-
-#### CWE-015: Produce one end-to-end deterministic recommendation — L
-
-Scenario:
-
-- One exercise
-- No history
-- Double-progression methodology
-- Available equipment
-- One recommended working set
-- Structured explanation
-
-Acceptance:
+- An architecture review approves dependency direction and naming.
+- Typed fixtures express start-workout and read-workout across host calls.
+- No database, terminal, clock, random, or global dependency enters the core.
+- Unsupported Phase 4 features are clearly marked rather than implied.
 
-- Direct Zig request returns canonical result.
-- Same request repeats identically.
-- Input and result fingerprints exist.
-- No persistence or implicit global state.
-- Result serializes to a golden fixture.
+#### CWE-104: Implement the minimal deterministic workout lifecycle — L
 
-### Epic 2 — Shared training logic
+**Class:** Missing public engine capability.
 
-#### CWE-020: Implement history-summary helpers — M
-
-Include:
-
-- Last completed exercise performance
-- Recent performances
-- Compatible-unit volume
-- Best completed load by rep range
-- Estimated 1RM helper with named formula
-- Recency relative to explicit `as_of`
+**Work:**
 
-Acceptance:
+- Implement only create/start and queryable lifecycle state required for the
+  first persisted vertical slice.
+- Use caller-supplied IDs and timestamps.
+- Define structured rejection and conflict results.
+- Add deterministic unit and architecture tests.
 
-- Each helper is deterministic and independently tested.
-- Formula identity is included where relevant.
-- Unit and overflow issues are explicit.
-- Methodologies are not forced to use these helpers.
-
-#### CWE-021: Implement hard constraint filtering — M
-
-Constraints:
-
-- Equipment
-- Excluded exercises
-- Required exercises
-- Time budget
-- Host restrictions
-- Methodology-required tags
+**Acceptance criteria:**
 
-Acceptance:
+- Start is deterministic and effect-free.
+- Retry semantics are representable by the public contract.
+- No persistence or allocation is hidden in decisions.
+- Tests cover valid start, duplicate/retry, invalid data, and two active
+  workouts where the contract allows them.
 
-- Every exclusion can produce a structured explanation.
-- Constraint conflicts produce actionable issues.
-- Filtering order does not change the final set.
-- Missing metadata behavior is configurable or explicit.
+#### CWE-105: Publish the Zig SQLite adapter package and metadata lifecycle — L
 
-#### CWE-022: Implement stable candidate ordering and alternatives — M
+**Class:** Missing public SQLite-adapter capability.
 
-Acceptance:
+**Work:**
 
-- Stable ID tie breaking.
-- Optional explicit seed policy.
-- Input order does not accidentally determine output.
-- Alternatives include reasons and score/priority details when applicable.
-- Alternative count is bounded.
+- Register `caudex_sqlite` as a distributable named package.
+- Package required private migrations without exposing them.
+- Provide open/create, supported options, migration, metadata, in-memory/file,
+  and close lifecycle.
+- Improve error categories for busy, corruption, migration, and compatibility.
+- Preserve prepared statements and private schema.
 
-#### CWE-023: Implement duration estimation primitives — S
+**Acceptance criteria:**
 
-Acceptance:
+- A clean external consumer opens `:memory:`, reads metadata, and closes.
+- A file database persists across adapter instances.
+- Newer schemas are rejected distinctly.
+- Busy and corruption behavior are tested.
+- No raw writable handle, SQL, table name, or migration body is public.
 
-- Uses explicit set duration, rest, transition, and setup assumptions.
-- Assumptions are returned in explanations.
-- Methodologies can override estimates.
-- Time budget never silently removes required work.
+#### CWE-106: Persist the minimal workout lifecycle through the public adapter — L
 
-### Epic 3 — Double progression methodology
+**Class:** Missing SQLite-adapter capability.
 
-#### CWE-030: Define double-progression config and state schemas — M
+**Work:**
 
-Acceptance:
+- Implement atomic start, idempotent receipt, and workout query using the public
+  tracking contract.
+- Add forward-only migrations and indexes.
+- Expose an application/service handle without leaking SQLite types where
+  practical.
 
-- Rep range
-- Working sets
-- Advancement criteria
-- Load increment
-- Hold/regress behavior
-- Rounding
-- Exercise overrides
-- Config validation and documentation
+**Acceptance criteria:**
 
-#### CWE-031: Implement load/rep recommendation — L
+- A workout started through one adapter instance is queried through another.
+- Retrying a command ID returns the original result without duplication.
+- Failure rolls back state and receipt together.
+- Tests use public APIs, not direct SQL assertions.
 
-Acceptance:
+### Phase 1 — Line-CLI walking skeleton
 
-- Initial prescription behavior is explicit.
-- Prior successful sets advance according to config.
-- Partial success follows documented policy.
-- Missing history generates assumptions/warnings.
-- Every decision has explanation codes.
-- Exact units and rounding are tested.
+#### CWE-110: Scaffold `caudex-cli` and enforce public imports — M
 
-#### CWE-032: Implement performance evaluation and next state — L
+**Class:** Client.
 
-Acceptance:
+**Work:**
 
-- Completed performance is evaluated without persistence.
-- Proposed next methodology state is versioned.
-- Host can reject the proposal without side effects.
-- Re-evaluation is deterministic.
-- State fixtures round-trip.
+- Create only `README.md` and `src/main.zig`.
+- Wire root build, run, install, and focused test steps.
+- Supply only `caudex`, `caudex_persistence`, and `caudex_sqlite`.
+- Add architecture checks for forbidden imports.
 
-#### CWE-033: Add double-progression conformance suite — M
+**Acceptance criteria:**
 
-Fixtures:
+- `caudex --help` and `caudex version` run.
+- Focused app tests do not require npm.
+- A deliberately private import fails at the build boundary.
+- Root builds remain simple.
 
-- First exposure
-- Bottom of rep range
-- Top of rep range
-- Advance load
-- Hold load
-- Regress
-- Missed set
-- Changed unit
-- Short session
-- Exercise override
+#### CWE-111: Resolve database paths and open/query/close metadata — M
 
-### Epic 4 — RPE top-set/backoff methodology
+**Class:** Client.
 
-#### CWE-040: Define RPE methodology config and state — M
+**Work:**
 
-Acceptance:
+- Implement explicit path, environment override, and platform default
+  resolution.
+- Open the public adapter, query version/schema metadata, render human output,
+  and close cleanly.
+- Add `caudex database info`.
 
-- Top-set reps and target RPE
-- Backoff calculation
-- Set count
-- Load rounding
-- Overshoot/undershoot policy
-- Estimation formula identity
-- Config validation
+**Acceptance criteria:**
 
-#### CWE-041: Implement top-set recommendation — L
+- This complete path works:
 
-Acceptance:
+  ```text
+  args → path → public adapter → metadata query → stdout → close
+  ```
 
-- Uses available history evidence.
-- Insufficient history is explicit.
-- Recommended load includes explanation.
-- Rounding is deterministic.
-- RPE/RIR compatibility rules are documented.
+- Tests cover precedence, missing directories, `:memory:`, human/JSON output,
+  stderr, and exit status.
+- No client SQL or private import exists.
 
-#### CWE-042: Implement backoff prescription and evaluation — L
+#### CWE-112: Add centralized errors, streams, formats, and exit mapping — M
 
-Acceptance:
+**Class:** Client.
 
-- Backoffs derive from documented inputs.
-- Performance evaluation proposes next state.
-- Explanation trace distinguishes estimate from policy.
-- Methodology does not reuse double-progression assumptions accidentally.
+**Work:**
 
-#### CWE-043: Review methodology abstraction against both implementations — M
+- Introduce minimal earned modules for output and errors.
+- Implement human and versioned JSON envelopes.
+- Centralize stable exit classes, color policy, and broken-pipe behavior.
 
-Do not add a DSL.
+**Acceptance criteria:**
 
-Acceptance:
+- stdout/stderr never mix contracts.
+- Piped output has no ANSI.
+- Golden tests cover JSON errors and representative help.
+- `EPIPE` exits quietly with no database damage.
 
-- Identify genuinely shared helpers.
-- Remove abstractions used by only one methodology unless clearly justified.
-- Document extension pain points.
-- Decide whether v0.1 custom Zig methodology interface is sufficient.
-- Record portable-bundle questions for later.
+#### CWE-113: Prove `workout start` across processes — L
 
-### Epic 5 — Canonical protocol and C ABI
+**Class:** Client vertical slice.
 
-#### CWE-050: Implement canonical JSON encoding/decoding — L
+**Work:**
 
-Acceptance:
+- Parse `caudex workout start`.
+- Supply or safely generate explicit command/workout IDs and timestamps at the
+  client boundary.
+- Execute through public tracking and SQLite packages.
+- Query the workout from a second process.
 
-- Request/result schemas round-trip.
-- Invalid UTF-8 and malformed JSON fail safely.
-- Size, nesting, and collection limits.
-- Decimal strings validate.
-- Unknown-field/version rules are tested.
-- Canonical fixtures are deterministic.
+**Acceptance criteria:**
 
-#### CWE-051: Implement C runtime and buffer ownership — M
+- A subprocess starts a workout and emits its ID.
+- A fresh subprocess shows the persisted workout.
+- JSON includes stable IDs and exact timestamps.
+- Retrying the same explicit command ID does not duplicate state.
 
-Acceptance:
+### Phase 2 — Essential workout-tracking commands
 
-- Opaque runtime handle.
-- ABI version.
-- Create/destroy.
-- Execute canonical request.
-- Owned result buffer.
-- Explicit free.
-- No panic/error union crosses boundary.
-- C11 and C++ header compile tests.
+#### CWE-120: Add public workout-exercise ordering operations — L
 
-#### CWE-052: Add C conformance example — M
+**Class:** Missing public engine and adapter capability.
 
-Acceptance:
+**Acceptance criteria:**
 
-- Loads methodology.
-- Runs recommendation.
-- Parses or prints result.
-- Repeats request and compares fingerprint.
-- Frees all resources.
-- Runs under available leak diagnostics.
+- Public commands add, remove, and reorder by semantic anchors, never numeric
+  storage positions.
+- Deterministic rules and SQLite transactions have separate tests.
+- Archived/missing exercises produce structured issues.
+- No CLI syntax is added in this issue.
 
-### Epic 6 — npm and WebAssembly
+#### CWE-121: Add public set lifecycle and exact metrics — L
 
-#### CWE-060: Compile the canonical core to WebAssembly — L
+**Class:** Missing public engine and adapter capability.
 
-Acceptance:
+**Acceptance criteria:**
 
-- `wasm32-freestanding` release artifact.
-- Same fixtures as direct Zig.
-- No filesystem or WASI dependency.
-- Boundary traps are contained and converted where possible.
-- Size baseline recorded.
-- Memory ownership tested.
+- Add/log, complete, skip, reopen, remove, and reorder behavior is explicit.
+- Repetitions, load, RIR, RPE, duration, targets, and actuals use exact public
+  measurements.
+- Invalid transitions reject without mutation.
+- Idempotency, revision conflicts, and rollback are tested.
 
-#### CWE-061: Implement TypeScript loader and facade — L
+#### CWE-122: Implement client reference and active-workout resolution — M
 
-Acceptance:
+**Class:** Client.
 
-- `createCaudex()`.
-- Ordinary JS object requests/results.
-- Strong TypeScript declarations.
-- Typed initialization errors.
-- Validation issues returned as values.
-- Node and browser loaders hidden behind one API.
-- No raw pointer exposure.
+**Acceptance criteria:**
 
-#### CWE-062: Implement methodology factories — M
+- Explicit IDs, exact aliases/names, and documented search resolve in order.
+- Multiple candidates return exit 5 and candidate IDs.
+- Zero/one/many active-workout selection follows ADR-0004.
+- No hidden current-workout preference is stored.
 
-Exports:
+#### CWE-123: Implement add-exercise and workout display commands — M
 
-- `methodologies.doubleProgression`
-- `methodologies.rpeTopSetBackoff`
+**Class:** Client.
 
-Acceptance:
+**Acceptance criteria:**
 
-- Config autocomplete.
-- Runtime config validation parity.
-- Factories create canonical methodology references.
-- No duplicate TypeScript-only recommendation logic.
+- Separate subprocess tests add and show exercises.
+- Human tables remain readable in narrow output.
+- JSON includes workout, exercise, ordering, and revision IDs.
+- Client uses shared typed use cases rather than command-specific SQL.
 
-#### CWE-063: Build the npm package artifact — M
+#### CWE-124: Implement concise set logging, skipping, and reopening — L
 
-Acceptance:
+**Class:** Client.
 
-- Scoped package metadata.
-- Controlled `exports`.
-- `files` allowlist.
-- WASM included.
-- Types included.
-- No install scripts.
-- License/notices.
-- `npm pack` inspection.
-- Scope/name availability verified before publication.
+**Acceptance criteria:**
 
-#### CWE-064: Add clean-project npm smoke tests — L
+- Long explicit metric options and unambiguous shorthand are supported.
+- Unit/shorthand parser tests cover invalid and conflicting input.
+- Helpful validation errors preserve engine issue codes.
+- Quiet and JSON modes work in subprocess tests.
 
-Test:
+#### CWE-125: Implement finish and cancel workflows — M
 
-- Supported Node runtime
-- Browser fixture
-- TypeScript compile
-- ESM
-- CommonJS only if advertised
-- Documented bundlers
-- Canonical fixture
-- Error fixture
-- Package contents
+**Class:** Engine/adapter gap plus client.
 
-#### CWE-065: Automate npm release with provenance — M
+**Acceptance criteria:**
 
-Acceptance:
+- A short or partial workout can finish successfully when domain rules allow it.
+- Cancellation is distinct from completion.
+- Genuinely destructive behavior confirms only on a TTY and supports `--yes`.
+- Interrupted/rejected operations leave the database consistent.
 
-- Tag-triggered workflow.
-- Tests before publish.
-- Artifact version consistency.
-- Provenance.
-- Dry-run path.
-- Changelog and release notes.
-- Failure cannot partially publish mismatched official artifacts.
+### Phase 3 — Catalog and history commands
 
-### Epic 7 — Developer experience
+#### CWE-130: Review and define public catalog-management scope — M
 
-#### CWE-070: Publish quickstart and concepts guide — M
+**Class:** Missing public engine capability review.
 
-Acceptance:
+**Acceptance criteria:**
 
-- Install-to-result flow is first.
-- Explanation inspection included.
-- Data ownership is clear.
-- No persistence setup.
-- Runnable documentation test.
+- Athlete, equipment, exercise, alias, archive, restore, annotation, and
+  external-ID needs are each classified.
+- Only engine-relevant reusable invariants enter public contracts.
+- Existing exercise snapshot compatibility is addressed.
+- Out-of-scope capabilities remain explicitly deferred.
 
-#### CWE-071: Publish methodology guides — M
+#### CWE-131: Implement approved catalog commands and SQLite queries — L
 
-Acceptance:
+**Class:** Engine and adapter.
 
-- When to use each methodology.
-- Configuration reference.
-- State behavior.
-- Explanation codes.
-- Limitations.
-- No claim of universal superiority.
+**Acceptance criteria:**
 
-#### CWE-072: Publish data mapping guide — M
+- Approved create/edit/archive/restore operations use stable IDs, revisions,
+  idempotency, and prepared SQL.
+- Search is indexed and bounded.
+- Tombstone behavior is tested only where the approved model supports it.
+- No CLI behavior is implemented.
 
-Examples:
+#### CWE-132: Implement catalog CLI commands — L
 
-- Existing app workout record to Caudex history
-- Exercise catalog mapping
-- Host IDs
-- Optional/missing fields
-- Persisting methodology state
-- Accepting/rejecting recommendations
+**Class:** Client.
 
-#### CWE-073: Implement testing utilities — M
+**Acceptance criteria:**
 
-Acceptance:
+- Only approved athlete/equipment/exercise nouns are exposed.
+- Exact ID operation and friendly ambiguity reporting coexist.
+- Example data is created through public commands.
+- Human tables, JSON, and subprocess tests cover CRUD lifecycle.
 
-- Framework-neutral builders/assertions.
-- Determinism assertion.
-- Explanation-code assertion.
-- Canonical fixture loader.
-- Public testing subpath.
-- No dependency on Jest/Vitest core.
+#### CWE-133: Add public history, last-performance, and correction queries — L
 
-#### CWE-074: Create Node and browser examples — M
+**Class:** Missing engine/adapter capability.
 
-Acceptance:
+**Acceptance criteria:**
 
-- Consume packed npm artifact.
-- Use only public API.
-- Show recommendation and evaluation.
-- Browser example runs locally without backend.
-- Examples are CI tested.
+- Date-bounded paginated history and exercise history use public types.
+- Last performance avoids loading all history.
+- Correction is an explicit audited command, not a raw update.
+- Revisions, tombstones where supported, and methodology-state implications are
+  documented.
 
-#### CWE-075: Create browser playground — L
+#### CWE-134: Implement history and correction CLI commands — L
 
-Acceptance:
+**Class:** Client.
 
-- Public package only.
-- Editable request.
-- Methodology selector.
-- Explanation viewer.
-- Copy/download fixture.
-- No user account or server required.
+**Acceptance criteria:**
 
-### Epic 8 — Zig and release artifacts
+- History list/show/exercise and correction use public APIs.
+- A completed workout is queried from a fresh process.
+- Last performance is concise and scriptable.
+- Mistake correction is confirmed when destructive and is regression-tested.
 
-#### CWE-080: Package direct Zig consumption — M
+### Phase 4 — Shell ergonomics and machine integration
 
-Acceptance:
+#### CWE-140: Mature help, aliases, tables, and config — M
 
-- Tagged source package.
-- Example `build.zig.zon` consumer.
-- Public module docs.
-- Custom methodology example.
-- Supported Zig version policy.
-- Clean consumer CI.
+**Class:** Client.
 
-#### CWE-081: Produce native C release matrix — L
+**Acceptance criteria:**
 
-Acceptance:
+- Help exists at every meaningful level.
+- Frequent aliases are documented and collision-tested.
+- Non-domain preferences are inspectable and atomically persisted.
+- User-controlled terminal text is safely escaped.
 
-- Documented targets.
-- Static/shared libraries as appropriate.
-- Header.
-- Checksums.
-- Build metadata.
-- Example link tests.
-- Artifact-size report.
+#### CWE-141: Stabilize JSON schemas and batch input — L
 
-#### CWE-082: Release v0.1.0 — L
+**Class:** Client/protocol.
 
-Release gates:
+**Acceptance criteria:**
 
-- Two methodologies
-- npm package
-- Zig package
-- C artifacts
-- Cross-language conformance
-- Quickstarts
-- Migration/version policy
-- Security review
-- License review
-- No known high-severity defects
+- Every scriptable command has a versioned JSON document.
+- Batch input is bounded, documented, and reports per-operation outcomes.
+- Golden and compatibility fixtures cover schemas and exact decimals.
+- Batch retries preserve public idempotency.
 
-### Epic 9 — Optional persistence adapters
+#### CWE-142: Generate shell completion and command documentation — M
 
-This epic follows the stable core and npm release. It may release as v0.2 packages and must not delay core v0.1.
+**Class:** Client.
 
-#### CWE-090: Define persistence capability contracts — M
+**Acceptance criteria:**
 
-Acceptance:
+- Bash, zsh, and fish completion is generated from reviewed command metadata.
+- Completion never queries or mutates a database unexpectedly.
+- Golden tests cover scripts.
+- Man page or command reference generation has one source of truth.
 
-- `CatalogSource`, `HistorySource`, and `MethodologyStateStore` are narrow and independently implementable.
-- Optional journaling and completed-workout capabilities remain separate.
-- Direct snapshot mode remains fully supported.
-- No persistence interface is imported by the core.
-- Errors distinguish adapter failures from core issues.
-- A custom-repository implementation guide exists.
+#### CWE-143: Add shell-script smoke scenarios — M
 
-#### CWE-091: Implement adapter contract test kit — M
+**Class:** Client integration.
 
-Acceptance:
+**Acceptance criteria:**
 
-- Tests cover loading, ordering, missing records, state round trips, and optimistic conflicts.
-- Transaction rollback is tested only for adapters that advertise it.
-- Canonical-equivalence fixtures compare adapter mode with direct snapshot mode.
-- Test doubles are database independent.
+- Pipes, command substitution, aliases, and non-interactive scheduling patterns
+  are tested.
+- stdout, stderr, quiet mode, JSON, signals, and exit codes are asserted.
+- Tests use only the Zig-built binary and ordinary shell facilities.
 
-#### CWE-092: Implement IndexedDB adapter — L
+### Phase 5 — Line-CLI hardening and release
 
-Acceptance:
+#### CWE-150: Add database diagnostics and integrity checking — M
 
-- Packaged separately from the core npm package.
-- Object-store versioning and indexes are documented.
-- State compare-and-set behavior is tested.
-- Browser lifecycle and quota limitations are documented.
-- Clean browser package smoke test passes.
+**Class:** SQLite adapter plus client presentation.
 
-#### CWE-093: Implement SQLite adapter — L
+**Acceptance criteria:**
 
-Acceptance:
+- Reusable public metadata and integrity operations contain no CLI defaults.
+- Busy, corrupt, incompatible, and newer-schema results are distinct.
+- `database check` and `doctor` render actionable, sanitized output.
 
-- Packaged separately.
-- Reference schema and forward migrations are adapter private.
-- Prepared statements and explicit busy handling.
-- Transactional accepted-state update.
-- File and in-memory integration tests.
-- No SQLite linkage in the core or core npm package.
+#### CWE-151: Add safe backup and restore — L
 
-#### CWE-094: Implement PostgreSQL adapter — L
+**Class:** SQLite adapter plus client.
 
-Acceptance:
+**Acceptance criteria:**
 
-- Packaged separately.
-- Reference migrations and optimistic revisions.
-- Host-supplied pool/client integration.
-- No required ORM.
-- Transactional accepted-result example.
-- Clean server-project smoke test.
+- A reusable adapter API owns consistency mechanics.
+- Existing destinations, symlinks, permissions, and interruption are handled
+  explicitly.
+- Restore validates compatibility before switching.
+- Backup/restore tests never depend on direct table editing.
 
-#### CWE-095: Add custom repository example — M
+#### CWE-152: Document and lock CLI compatibility contracts — M
 
-Acceptance:
+**Class:** Client.
 
-- Implements capabilities over a deliberately non-reference repository.
-- Demonstrates mapping existing host records into canonical history.
-- Persists only methodology state.
-- Proves applications do not need to copy their entire database into Caudex.
+**Acceptance criteria:**
 
-### Epic 10 — Native package managers
+- Exit codes, JSON schemas, command grammar, database paths, and human-output
+  non-guarantees are documented.
+- Compatibility tests cover old supported fixtures.
+- Version output reports all independent boundaries.
 
-These follow v0.1 unless completed without delaying npm quality.
+#### CWE-153: Run the complete line-CLI end-to-end suite — L
 
-#### CWE-100: Swift facade and XCFramework — L
+**Class:** Integration.
 
-Acceptance:
+**Acceptance criteria:**
 
-- Idiomatic Swift types.
-- SwiftPM binary target.
-- Device/simulator support.
-- Conformance fixtures.
-- Sample app.
-- Published package smoke test.
+- The first eleven required scenarios pass across subprocesses.
+- Busy, interruption, closed stdout, retry, and ambiguity are covered.
+- No test reaches into private SQL or engine modules.
+- All relevant format, build, and package checks pass.
 
-#### CWE-101: Kotlin facade and Android AAR — L
+#### CWE-154: Establish performance and large-history baselines — M
 
-Acceptance:
+**Class:** Quality.
 
-- Idiomatic Kotlin types.
-- Private JNI details.
-- Supported Android ABIs.
-- Maven Central publication.
-- Conformance fixtures.
-- Sample app.
-- Artifact collision review.
+**Acceptance criteria:**
 
-## 21. Definition of done for every Codex task
+- Startup, database open, common commands, search, last performance, and history
+  listing are measured on documented hardware/data.
+- Regressions have repeatable benchmark fixtures.
+- Any optimization follows evidence and preserves public behavior.
 
-1. Builds with Zig 0.16.0.
-2. Existing tests remain green.
-3. New behavior has focused tests.
-4. Formatting passes.
-5. Public behavior is documented.
-6. Allocation and ownership are explicit.
-7. Domain and methodology calculations remain deterministic and effect-free.
-8. No generalized FP framework is introduced.
-9. No persistence, repository interface, database driver, migration code, transaction manager, or app lifecycle enters the core.
-10. Optional adapters depend on public schemas and facades; the core never depends on adapters.
-11. No hidden clock, randomness, environment, filesystem, or network access.
-12. Exact decimal and checked arithmetic rules are preserved.
-13. Validation issues and runtime failures remain distinct.
-14. Explanation codes accompany material recommendation decisions.
-15. Public API changes update schemas, types, fixtures, and docs together.
-16. Package tasks test produced artifacts rather than workspace shortcuts.
-17. No unsupported ecosystem is advertised.
-18. No unrelated refactor is included.
-19. The Codex completion report lists:
-    - Summary
-    - Files changed
-    - Public API changes
-    - Tests and exact commands
-    - Fixture changes
-    - Architectural decisions
-    - Known limitations
+#### CWE-155: Package the first line-CLI release — L
 
-## 22. Codex prompt templates
+**Class:** Release.
 
-### Focused core task
+**Acceptance criteria:**
+
+- Supported target matrix and SQLite requirements are documented.
+- Archives install and run from clean locations.
+- Checksums, license, notices, version metadata, and smoke tests are complete.
+- No TUI dependency is included.
+
+### Phase 6 — TUI foundation
+
+#### CWE-160: Evaluate terminal libraries and record the dependency decision — M
+
+**Class:** Architecture review.
+
+**Acceptance criteria:**
+
+- Candidate maintenance, platforms, licenses, Unicode, resize, signal,
+  testability, size, and pinning are compared.
+- Standard-library/direct implementation is evaluated.
+- Any dependency is pinned and isolated behind an app facade.
+- No terminal code enters public engine/adapter APIs.
+
+#### CWE-161: Implement crash-safe terminal lifecycle — L
+
+**Class:** Client.
+
+**Acceptance criteria:**
+
+- Raw mode, alternate screen, resize, signals, ordinary exit, and panic/error
+  restoration are covered.
+- A fake terminal verifies lifecycle without a live terminal.
+- `NO_COLOR` and non-color modes work.
+
+#### CWE-162: Implement explicit TUI event/update/render foundation — L
+
+**Class:** Client.
+
+**Acceptance criteria:**
+
+- Synthetic events drive deterministic update tests.
+- Rendering targets an application-owned buffer/facade.
+- Resize, narrow layout, Unicode fallback, and help overlay states have selective
+  goldens.
+- No generalized Elm/Redux/effect framework is introduced.
+
+#### CWE-163: Connect TUI actions to the shared client application layer — M
+
+**Class:** Client.
+
+**Acceptance criteria:**
+
+- TUI actions call the same typed use cases as line commands.
+- No subprocess spawning occurs for ordinary operations.
+- Errors and conflicts update presentation state without duplicating rules.
+
+### Phase 7 — Live-workout TUI
+
+#### CWE-170: Build the current-workout dashboard and exercise picker — L
+
+**Acceptance criteria:**
+
+- Dashboard handles zero, one, and multiple active workouts safely.
+- Exercise search and ambiguity use public queries.
+- Last performance is visible.
+- Keyboard-only navigation and help are tested.
+
+#### CWE-171: Add exercise ordering and set logging screens — L
+
+**Acceptance criteria:**
+
+- Add/reorder exercises and log/edit/skip/reopen sets through shared use cases.
+- Target-versus-actual exact metrics render clearly.
+- Conflicts refresh or explain; they never guess or overwrite.
+
+#### CWE-172: Add notes, completion, cancellation, and recovery — L
+
+**Acceptance criteria:**
+
+- Supported notes use public commands.
+- Short completion and cancellation are distinct.
+- Resize and interruption preserve database consistency and restore terminal.
+- Confirmation is accessible and does not trap non-interactive execution.
+
+#### CWE-173: Run the live-workout TUI end-to-end scenario — L
+
+**Acceptance criteria:**
+
+- A fake-terminal or controlled PTY test performs the line-CLI scenario through
+  the TUI.
+- The resulting workout is queried by a new line-CLI process.
+- Render and input latency baselines are recorded.
+
+### Phase 8 — Full reference-client feature coverage
+
+#### CWE-180: Build catalog-management TUI screens — L
+
+**Acceptance criteria:**
+
+- Screens expose only approved public catalog operations.
+- Search/filter, aliases, archive/restore, annotations, and external IDs appear
+  only where supported.
+- No alternate catalog schema or direct database edit exists.
+
+#### CWE-181: Build history browser and correction flows — L
+
+**Acceptance criteria:**
+
+- Date range, exercise history, last performance, detail, and search use bounded
+  public queries.
+- Historical correction is explicit and conflict-aware.
+- Stable export appears only if a public export contract exists.
+
+#### CWE-182: Add local-data and database-switching UI — M
+
+**Acceptance criteria:**
+
+- Metadata, migration visibility, diagnostics, backup/restore, and safe switching
+  use public adapter APIs.
+- Busy/corrupt/incompatible states are recoverable and clear.
+- No raw table browser is added.
+
+#### CWE-183: Audit complete supported tracking coverage — M
+
+**Class:** Architecture/product review.
+
+**Acceptance criteria:**
+
+- Every public tracking operation is demonstrated or intentionally excluded.
+- Every desired but absent feature is classified into the four gap categories.
+- Recommendation, workout generation, periodization, and recovery features are
+  not invented.
+
+### Phase 9 — Hardening, packaging, and documentation
+
+#### CWE-190: Harden terminal compatibility and accessibility — L
+
+**Acceptance criteria:**
+
+- Supported terminals/platforms, Unicode width, color, resize, signal, and
+  keyboard behavior are tested and documented.
+- Meaning is not conveyed by color alone.
+- Line CLI remains the accessible fallback.
+
+#### CWE-191: Harden security, diagnostics, and crash behavior — L
+
+**Acceptance criteria:**
+
+- Bounded input, terminal escaping, path/symlink behavior, permissions,
+  closed-output, and diagnostic redaction tests pass.
+- Terminal restoration survives injected failures.
+- No secrets or unsafe raw content appear in diagnostics.
+
+#### CWE-192: Publish integrator and user documentation — L
+
+**Acceptance criteria:**
+
+- Installation, first workout, shell scripting, JSON, database, backup, exit
+  code, command, TUI keybinding, and troubleshooting docs are complete.
+- A third-party Zig guide proves use of public packages only.
+- It explains how to build another client without copying presentation logic.
+
+#### CWE-193: Package the full reference-client release — L
+
+**Acceptance criteria:**
+
+- Cross-platform artifacts and terminal/SQLite requirements are verified.
+- Complete line and TUI smoke suites run from release archives.
+- Versions, licenses, notices, checksums, migration support, and release notes
+  are complete.
+
+## 20. Recommended implementation order
+
+Strict prerequisites:
 
 ```text
-You are implementing [ISSUE ID] in Caudex Workout Engine.
+CWE-102
+  ↓
+CWE-103 → CWE-104
+  ↓         ↓
+CWE-105 → CWE-106
+  ↓
+CWE-110 → CWE-111 → CWE-112 → CWE-113
+  ↓
+Phase 2 essential tracking
+  ↓
+Phase 3 catalog/history
+  ↓
+Phase 4 shell integration
+  ↓
+Phase 5 line-CLI release
+  ↓
+Phase 6 TUI foundation
+  ↓
+Phase 7 live TUI
+  ↓
+Phase 8 coverage
+  ↓
+Phase 9 full release
+```
 
-Read:
-- docs/adr/ADR-0001-workout-engine-core-architecture.md
-- docs/adr/ADR-0002-library-first-product-and-distribution.md
-- docs/adr/ADR-0003-persistence-as-optional-adapter.md
-- Relevant canonical schemas and methodology documentation
+Do not start TUI dependency selection until CWE-155 is complete. Do not expose a
+CLI command before its owning public command/query contract and adapter support
+are accepted.
 
-Product:
-Caudex is a stateless, embeddable strength/hypertrophy programming library for developers. It loads explicit methodologies and returns deterministic, explainable recommendations.
+## 21. Definition of done for every issue
 
-Architectural constraints:
-- Functional programming is an architectural discipline, not a generalized FP framework.
-- Domain and methodology calculations are deterministic and effect-free.
-- Application orchestration, allocation, serialization, packaging, and ABI handling use explicit idiomatic Zig.
-- Do not add persistence, SQLite, event sourcing, networking, clocks, hidden randomness, global mutable state, zig-cats, monad/typeclass emulation, generalized map/filter/reduce wrappers, or runtime dependency injection.
-- Use exact decimal values and checked arithmetic.
-- Material recommendation decisions require structured explanation codes.
-- The host owns history and methodology-state persistence.
+Every issue:
+
+1. Reads AGENTS.md, ADR-0001 through ADR-0004, relevant plan sections, public
+   package docs, neighboring code, and current git status.
+2. States the issue's gap classification and concise plan before editing.
+3. Resolves material public-contract ambiguity before implementation.
+4. Changes only the independently testable scope.
+5. Adds tests at the correct deterministic, adapter, client, subprocess, or
+   terminal boundary.
+6. Uses public packages in app code and prepared/bound SQL in adapter code.
+7. Adds no dependency without purpose, license, standard-library comparison,
+   pin, platform review, and isolation.
+8. Runs applicable focused tests plus:
+
+   ```bash
+   zig build
+   zig build test
+   zig fmt --check .
+   git diff --check
+   ```
+
+9. Inspects the final diff for unrelated changes.
+10. Updates documentation and compatibility fixtures when public behavior
+    changes.
+11. Reports summary, files, exact commands, public API/schema changes,
+    architecture decisions, assumptions, and limitations.
+12. Does not commit, push, branch, or open a pull request without explicit
+    instruction.
+
+## 22. Focused Codex issue prompt template
+
+```text
+Implement only CWE-___ from docs/implementation-plan.md.
+
+Read AGENTS.md, ADR-0001 through ADR-0004, the issue and its prerequisites,
+relevant public package documentation, neighboring code/tests, build.zig, and
+build.zig.zon. Inspect git status first.
 
 Before editing:
-1. Inspect relevant code and tests.
-2. State a brief plan.
-3. Identify any conflict with the ADRs.
-4. Resolve small ambiguities conservatively without expanding scope.
+- classify the work as engine contract, SQLite adapter, client, or out of scope;
+- report current public capability and any blocking mismatch;
+- state a concise plan.
 
-Issue:
-[PASTE ISSUE]
+Constraints:
+- preserve the stateless recommendation core and explicit Zig shell;
+- app code imports named public packages only;
+- no raw SQLite access from the client;
+- no terminal or CLI behavior in engine/adapter contracts;
+- no JavaScript, TypeScript, Node.js, or npm;
+- no generalized FP/UI framework;
+- no unrelated scaffolding or speculative features.
 
-Acceptance criteria:
-[PASTE ACCEPTANCE CRITERIA]
-
-At completion:
-- Run formatting and all relevant tests.
-- Report summary, files changed, public API/schema changes, tests, fixture diffs, decisions, and limitations.
+Implement the smallest independently testable change satisfying every listed
+acceptance criterion. Add boundary-appropriate tests. Run all applicable
+focused checks and the repository required checks. Report exact results,
+public API/schema changes, architectural decisions, assumptions, and known
+limitations. Do not commit or push.
 ```
 
-### Methodology task
+## 23. Public engine/adapter issue prompt template
 
 ```text
-Implement [ISSUE ID] for methodology [METHODOLOGY ID].
+Implement only CWE-___, a public [engine|SQLite-adapter] prerequisite for the
+first-party reference client.
 
-The methodology must:
-- Declare stable metadata and version.
-- Validate configuration and state.
-- Produce deterministic recommendations.
-- Evaluate performance without persistence.
-- Return proposed next state rather than applying it.
-- Emit stable explanation codes for every material decision.
-- Use only explicit request/history/state inputs.
-- Use exact units and checked arithmetic.
-- Remain free to use its own algorithm shape; do not force it into abstractions created for another methodology.
+Do not implement CLI or TUI behavior. Read the authoritative ADRs and inspect
+the completed public surface. Define the smallest reusable host-facing contract
+that solves the stated capability for third-party Zig hosts as well as
+caudex-cli. Keep private representations, SQL, migrations, and service
+implementations outside public roots.
 
-Required scenarios:
-[PASTE SCENARIOS]
-
-Acceptance criteria:
-[PASTE ACCEPTANCE CRITERIA]
-
-Add golden fixtures and run the methodology conformance suite.
+Separate deterministic issues from runtime/storage failures. Require explicit
+IDs, timestamps, revisions, allocators, and ownership as applicable. Use
+prepared statements and atomic transactions in SQLite. Add public contract,
+adapter, clean-consumer, and architecture tests. Run the repository checks and
+report any compatibility or migration change. Do not commit or push.
 ```
 
-### npm/package task
+## 24. Architectural review prompt template
 
 ```text
-Implement [ISSUE ID] for the produced npm package.
+Review CWE-___ without implementing production code.
 
-Requirements:
-- Work from the packed tarball, not a workspace import.
-- No native compilation or install script.
-- Include WASM, types, schemas, license, and only intended files.
-- Preserve one idiomatic TypeScript facade.
-- Do not expose raw WASM pointers or C buffer ownership.
-- Runtime validation must match TypeScript/canonical schemas.
-- Test the documented Node, browser, module, and bundler support.
-- Do not advertise an environment unless the clean-project smoke test passes.
+Read AGENTS.md, ADR-0001 through ADR-0004, the active plan, completed v0.1 plan,
+public package docs, build manifests, package roots, relevant tests, and current
+git status.
 
-Acceptance criteria:
-[PASTE ACCEPTANCE CRITERIA]
+Evaluate:
+- whether the capability belongs to the deterministic engine, a public
+  tracking/application contract, the reusable SQLite adapter, or the client;
+- whether caudex-cli can consume it through named public packages;
+- whether any private type, SQL, migration, event, ABI, fixture, terminal, or
+  client preference leaks across boundaries;
+- idempotency, revisions, errors, allocation/ownership, compatibility,
+  migration, testability, security, performance, and dependency implications;
+- whether a smaller vertical slice proves the architecture first.
 
-Report the tarball contents, package size, smoke-test commands, and limitations.
+Report findings by severity with file/line evidence, unresolved questions,
+required acceptance-criteria changes, and a go/no-go recommendation. Do not
+edit files.
 ```
 
-### Architecture review
+## 25. Open decisions intentionally deferred
 
-```text
-Review [ISSUE OR COMMIT RANGE] against ADR-0001, ADR-0002, and ADR-0003.
+These are safe to decide in their focused issues:
 
-Check:
-- Stateless library boundary
-- Determinism and hidden inputs
-- Functional discipline versus generalized FP machinery
-- Idiomatic Zig allocation/control flow
-- Methodology neutrality
-- Unnecessary universal DSL abstractions
-- Exact decimal arithmetic and overflow
-- Explanation completeness and code stability
-- Host-data ownership
-- Persistence leaking into core
-- Adapter-to-core dependency direction
-- Explicit recommendation acceptance before persistence
-- Canonical schema/type drift
-- C/WASM ownership and panic containment
-- Package artifact correctness
-- Cross-language fixture parity
-- Unsupported claims in docs
-- Scope expansion toward a tracker/app/platform
+- Final names and independent release cadence of public persistence/tracking
+  Zig packages
+- Whether tracker state belongs in the existing adapter schema or a separately
+  versioned adapter component
+- Whether athlete and equipment need first-class v0.2 models
+- Approved notes, grouping, tombstone, annotation, and external-ID semantics
+- Terminal dependency selection
+- Exact cross-platform release matrix and installer channels
+- Concrete performance budgets after baseline measurement
+- Whether safe reusable backup uses SQLite's backup API or another adapter-owned
+  mechanism
+- Whether app-local manifests become useful for independent distribution
 
-Report findings by severity with file and symbol references. Fix confirmed high- and medium-severity findings, add regression tests, and report exact commands.
-```
-
-## 23. Recommended execution order
-
-```text
-CWE-001 → CWE-002 → CWE-003 → CWE-004
-
-CWE-010 → CWE-011 → CWE-012 → CWE-013 → CWE-014 → CWE-015
-
-CWE-020 → CWE-021 → CWE-022 → CWE-023
-
-CWE-030 → CWE-031 → CWE-032 → CWE-033
-
-CWE-040 → CWE-041 → CWE-042 → CWE-043
-
-CWE-050 → CWE-051 → CWE-052
-
-CWE-060 → CWE-061 → CWE-062 → CWE-063 → CWE-064 → CWE-065
-
-CWE-070 → CWE-071 → CWE-072 → CWE-073 → CWE-074 → CWE-075
-
-CWE-080 → CWE-081 → CWE-082
-
-CWE-090 → CWE-091 → CWE-092 → CWE-093 → CWE-094 → CWE-095
-
-CWE-100 → CWE-101
-```
-
-Run the architecture review prompt after every epic.
-
-Do not begin native package-manager work if it would delay the quality of the npm, Zig, or C release.
-
-## 24. Release phases
-
-### 0.1.0-alpha.1
-
-- Canonical model
-- Direct Zig API
-- Minimal double-progression recommendation
-- Golden fixtures
-
-### 0.1.0-alpha.2
-
-- Full double progression
-- Explanations
-- Performance evaluation
-- C ABI
-
-### 0.1.0-beta.1
-
-- npm/WASM package
-- Node and browser quickstarts
-- Package smoke tests
-
-### 0.1.0-beta.2
-
-- RPE top-set/backoff methodology
-- Cross-methodology architecture review
-- Testing utilities
-
-### 0.1.0
-
-- npm publication
-- Zig source package
-- C artifacts
-- Documentation
-- Playground
-- Conformance suite
-- Release and compatibility policy
-
-## 25. Success metrics
-
-### Developer activation
-
-- A developer can install the npm package and receive a recommendation without a database, native compiler, or account.
-- The primary quickstart remains around thirty lines excluding fixture data.
-- TypeScript autocomplete covers all public request and result fields.
-- Validation errors identify the exact input path and a corrective action.
-
-### Trust
-
-- Every recommendation records methodology and engine versions.
-- Material choices have explanation codes.
-- Repeated requests pass deterministic fingerprint tests.
-- Cross-language canonical fixtures match.
-
-### Ecosystem quality
-
-- npm, Zig, and C artifacts are tested after packaging.
-- No ecosystem is marked supported without a clean consumer test.
-- Release notes include methodology-result changes.
-- Issues can be reproduced with portable request fixtures.
-
-### Product focus
-
-- Core releases do not require SQLite, authentication, UI, or cloud services.
-- New features are evaluated by how much fitness-development work they remove.
-- The project resists becoming another workout tracker.
-
-## 26. Post-v0.1 roadmap
-
-### v0.2
-
-- Portable methodology-bundle investigation
-- Program-revision recommendations
-- Missed-session policies
-- Minimum-viable session policies
-- Optional starter exercise catalog
-- React Native feasibility
-- SwiftPM and Maven releases if not already complete
-
-### v0.3
-
-- Per-muscle recovery inputs
-- Configurable volume targets
-- Exercise substitution engine
-- Deload strategies
-- Plateau signals
-- Methodology comparison/simulation API
-
-### v0.4
-
-- Multi-week program generation
-- Training-block state
-- Schedule redistribution policies
-- More first-party methodologies
-- Third-party methodology authoring tools
-
-### Later
-
-- Cardio/conditioning programming
-- Mobility programming
-- Health Connect/HealthKit mapping helpers
-- FIT/FHIR adapters
-- Optional persistence contract and adapter packages
-- IndexedDB, SQLite, and PostgreSQL reference adapters
-- Custom repository examples and contract tests
-- Hosted execution service only if ecosystem demand justifies it
-
-## 27. Final architectural position
-
-1. **Caudex is a programming library, not a tracker.**
-2. **The host owns users, storage, history, synchronization, and UI.**
-3. **The Zig core consumes explicit snapshots and returns values.**
-4. **The core contains no repository port, database driver, schema, migration, or transaction manager.**
-5. **Persistence is an optional adapter that depends on Caudex, never the reverse.**
-6. **Applications may use SQLite, PostgreSQL, IndexedDB, custom repositories, remote APIs, or no persistence.**
-7. **Calculating a recommendation never persists it.**
-8. **The host explicitly accepts and saves proposed methodology state.**
-9. **Methodologies are explicit, versioned, and selectable.**
-10. **Recommendations are deterministic and explainable.**
-11. **Functional programming is a discipline, not an abstraction framework.**
-12. **npm/WASM is the first mass-market developer surface.**
-13. **The direct Zig API and C ABI remain first class.**
-14. **SwiftPM and Maven wrappers follow a stable ABI.**
-15. **Package quality, documentation, and conformance tests are product features.**
-16. **Two different methodologies validate the extension design before a portable DSL is considered.**
-17. **No persistence system is required to benefit from Caudex.**
-
-## References
-
-- Zig 0.16.0 documentation, including build-system package support, C interoperability, and WebAssembly: https://ziglang.org/documentation/0.16.0/
-- npm public scoped packages: https://docs.npmjs.com/creating-and-publishing-scoped-public-packages/
-- npm `package.json`, public `exports`, and package contents: https://docs.npmjs.com/files/package.json/
-- GitHub Actions npm publishing and provenance: https://docs.github.com/en/actions/tutorials/publish-packages/publish-nodejs-packages
-- WebAssembly JavaScript loading: https://developer.mozilla.org/en-US/docs/WebAssembly/Guides/Loading_and_running
-- Swift binary frameworks as packages: https://developer.apple.com/documentation/xcode/distributing-binary-frameworks-as-swift-packages
-- Android library/AAR creation: https://developer.android.com/studio/projects/android-library
-- Android native middleware guidance: https://developer.android.com/ndk/guides/middleware-vendors
-- Maven Central publishing: https://central.sonatype.org/publish/
+None authorizes a private import or direct table mutation in the interim.

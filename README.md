@@ -117,6 +117,14 @@ fitness platform. The host owns users, UI, workout-history persistence,
 synchronization, and whether a recommendation is accepted or stored. The core
 does not require SQLite or any other database.
 
+The next major phase adds `caudex-cli`, a first-party Zig reference client under
+`apps/caudex-cli`. The application remains architecturally external to the
+engine: it will consume intentionally public engine and SQLite-adapter packages
+and will not import private modules or mutate adapter tables directly. The
+[reference-client implementation plan](docs/implementation-plan.md) begins by
+making those Zig adapter boundaries genuinely public before implementing a
+line-oriented CLI and, later, a TUI.
+
 ## v0.1 scope
 
 The initial release targets Zig 0.16.0 and includes:
@@ -146,13 +154,15 @@ The architecture and implementation sequence are defined by:
 - [ADR-0001: Functional Core, Explicit Zig Shell, and Adapter Architecture](docs/adr/ADR-0001-workout-engine-core-architecture.md)
 - [ADR-0002: Library-First Product, Stateless Core, and Multi-Ecosystem Distribution](docs/adr/ADR-0002-library-first-product-and-distribution.md)
 - [ADR-0003: Persistence Is an Optional Adapter Outside the Core](docs/adr/ADR-0003-persistence-as-optional-adapter.md)
-- [Implementation plan](docs/implementation-plan.md)
+- [ADR-0004: First-Party Zig Reference Client in the Workout Engine Monorepo](docs/adr/ADR-0004-first-party-zig-reference-client.md)
+- [Active reference-client implementation plan](docs/implementation-plan.md)
+- [Completed v0.1 implementation plan](docs/implementation-plans/completed/v0.1-library-first-implementation-plan.md)
 
 ADR-0002 supersedes ADR-0001's tracking-first and SQLite-first product
 decisions. ADR-0003 makes persistence permanently optional and outside the core.
 ADR-0001 remains authoritative for the functional-programming discipline and
 explicit Zig boundary design.
 
-The project is currently in its contract and core-scaffolding phase. Public API
-examples should be treated as design material until their corresponding
-milestone acceptance criteria are complete.
+Engine v0.1 is complete. Reference-client commands remain planned until their
+public engine and adapter prerequisites satisfy the active plan's acceptance
+criteria.

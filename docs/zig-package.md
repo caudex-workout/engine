@@ -66,6 +66,20 @@ registers a host-defined methodology without importing private source files.
 Public declarations reachable from `@import("caudex")` are the supported Zig
 surface. Files elsewhere in `src` must not be imported by path.
 
+## Persistence package status
+
+The v0.1 tagged Zig source package exports only the `caudex` module. The
+repository's Zig persistence contracts and SQLite implementation are currently
+build-local adapter modules: they are not included in `build.zig.zon`'s package
+paths and are not supported through repository-relative imports.
+
+[ADR-0004](adr/ADR-0004-first-party-zig-reference-client.md) and the
+[reference-client implementation plan](implementation-plan.md) require named,
+clean-consumer-tested public Zig persistence and SQLite package roots before
+`caudex-cli` may depend on them. Until that work is complete, external Zig hosts
+should treat `adapters/` as implementation source rather than a published
+package contract.
+
 ## Zig version policy
 
 Caudex v0.1 supports exactly Zig 0.16.x and declares 0.16.0 as its minimum.
