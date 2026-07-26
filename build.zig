@@ -291,6 +291,16 @@ pub fn build(b: *std.Build) void {
     );
     npm_examples_step.dependOn(&npm_examples_test.step);
 
+    const zig_package_consumer_test = b.addSystemCommand(&.{
+        "node",
+        "tests/zig_package_consumer_test.mjs",
+    });
+    const zig_package_step = b.step(
+        "test-zig-package",
+        "Test direct Zig consumption from declared package paths",
+    );
+    zig_package_step.dependOn(&zig_package_consumer_test.step);
+
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&run_library_tests.step);
     test_step.dependOn(&run_contract_tests.step);
@@ -311,4 +321,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&data_mapping_guide_test.step);
     test_step.dependOn(&testing_utilities_test.step);
     test_step.dependOn(&npm_examples_test.step);
+    test_step.dependOn(&zig_package_consumer_test.step);
 }

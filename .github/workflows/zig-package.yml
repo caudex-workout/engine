@@ -1,0 +1,42 @@
+name: Zig package
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: zig-package-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  clean-consumer:
+    name: Clean Zig 0.16 consumer
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Check formatting
+        run: zig fmt --check .
+
+      - name: Build source package
+        run: zig build
+
+      - name: Test clean direct consumer
+        run: zig build test-zig-package

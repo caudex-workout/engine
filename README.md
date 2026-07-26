@@ -64,6 +64,15 @@ It is compiled and executed against the packed npm artifact by
 The package is not yet published to the public npm registry. Until the first
 release, the same flow is exercised from the locally packed artifact.
 
+## Zig package
+
+Direct Zig consumers can add a tagged source archive with `zig fetch --save`
+and import the public module as `@import("caudex")`. The
+[Zig package guide](docs/zig-package.md) documents dependency wiring, public
+modules, the Zig 0.16.x support policy, and the checked-in custom-methodology
+consumer. `zig build test-zig-package` verifies that example from a clean copy
+containing only the source package's declared paths.
+
 See the [quickstart and concepts guide](docs/quickstart-and-concepts.md) for the
 request/result model, explanation references, data ownership, deterministic
 inputs, and error handling. No database, account, or runtime network request is

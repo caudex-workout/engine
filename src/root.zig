@@ -1,3 +1,15 @@
+//! Caudex Workout Engine's public Zig module.
+//!
+//! Hosts provide complete, borrowed request snapshots and caller-owned output
+//! storage. Core calculations are deterministic and perform no persistence,
+//! network access, clock reads, hidden randomness, or implicit allocation.
+//!
+//! Start with `engine.recommendSession` and `engine.evaluatePerformance` for
+//! the typed v0.1 operations. Custom builds can compose implementations with
+//! `methodology.Methodology` and `methodology.Registry`. Canonical JSON and
+//! ABI adapters are boundary tools; direct Zig consumers should prefer the
+//! typed domain modules exported here.
+
 const std = @import("std");
 
 pub const canonical = @import("canonical.zig");
