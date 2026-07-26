@@ -34,5 +34,40 @@ The public `Caudex` value exposes only `recommendSession()` and `dispose()`.
 Linear-memory addresses, allocation functions, result descriptors, and runtime
 handles remain private to the loader.
 
+## Methodology factories
+
+The package exports typed factories for both first-party configurations:
+
+```ts
+import { methodologies } from "@caudex/workout-engine";
+
+const methodology = methodologies.doubleProgression({
+  repRange: { min: 8, max: 12 },
+  workingSets: 3,
+  advancementCriteria: {
+    minimumSuccessfulSets: 3,
+    minimumRepetitions: 12,
+  },
+  initialLoad: { amount: "45", unit: "lb" },
+  loadIncrement: { amount: "5", unit: "lb" },
+  failurePolicy: {
+    onPartial: "hold",
+    onFailure: "regress",
+    regressionAmount: { amount: "5", unit: "lb" },
+  },
+  rounding: {
+    mode: "nearest",
+    quantum: { amount: "2.5", unit: "lb" },
+  },
+});
+```
+
+`methodologies.rpeTopSetBackoff()` provides autocomplete for the distinct RPE
+configuration. Both factories validate exact decimals, ranges, units, policy
+values, override resolution, duplicate IDs, and unknown fields. They return a
+normalized canonical methodology reference. Invalid configuration throws
+`MethodologyConfigError` with structured `methodology.config_invalid` issues.
+Factories contain no recommendation or progression calculations.
+
 The default WASM URL is `../wasm/caudex.wasm` relative to the distributed
 JavaScript module. Packaging and final asset placement belong to CWE-063.

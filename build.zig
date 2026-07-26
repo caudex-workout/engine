@@ -176,6 +176,28 @@ pub fn build(b: *std.Build) void {
     );
     typescript_step.dependOn(&typescript_loader_test.step);
 
+    const methodology_factory_test = b.addSystemCommand(&.{
+        "node",
+        "--experimental-strip-types",
+        "--disable-warning=ExperimentalWarning",
+        "tests/methodology_factories_test.ts",
+    });
+    methodology_factory_test.addArtifactArg(wasm_runtime);
+    methodology_factory_test.addFileArg(
+        b.path("fixtures/requests/recommendation.json"),
+    );
+    methodology_factory_test.addFileArg(
+        b.path("fixtures/methodologies/double-progression-config-v1.json"),
+    );
+    methodology_factory_test.addFileArg(
+        b.path("fixtures/methodologies/rpe-top-set-backoff-config-v1.json"),
+    );
+    const methodology_factory_step = b.step(
+        "test-methodology-factories",
+        "Run TypeScript methodology factory tests",
+    );
+    methodology_factory_step.dependOn(&methodology_factory_test.step);
+
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&run_library_tests.step);
     test_step.dependOn(&run_contract_tests.step);
@@ -187,4 +209,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&wasm_library.step);
     test_step.dependOn(&wasm_conformance.step);
     test_step.dependOn(&typescript_loader_test.step);
+    test_step.dependOn(&methodology_factory_test.step);
 }

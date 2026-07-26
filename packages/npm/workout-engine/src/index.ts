@@ -51,12 +51,29 @@ export interface CompletedWorkout {
   exercises: CompletedExercise[];
 }
 
-export interface MethodologyRef {
+export interface MethodologyRef<TConfig = JsonValue> {
   id: string;
   versionRequirement?: string;
   configVersion: number;
-  config: JsonValue;
+  config: TConfig;
 }
+
+export {
+  MethodologyConfigError,
+  methodologies,
+  type AdvancementCriteria,
+  type BackoffCalculation,
+  type DoubleProgressionConfig,
+  type DoubleProgressionExerciseOverride,
+  type DoubleProgressionMethodology,
+  type FailureAction,
+  type FailurePolicy,
+  type LoadRounding,
+  type RepRange,
+  type RpeTopSetBackoffConfig,
+  type RpeTopSetBackoffMethodology,
+  type RoundingMode,
+} from "./methodologies.ts";
 
 export interface MethodologyState {
   schemaVersion: number;
@@ -92,7 +109,7 @@ export interface Athlete {
 export interface RecommendationRequest {
   schemaVersion: 1;
   asOf: string;
-  methodology: MethodologyRef;
+  methodology: MethodologyRef<unknown>;
   methodologyState?: MethodologyState;
   catalog: Exercise[];
   athlete?: Athlete;
