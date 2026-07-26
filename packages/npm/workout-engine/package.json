@@ -1,0 +1,45 @@
+{
+  "name": "@caudex/workout-engine",
+  "version": "0.1.0-dev",
+  "description": "Deterministic strength and hypertrophy workout programming engine",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./methodologies": {
+      "types": "./dist/methodologies/index.d.ts",
+      "import": "./dist/methodologies/index.js"
+    },
+    "./schema/canonical": "./schemas/v0/canonical.schema.json",
+    "./schema/recommendation-request": "./schemas/v0/recommendation-request.schema.json",
+    "./schema/recommendation-result": "./schemas/v0/recommendation-result.schema.json",
+    "./schema/evaluation-request": "./schemas/v0/evaluation-request.schema.json",
+    "./schema/evaluation-result": "./schemas/v0/evaluation-result.schema.json",
+    "./schema/double-progression-config": "./schemas/methodologies/double-progression-config-v1.schema.json",
+    "./schema/double-progression-state": "./schemas/methodologies/double-progression-state-v1.schema.json",
+    "./schema/rpe-top-set-backoff-config": "./schemas/methodologies/rpe-top-set-backoff-config-v1.schema.json",
+    "./schema/rpe-top-set-backoff-state": "./schemas/methodologies/rpe-top-set-backoff-state-v1.schema.json"
+  },
+  "files": [
+    "dist/",
+    "wasm/",
+    "schemas/",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "node scripts/build-package.mjs"
+  }
+}

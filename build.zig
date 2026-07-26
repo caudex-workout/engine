@@ -198,6 +198,24 @@ pub fn build(b: *std.Build) void {
     );
     methodology_factory_step.dependOn(&methodology_factory_test.step);
 
+    const npm_package_build = b.addSystemCommand(&.{
+        "node",
+        "--disable-warning=ExperimentalWarning",
+        "packages/npm/workout-engine/scripts/build-package.mjs",
+    });
+    npm_package_build.addArtifactArg(wasm_runtime);
+    const npm_package_test = b.addSystemCommand(&.{
+        "node",
+        "tests/npm_package_artifact_test.mjs",
+        "packages/npm/workout-engine",
+    });
+    npm_package_test.step.dependOn(&npm_package_build.step);
+    const npm_package_step = b.step(
+        "package-npm",
+        "Build and inspect the packed npm artifact",
+    );
+    npm_package_step.dependOn(&npm_package_test.step);
+
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&run_library_tests.step);
     test_step.dependOn(&run_contract_tests.step);
@@ -210,4 +228,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&wasm_conformance.step);
     test_step.dependOn(&typescript_loader_test.step);
     test_step.dependOn(&methodology_factory_test.step);
+    test_step.dependOn(&npm_package_test.step);
 }

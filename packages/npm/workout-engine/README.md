@@ -71,3 +71,23 @@ Factories contain no recommendation or progression calculations.
 
 The default WASM URL is `../wasm/caudex.wasm` relative to the distributed
 JavaScript module. Packaging and final asset placement belong to CWE-063.
+
+## Package artifact
+
+The ESM-only package uses a controlled export map for the main facade,
+methodology factories, and named schema files. Its allowlist contains compiled
+JavaScript, declarations, the freestanding WASM runtime, schemas, README,
+license, and notice. It has no production dependencies, native compilation,
+preinstall, install, or postinstall script. CommonJS is not advertised.
+
+Build and inspect the actual tarball with:
+
+```bash
+zig build package-npm
+```
+
+On 2026-07-26, a read-only lookup of `@caudex/workout-engine` against the public
+npm registry returned `E404`, meaning no published package currently claims
+that full name. Publication still requires the maintainer to create or control
+the `@caudex` organization; this repository does not infer registry ownership
+from name availability.
