@@ -19,6 +19,10 @@ pub fn build(b: *std.Build) void {
                     .name = "caudex_persistence",
                     .module = caudex.module("caudex_persistence"),
                 },
+                .{
+                    .name = "caudex_tracking",
+                    .module = caudex.module("caudex_tracking"),
+                },
             },
         }),
     });

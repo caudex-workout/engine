@@ -41,6 +41,10 @@ const executable = b.addExecutable(.{
                 .name = "caudex_persistence",
                 .module = caudex_dependency.module("caudex_persistence"),
             },
+            .{
+                .name = "caudex_tracking",
+                .module = caudex_dependency.module("caudex_tracking"),
+            },
         },
     }),
 });
@@ -51,11 +55,24 @@ Application code imports the public modules it needs:
 ```zig
 const caudex = @import("caudex");
 const caudex_persistence = @import("caudex_persistence");
+const caudex_tracking = @import("caudex_tracking");
 ```
 
 The complete [`examples/zig/consumer`](../examples/zig/consumer) package
 registers a host-defined methodology and inspects the persistence contract
 without importing repository-relative source files.
+
+## Tracking contract
+
+`caudex_tracking` defines the public, database-independent command, query,
+workout-state, and structured-issue values for host-owned workout tracking. It
+depends only on `caudex` and performs no command execution, allocation,
+persistence, clock access, or terminal behavior.
+
+The accepted [CWE-103 architecture review](tracking/architecture-review-cwe-103.md)
+documents package ownership, idempotency, revisions, short-workout completion,
+active-workout ambiguity, correction prerequisites, deferred features, and
+compatibility.
 
 ## Public module map
 

@@ -70,7 +70,8 @@ release, the same flow is exercised from the locally packed artifact.
 
 Direct Zig consumers can add a tagged source archive with `zig fetch --save`
 and import `@import("caudex")` plus the optional database-independent
-`@import("caudex_persistence")` contract. The
+`@import("caudex_persistence")` and host-owned `@import("caudex_tracking")`
+contracts. The
 [Zig package guide](docs/zig-package.md) documents dependency wiring, public
 modules, persistence ownership/error/compatibility semantics, the Zig 0.16.x
 support policy, and the checked-in consumer. `zig build test-zig-package`
