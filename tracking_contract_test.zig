@@ -84,5 +84,5 @@ test "tracking contract exposes no execution or persistence API" {
     }) |name| {
         try std.testing.expect(!@hasDecl(tracking, name));
     }
-    try std.testing.expectEqual(@as(u32, 1), tracking.contract_version);
+    try std.testing.expectEqual(@as(u32, 2), tracking.contract_version);
 }

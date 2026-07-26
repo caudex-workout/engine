@@ -132,6 +132,171 @@ test "two active workouts are allowed and produce ambiguity" {
     try std.testing.expect(selected.ambiguous[1].id.eql(second.id));
 }
 
+test "exercise ordering uses semantic anchors deterministically" {
+    const bench: tracking.ExerciseCatalogEntry = .{
+        .exercise_id = .{ .bytes = "bench" },
+        .availability = .active,
+    };
+    const row: tracking.ExerciseCatalogEntry = .{
+        .exercise_id = .{ .bytes = "row" },
+        .availability = .active,
+    };
+    const curl: tracking.ExerciseCatalogEntry = .{
+        .exercise_id = .{ .bytes = "curl" },
+        .availability = .active,
+    };
+    var issues: [1]tracking.Issue = undefined;
+    var storage_a: [3]tracking.ExerciseMembership = undefined;
+    var storage_b: [3]tracking.ExerciseMembership = undefined;
+    const workout = (try tracking.startWorkout(.{}, command, &issues)).accepted.workout;
+
+    const first = (try tracking.addExercise(.{
+        .workouts = &.{workout},
+        .exercise_catalog = &.{ bench, row, curl },
+    }, addCommand("add-bench", 1, "bench-membership", "bench", .end), &storage_a, &issues)).accepted.workout;
+    try expectOrder(first, &.{"bench-membership"});
+
+    const second = (try tracking.addExercise(.{
+        .workouts = &.{first},
+        .exercise_catalog = &.{ bench, row, curl },
+    }, addCommand("add-row", 2, "row-membership", "row", .beginning), &storage_b, &issues)).accepted.workout;
+    try expectOrder(second, &.{ "row-membership", "bench-membership" });
+
+    const third = (try tracking.addExercise(.{
+        .workouts = &.{second},
+        .exercise_catalog = &.{ bench, row, curl },
+    }, addCommand(
+        "add-curl",
+        3,
+        "curl-membership",
+        "curl",
+        .{ .after = .{ .bytes = "row-membership" } },
+    ), &storage_a, &issues)).accepted.workout;
+    try expectOrder(third, &.{
+        "row-membership",
+        "curl-membership",
+        "bench-membership",
+    });
+
+    const reordered = (try tracking.reorderExercise(
+        .{ .workouts = &.{third} },
+        .{
+            .metadata = metadata("reorder-bench"),
+            .scope = scope,
+            .workout_id = command.workout_id,
+            .expected_revision = 4,
+            .membership_id = .{ .bytes = "bench-membership" },
+            .anchor = .beginning,
+        },
+        &storage_b,
+        &issues,
+    )).accepted.workout;
+    try expectOrder(reordered, &.{
+        "bench-membership",
+        "row-membership",
+        "curl-membership",
+    });
+
+    const removed = (try tracking.removeExercise(
+        .{ .workouts = &.{reordered} },
+        .{
+            .metadata = metadata("remove-row"),
+            .scope = scope,
+            .workout_id = command.workout_id,
+            .expected_revision = 5,
+            .membership_id = .{ .bytes = "row-membership" },
+        },
+        &storage_a,
+        &issues,
+    )).accepted.workout;
+    try expectOrder(removed, &.{ "bench-membership", "curl-membership" });
+    try std.testing.expectEqual(@as(u64, 6), removed.revision);
+}
+
+test "missing archived and invalid anchor exercises are structured issues" {
+    const archived: tracking.ExerciseCatalogEntry = .{
+        .exercise_id = .{ .bytes = "archived-exercise" },
+        .availability = .archived,
+    };
+    var issues: [1]tracking.Issue = undefined;
+    var storage: [2]tracking.ExerciseMembership = undefined;
+    const workout = (try tracking.startWorkout(.{}, command, &issues)).accepted.workout;
+
+    try expectRejectedCode(try tracking.addExercise(
+        .{ .workouts = &.{workout} },
+        addCommand("missing", 1, "membership-1", "missing", .end),
+        &storage,
+        &issues,
+    ), tracking.issue_codes.exercise_not_found);
+    try expectRejectedCode(try tracking.addExercise(
+        .{
+            .workouts = &.{workout},
+            .exercise_catalog = &.{archived},
+        },
+        addCommand(
+            "archived",
+            1,
+            "membership-1",
+            "archived-exercise",
+            .end,
+        ),
+        &storage,
+        &issues,
+    ), tracking.issue_codes.exercise_archived);
+
+    const active = tracking.ExerciseCatalogEntry{
+        .exercise_id = .{ .bytes = "active-exercise" },
+        .availability = .active,
+    };
+    try expectRejectedCode(try tracking.addExercise(
+        .{
+            .workouts = &.{workout},
+            .exercise_catalog = &.{active},
+        },
+        addCommand(
+            "bad-anchor",
+            1,
+            "membership-1",
+            "active-exercise",
+            .{ .before = .{ .bytes = "missing-membership" } },
+        ),
+        &storage,
+        &issues,
+    ), tracking.issue_codes.invalid_exercise_anchor);
+}
+
+fn metadata(command_id: []const u8) tracking.CommandMetadata {
+    return .{
+        .command_id = .{ .bytes = command_id },
+        .occurred_at = .{ .bytes = "2026-07-26T12:01:00Z" },
+    };
+}
+
+fn addCommand(
+    command_id: []const u8,
+    revision: u64,
+    membership_id: []const u8,
+    exercise_id: []const u8,
+    anchor: tracking.ExerciseAnchor,
+) tracking.AddExerciseCommand {
+    return .{
+        .metadata = metadata(command_id),
+        .scope = scope,
+        .workout_id = command.workout_id,
+        .expected_revision = revision,
+        .membership_id = .{ .bytes = membership_id },
+        .exercise_id = .{ .bytes = exercise_id },
+        .anchor = anchor,
+    };
+}
+
+fn expectOrder(workout: tracking.Workout, expected: []const []const u8) !void {
+    try std.testing.expectEqual(expected.len, workout.exercises.len);
+    for (expected, workout.exercises) |id, membership| {
+        try std.testing.expectEqualStrings(id, membership.id.bytes);
+    }
+}
+
 fn expectAcceptedWorkout(
     result: tracking.CommandResult,
     id: []const u8,

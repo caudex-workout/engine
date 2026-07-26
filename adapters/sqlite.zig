@@ -12,7 +12,7 @@ const c = @cImport({
 });
 
 pub const adapter_version = "0.1.0";
-pub const schema_version: u32 = 2;
+pub const schema_version: u32 = 3;
 pub const minimum_schema_version: u32 = 1;
 
 pub const Options = struct {
@@ -117,6 +117,30 @@ pub const Adapter = opaque {
         return readTrackedWorkout(self, allocator, query);
     }
 
+    pub fn addExercise(
+        self: *Adapter,
+        allocator: std.mem.Allocator,
+        command: tracking.AddExerciseCommand,
+    ) TrackingError!tracking.CommandResult {
+        return changeTrackedExercises(self, allocator, .{ .add = command });
+    }
+
+    pub fn removeExercise(
+        self: *Adapter,
+        allocator: std.mem.Allocator,
+        command: tracking.RemoveExerciseCommand,
+    ) TrackingError!tracking.CommandResult {
+        return changeTrackedExercises(self, allocator, .{ .remove = command });
+    }
+
+    pub fn reorderExercise(
+        self: *Adapter,
+        allocator: std.mem.Allocator,
+        command: tracking.ReorderExerciseCommand,
+    ) TrackingError!tracking.CommandResult {
+        return changeTrackedExercises(self, allocator, .{ .reorder = command });
+    }
+
     pub fn replaceCatalog(
         self: *Adapter,
         allocator: std.mem.Allocator,
@@ -126,16 +150,19 @@ pub const Adapter = opaque {
         try self.execute("BEGIN IMMEDIATE");
         errdefer self.execute("ROLLBACK") catch {};
 
-        var delete_statement = try self.prepare(
-            "DELETE FROM catalog WHERE host_scope_key = ?1",
+        var archive_statement = try self.prepare(
+            "UPDATE catalog SET archived = 1 WHERE host_scope_key = ?1",
         );
-        defer delete_statement.finalize();
-        try delete_statement.bindText(1, scope.host_scope_key);
-        try delete_statement.done();
+        defer archive_statement.finalize();
+        try archive_statement.bindText(1, scope.host_scope_key);
+        try archive_statement.done();
 
         var insert_statement = try self.prepare(
-            \\INSERT INTO catalog (host_scope_key, exercise_id, payload)
-            \\VALUES (?1, ?2, ?3)
+            \\INSERT INTO catalog (host_scope_key, exercise_id, payload, archived)
+            \\VALUES (?1, ?2, ?3, 0)
+            \\ON CONFLICT (host_scope_key, exercise_id) DO UPDATE SET
+            \\  payload = excluded.payload,
+            \\  archived = 0
         );
         defer insert_statement.finalize();
         for (exercises) |exercise| {
@@ -196,6 +223,10 @@ pub const Adapter = opaque {
             2,
             @embedFile("sqlite/migrations/002_tracking_start.sql"),
         );
+        if (current < 3) try self.applyMigration(
+            3,
+            @embedFile("sqlite/migrations/003_tracking_exercises.sql"),
+        );
     }
 
     fn applyMigration(
@@ -205,6 +236,18 @@ pub const Adapter = opaque {
     ) persistence.AdapterError!void {
         try self.execute("BEGIN IMMEDIATE");
         errdefer self.execute("ROLLBACK") catch {};
+        const already_applied = blk: {
+            var existing = try self.prepare(
+                "SELECT 1 FROM schema_migrations WHERE version >= ?1 LIMIT 1",
+            );
+            defer existing.finalize();
+            try existing.bindInt(1, version);
+            break :blk try existing.row();
+        };
+        if (already_applied) {
+            try self.execute("COMMIT");
+            return;
+        }
         try self.executeScript(script);
         var record = try self.prepare(
             "INSERT INTO schema_migrations (version) VALUES (?1)",
@@ -355,6 +398,171 @@ fn readTrackedWorkout(
     } };
 }
 
+const ExerciseChange = union(enum) {
+    add: tracking.AddExerciseCommand,
+    remove: tracking.RemoveExerciseCommand,
+    reorder: tracking.ReorderExerciseCommand,
+
+    fn scope(self: ExerciseChange) tracking.Scope {
+        return switch (self) {
+            inline else => |command| command.scope,
+        };
+    }
+
+    fn workoutId(self: ExerciseChange) tracking.Id {
+        return switch (self) {
+            inline else => |command| command.workout_id,
+        };
+    }
+};
+
+fn changeTrackedExercises(
+    self: *Adapter,
+    allocator: std.mem.Allocator,
+    change: ExerciseChange,
+) TrackingError!tracking.CommandResult {
+    try self.execute("BEGIN IMMEDIATE");
+    errdefer self.execute("ROLLBACK") catch {};
+
+    const workout = try loadTrackedWorkout(
+        self,
+        allocator,
+        change.scope(),
+        change.workoutId(),
+    );
+    const workouts = if (workout) |value| &.{value} else &.{};
+    var catalog_storage: [1]tracking.ExerciseCatalogEntry = undefined;
+    const catalog = switch (change) {
+        .add => |command| blk: {
+            const entry = try loadExerciseCatalogEntry(
+                self,
+                allocator,
+                command.scope.host_scope_key,
+                command.exercise_id,
+            );
+            if (entry) |value| {
+                catalog_storage[0] = value;
+                break :blk catalog_storage[0..1];
+            }
+            break :blk catalog_storage[0..0];
+        },
+        else => catalog_storage[0..0],
+    };
+    const existing_len = if (workout) |value| value.exercises.len else 0;
+    const capacity = existing_len + switch (change) {
+        .add => @as(usize, 1),
+        else => 0,
+    };
+    const exercise_storage = try allocator.alloc(
+        tracking.ExerciseMembership,
+        capacity,
+    );
+    var issue_storage: [1]tracking.Issue = undefined;
+    const decided = switch (change) {
+        .add => |command| tracking.addExercise(
+            .{ .workouts = workouts, .exercise_catalog = catalog },
+            command,
+            exercise_storage,
+            &issue_storage,
+        ),
+        .remove => |command| tracking.removeExercise(
+            .{ .workouts = workouts },
+            command,
+            exercise_storage,
+            &issue_storage,
+        ),
+        .reorder => |command| tracking.reorderExercise(
+            .{ .workouts = workouts },
+            command,
+            exercise_storage,
+            &issue_storage,
+        ),
+    } catch |err| switch (err) {
+        error.IssueBufferTooSmall,
+        error.ExerciseBufferTooSmall,
+        error.RevisionOverflow,
+        => return error.InvalidData,
+    };
+    const proposed = switch (decided) {
+        .accepted => |accepted| accepted,
+        .rejected => |rejected| {
+            const owned = try ownRejected(allocator, rejected);
+            try self.execute("ROLLBACK");
+            return owned;
+        },
+    };
+    const accepted = try ownAccepted(allocator, proposed);
+    try persistExerciseOrdering(self, accepted.workout);
+    try self.execute("COMMIT");
+    return .{ .accepted = accepted };
+}
+
+fn loadExerciseCatalogEntry(
+    self: *Adapter,
+    allocator: std.mem.Allocator,
+    host_scope_key: tracking.Id,
+    exercise_id: tracking.Id,
+) TrackingError!?tracking.ExerciseCatalogEntry {
+    var statement = try self.prepare(
+        \\SELECT archived FROM catalog
+        \\WHERE host_scope_key = ?1 AND exercise_id = ?2
+    );
+    defer statement.finalize();
+    try statement.bindText(1, host_scope_key.bytes);
+    try statement.bindText(2, exercise_id.bytes);
+    if (!try statement.row()) return null;
+    const archived = c.sqlite3_column_int(statement.raw, 0);
+    if (archived != 0 and archived != 1) return error.InvalidData;
+    return .{
+        .exercise_id = try ownId(allocator, exercise_id),
+        .availability = if (archived == 0) .active else .archived,
+    };
+}
+
+fn persistExerciseOrdering(
+    self: *Adapter,
+    workout: tracking.Workout,
+) persistence.AdapterError!void {
+    var update = try self.prepare(
+        \\UPDATE tracking_workouts SET revision = ?1
+        \\WHERE host_scope_key = ?2 AND athlete_id = ?3 AND workout_id = ?4
+    );
+    defer update.finalize();
+    try update.bindInt(1, workout.revision);
+    try update.bindText(2, workout.scope.host_scope_key.bytes);
+    try update.bindText(3, athleteKey(workout.scope));
+    try update.bindText(4, workout.id.bytes);
+    try update.done();
+
+    var delete = try self.prepare(
+        \\DELETE FROM tracking_workout_exercises
+        \\WHERE host_scope_key = ?1 AND athlete_id = ?2 AND workout_id = ?3
+    );
+    defer delete.finalize();
+    try delete.bindText(1, workout.scope.host_scope_key.bytes);
+    try delete.bindText(2, athleteKey(workout.scope));
+    try delete.bindText(3, workout.id.bytes);
+    try delete.done();
+
+    var insert = try self.prepare(
+        \\INSERT INTO tracking_workout_exercises
+        \\  (host_scope_key, athlete_id, workout_id, membership_id,
+        \\   exercise_id, ordinal)
+        \\VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+    );
+    defer insert.finalize();
+    for (workout.exercises, 0..) |membership, ordinal| {
+        try insert.bindText(1, workout.scope.host_scope_key.bytes);
+        try insert.bindText(2, athleteKey(workout.scope));
+        try insert.bindText(3, workout.id.bytes);
+        try insert.bindText(4, membership.id.bytes);
+        try insert.bindText(5, membership.exercise_id.bytes);
+        try insert.bindInt(6, ordinal);
+        try insert.done();
+        try insert.reset();
+    }
+}
+
 fn loadTrackedWorkout(
     self: *Adapter,
     allocator: std.mem.Allocator,
@@ -385,6 +593,7 @@ fn loadTrackedWorkout(
         .{ .bytes = try allocator.dupe(u8, value) }
     else
         null;
+    const exercises = try loadTrackedExercises(self, allocator, scope, workout_id);
     return .{
         .id = try ownId(allocator, workout_id),
         .scope = try ownScope(allocator, scope),
@@ -392,7 +601,43 @@ fn loadTrackedWorkout(
         .status = status,
         .started_at = started_at,
         .completed_at = completed_at,
+        .exercises = exercises,
     };
+}
+
+fn loadTrackedExercises(
+    self: *Adapter,
+    allocator: std.mem.Allocator,
+    scope: tracking.Scope,
+    workout_id: tracking.Id,
+) TrackingError![]const tracking.ExerciseMembership {
+    var statement = try self.prepare(
+        \\SELECT membership_id, exercise_id
+        \\FROM tracking_workout_exercises
+        \\WHERE host_scope_key = ?1 AND athlete_id = ?2 AND workout_id = ?3
+        \\ORDER BY ordinal
+    );
+    defer statement.finalize();
+    try statement.bindText(1, scope.host_scope_key.bytes);
+    try statement.bindText(2, athleteKey(scope));
+    try statement.bindText(3, workout_id.bytes);
+    var values: std.ArrayList(tracking.ExerciseMembership) = .empty;
+    errdefer values.deinit(allocator);
+    while (try statement.row()) {
+        const membership_id = tracking.Id{
+            .bytes = try dupeColumn(allocator, statement.raw, 0),
+        };
+        const exercise_id = tracking.Id{
+            .bytes = try dupeColumn(allocator, statement.raw, 1),
+        };
+        _ = tracking.Id.parse(membership_id.bytes) catch return error.InvalidData;
+        _ = tracking.Id.parse(exercise_id.bytes) catch return error.InvalidData;
+        try values.append(allocator, .{
+            .id = membership_id,
+            .exercise_id = exercise_id,
+        });
+    }
+    return values.toOwnedSlice(allocator);
 }
 
 fn loadStartReceipt(
@@ -530,9 +775,28 @@ fn ownAccepted(
                 .{ .bytes = try allocator.dupe(u8, timestamp.bytes) }
             else
                 null,
+            .exercises = try ownExerciseMemberships(
+                allocator,
+                accepted.workout.exercises,
+            ),
         },
         .issues = try allocator.dupe(tracking.Issue, accepted.issues),
     };
+}
+
+fn ownExerciseMemberships(
+    allocator: std.mem.Allocator,
+    memberships: []const tracking.ExerciseMembership,
+) std.mem.Allocator.Error![]const tracking.ExerciseMembership {
+    const owned = try allocator.alloc(tracking.ExerciseMembership, memberships.len);
+    for (memberships, 0..) |membership, index| {
+        owned[index] = .{
+            .id = try ownId(allocator, membership.id),
+            .exercise_id = try ownId(allocator, membership.exercise_id),
+            .sets = membership.sets,
+        };
+    }
+    return owned;
 }
 
 fn ownId(
@@ -632,7 +896,7 @@ fn loadCatalogCallback(
     const self: *Adapter = @ptrCast(@alignCast(context));
     var statement = try self.prepare(
         \\SELECT payload FROM catalog
-        \\WHERE host_scope_key = ?1
+        \\WHERE host_scope_key = ?1 AND archived = 0
         \\ORDER BY exercise_id
     );
     defer statement.finalize();

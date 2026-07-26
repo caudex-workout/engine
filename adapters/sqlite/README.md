@@ -27,9 +27,9 @@ Lifecycle errors are intentionally distinct:
 
 ## Schema and migrations
 
-`migrations/001_initial.sql` is packaged so the public module can embed it, but
-it remains an adapter-private resource rather than an importable module or
-schema contract. The adapter records applied versions in
+Migration files are packaged so the public module can embed them, but remain
+adapter-private resources rather than importable modules or schema contracts.
+The adapter records applied versions in
 `schema_migrations`. Released migrations are immutable and future changes add a
 higher-numbered file; migrations run forward inside an immediate transaction.
 The physical tables are not canonical Caudex schemas.
@@ -55,8 +55,15 @@ ID and payload returns the stored result as `replayed`. Reusing the ID with a
 different payload returns `tracking.command_payload_conflict`. Rejected
 commands store neither a workout nor a receipt.
 
-Only start and read are implemented by this slice. Exercise membership, set
-logging, completion, and broader history queries remain later capabilities.
+Schema version 3 adds atomic exercise membership ordering. `addExercise`,
+`removeExercise`, and `reorderExercise` accept semantic anchors (`beginning`,
+`end`, `before`, or `after`); the physical ordinal is private. Catalog entries
+omitted by a later `replaceCatalog` call remain archived so adding an archived
+exercise can be distinguished from adding an ID that never existed. Catalog
+loads return active entries only.
+
+Set logging, completion, and broader history queries remain later
+capabilities.
 
 ## SQL and concurrency
 

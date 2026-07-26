@@ -1,4 +1,5 @@
 const std = @import("std");
+const persistence = @import("caudex_persistence");
 const sqlite = @import("caudex_sqlite");
 const tracking = @import("caudex_tracking");
 
@@ -147,6 +148,141 @@ test "execution failure rolls back before workout and receipt become visible" {
         .applied,
         "workout-1",
     );
+}
+
+test "exercise add remove and reorder persist atomically" {
+    const database = try sqlite.openInMemory(.{});
+    defer database.close();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    try database.replaceCatalog(allocator, .{
+        .host_scope_key = scope.host_scope_key.bytes,
+        .as_of = start.started_at.bytes,
+    }, &.{
+        persistence.canonical.Exercise{ .id = "bench" },
+        persistence.canonical.Exercise{ .id = "row" },
+    });
+    _ = try database.startWorkout(allocator, start);
+
+    const bench = try database.addExercise(allocator, .{
+        .metadata = metadata("add-bench"),
+        .scope = scope,
+        .workout_id = start.workout_id,
+        .expected_revision = 1,
+        .membership_id = .{ .bytes = "bench-membership" },
+        .exercise_id = .{ .bytes = "bench" },
+        .anchor = .end,
+    });
+    try expectOrder(bench.accepted.workout, &.{"bench-membership"});
+    const row = try database.addExercise(allocator, .{
+        .metadata = metadata("add-row"),
+        .scope = scope,
+        .workout_id = start.workout_id,
+        .expected_revision = 2,
+        .membership_id = .{ .bytes = "row-membership" },
+        .exercise_id = .{ .bytes = "row" },
+        .anchor = .beginning,
+    });
+    try expectOrder(row.accepted.workout, &.{
+        "row-membership",
+        "bench-membership",
+    });
+    const reordered = try database.reorderExercise(allocator, .{
+        .metadata = metadata("reorder-bench"),
+        .scope = scope,
+        .workout_id = start.workout_id,
+        .expected_revision = 3,
+        .membership_id = .{ .bytes = "bench-membership" },
+        .anchor = .beginning,
+    });
+    try expectOrder(reordered.accepted.workout, &.{
+        "bench-membership",
+        "row-membership",
+    });
+    const removed = try database.removeExercise(allocator, .{
+        .metadata = metadata("remove-row"),
+        .scope = scope,
+        .workout_id = start.workout_id,
+        .expected_revision = 4,
+        .membership_id = .{ .bytes = "row-membership" },
+    });
+    try expectOrder(removed.accepted.workout, &.{"bench-membership"});
+
+    const persisted = try database.readWorkout(allocator, .{
+        .scope = scope,
+        .workout_id = start.workout_id,
+    });
+    try std.testing.expectEqual(@as(u64, 5), persisted.found.revision);
+    try expectOrder(persisted.found, &.{"bench-membership"});
+
+    const rejected = try database.reorderExercise(allocator, .{
+        .metadata = metadata("bad-reorder"),
+        .scope = scope,
+        .workout_id = start.workout_id,
+        .expected_revision = 5,
+        .membership_id = .{ .bytes = "bench-membership" },
+        .anchor = .{ .after = .{ .bytes = "missing-membership" } },
+    });
+    try expectRejected(rejected, tracking.issue_codes.invalid_exercise_anchor);
+    const unchanged = try database.readWorkout(allocator, .{
+        .scope = scope,
+        .workout_id = start.workout_id,
+    });
+    try std.testing.expectEqual(@as(u64, 5), unchanged.found.revision);
+    try expectOrder(unchanged.found, &.{"bench-membership"});
+}
+
+test "adapter distinguishes archived and missing catalog exercises" {
+    const database = try sqlite.openInMemory(.{});
+    defer database.close();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const catalog_scope: persistence.CatalogScope = .{
+        .host_scope_key = scope.host_scope_key.bytes,
+        .as_of = start.started_at.bytes,
+    };
+    try database.replaceCatalog(allocator, catalog_scope, &.{
+        persistence.canonical.Exercise{ .id = "archived" },
+    });
+    try database.replaceCatalog(allocator, catalog_scope, &.{});
+    _ = try database.startWorkout(allocator, start);
+
+    const archived = try database.addExercise(allocator, .{
+        .metadata = metadata("add-archived"),
+        .scope = scope,
+        .workout_id = start.workout_id,
+        .expected_revision = 1,
+        .membership_id = .{ .bytes = "membership-1" },
+        .exercise_id = .{ .bytes = "archived" },
+        .anchor = .end,
+    });
+    try expectRejected(archived, tracking.issue_codes.exercise_archived);
+    const missing = try database.addExercise(allocator, .{
+        .metadata = metadata("add-missing"),
+        .scope = scope,
+        .workout_id = start.workout_id,
+        .expected_revision = 1,
+        .membership_id = .{ .bytes = "membership-1" },
+        .exercise_id = .{ .bytes = "never-existed" },
+        .anchor = .end,
+    });
+    try expectRejected(missing, tracking.issue_codes.exercise_not_found);
+}
+
+fn metadata(command_id: []const u8) tracking.CommandMetadata {
+    return .{
+        .command_id = .{ .bytes = command_id },
+        .occurred_at = .{ .bytes = "2026-07-26T12:01:00Z" },
+    };
+}
+
+fn expectOrder(workout: tracking.Workout, expected: []const []const u8) !void {
+    try std.testing.expectEqual(expected.len, workout.exercises.len);
+    for (expected, workout.exercises) |id, membership| {
+        try std.testing.expectEqualStrings(id, membership.id.bytes);
+    }
 }
 
 fn expectAccepted(

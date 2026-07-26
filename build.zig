@@ -407,6 +407,10 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
+                .{
+                    .name = "caudex_persistence",
+                    .module = persistence_module,
+                },
                 .{ .name = "caudex_tracking", .module = tracking_module },
                 .{ .name = "caudex_sqlite", .module = sqlite_module },
             },
@@ -487,8 +491,8 @@ pub fn build(b: *std.Build) void {
         \\Database: :memory:
         \\Kind: memory
         \\Adapter version: 0.1.0
-        \\Schema version: 2
-        \\Supported schema: 1-2
+        \\Schema version: 3
+        \\Supported schema: 1-3
         \\Compatibility: current
         \\
     );
@@ -505,8 +509,8 @@ pub fn build(b: *std.Build) void {
     cli_database_json.expectStdOutEqual(
         "{\"schemaVersion\":1,\"kind\":\"caudex.database.info\",\"data\":{" ++
             "\"databasePath\":\":memory:\",\"databaseKind\":\"memory\"," ++
-            "\"adapterVersion\":\"0.1.0\",\"databaseSchemaVersion\":2," ++
-            "\"minimumSchemaVersion\":1,\"latestSchemaVersion\":2," ++
+            "\"adapterVersion\":\"0.1.0\",\"databaseSchemaVersion\":3," ++
+            "\"minimumSchemaVersion\":1,\"latestSchemaVersion\":3," ++
             "\"compatibility\":\"current\"}}\n",
     );
 
@@ -551,8 +555,8 @@ pub fn build(b: *std.Build) void {
         "{\"schemaVersion\":1,\"kind\":\"caudex.database.info\",\"data\":{" ++
             "\"databasePath\":\".zig-cache/cwe112-broken-pipe.sqlite\"," ++
             "\"databaseKind\":\"file\",\"adapterVersion\":\"0.1.0\"," ++
-            "\"databaseSchemaVersion\":2,\"minimumSchemaVersion\":1," ++
-            "\"latestSchemaVersion\":2,\"compatibility\":\"current\"}}\n",
+            "\"databaseSchemaVersion\":3,\"minimumSchemaVersion\":1," ++
+            "\"latestSchemaVersion\":3,\"compatibility\":\"current\"}}\n",
     );
 
     const cli_workout_start_test = b.addSystemCommand(&.{
