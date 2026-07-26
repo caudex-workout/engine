@@ -1,0 +1,37 @@
+{
+  "name": "@caudex/persistence-indexeddb",
+  "version": "0.2.0-dev",
+  "description": "Optional IndexedDB persistence adapter for Caudex browser hosts",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "peerDependencies": {
+    "@caudex/persistence": ">=0.2.0-dev <1",
+    "@caudex/workout-engine": ">=0.1.0 <1"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "devDependencies": {
+    "@caudex/persistence": "file:../persistence",
+    "@caudex/workout-engine": "file:../npm/workout-engine",
+    "fake-indexeddb": "6.2.4",
+    "typescript": "5.9.2"
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.json"
+  }
+}

@@ -273,6 +273,41 @@ pub fn build(b: *std.Build) void {
         "packages/npm/workout-engine/scripts/build-package.mjs",
     });
     npm_package_build.addArtifactArg(wasm_runtime);
+
+    const persistence_package_build = b.addSystemCommand(&.{
+        "node",
+        "packages/npm/workout-engine/node_modules/typescript/bin/tsc",
+        "--project",
+        "packages/persistence/tsconfig.json",
+    });
+    const indexeddb_package_build = b.addSystemCommand(&.{
+        "npm",
+        "run",
+        "build",
+        "--prefix",
+        "packages/persistence-indexeddb",
+    });
+    indexeddb_package_build.step.dependOn(&persistence_package_build.step);
+    const indexeddb_adapter_test = b.addSystemCommand(&.{
+        "node",
+        "--experimental-strip-types",
+        "--disable-warning=ExperimentalWarning",
+        "tests/indexeddb_adapter_test.ts",
+    });
+    indexeddb_adapter_test.step.dependOn(&indexeddb_package_build.step);
+    const indexeddb_clean_smoke = b.addSystemCommand(&.{
+        "node",
+        "tests/indexeddb_clean_smoke.mjs",
+    });
+    indexeddb_clean_smoke.step.dependOn(&npm_package_build.step);
+    indexeddb_clean_smoke.step.dependOn(&indexeddb_package_build.step);
+    const indexeddb_test_step = b.step(
+        "test-persistence-indexeddb",
+        "Build and test the optional IndexedDB persistence adapter",
+    );
+    indexeddb_test_step.dependOn(&indexeddb_adapter_test.step);
+    indexeddb_test_step.dependOn(&indexeddb_clean_smoke.step);
+
     const npm_package_test = b.addSystemCommand(&.{
         "node",
         "tests/npm_package_artifact_test.mjs",
@@ -410,6 +445,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&typescript_loader_test.step);
     test_step.dependOn(&methodology_factory_test.step);
     test_step.dependOn(&npm_package_test.step);
+    test_step.dependOn(&indexeddb_adapter_test.step);
+    test_step.dependOn(&indexeddb_clean_smoke.step);
     test_step.dependOn(&npm_clean_smoke.step);
     test_step.dependOn(&npm_release_test.step);
     test_step.dependOn(&docs_quickstart_test.step);

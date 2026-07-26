@@ -63,3 +63,13 @@ test "core source has no forbidden effect or dependency imports" {
         }
     }
 }
+
+test "core npm package has no persistence adapter dependency" {
+    const manifest = @embedFile("packages/npm/workout-engine/package.json");
+    try std.testing.expect(
+        std.mem.indexOf(u8, manifest, "@caudex/persistence") == null,
+    );
+    try std.testing.expect(
+        std.mem.indexOf(u8, manifest, "indexeddb") == null,
+    );
+}
