@@ -43,9 +43,14 @@ missing exports, and runtime creation failures throw
 `CaudexInitializationError` with a typed `code`. Failures after successful
 initialization that prevent safe execution throw `CaudexRuntimeError`.
 
-The public `Caudex` value exposes only `recommendSession()` and `dispose()`.
-Linear-memory addresses, allocation functions, result descriptors, and runtime
-handles remain private to the loader.
+The public `Caudex` value exposes `recommendSession()`,
+`evaluatePerformance()`, and `dispose()`. Linear-memory addresses, allocation
+functions, result descriptors, and runtime handles remain private to the
+loader.
+
+The v0.1 npm evaluation boundary supports double progression. Requests for
+other methodology implementations return the same structured unsupported
+methodology result used by recommendation requests.
 
 ## Methodology factories
 
@@ -122,8 +127,9 @@ bundler for v0.1; other bundlers are not part of the current compatibility
 claim.
 
 The package has no runtime dependencies. Its development-only dependencies are
-TypeScript (Apache-2.0), used to compile the installed declarations, and Rollup
-(MIT), used to bundle the installed browser entry point.
+TypeScript (Apache-2.0), used to compile the installed declarations; Rollup
+(MIT), used to bundle browser entry points; and Rollup's node-resolution plugin
+(MIT), used to resolve the package import in the checked-in browser example.
 
 ## Testing utilities
 

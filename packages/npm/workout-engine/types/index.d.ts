@@ -113,6 +113,17 @@ export interface RecommendationRequest {
   tieBreakSeed?: string;
 }
 
+export interface EvaluationRequest {
+  schemaVersion: 1;
+  asOf: string;
+  methodology: MethodologyRef<unknown>;
+  methodologyState?: MethodologyState;
+  catalog: Exercise[];
+  athlete?: Athlete;
+  history?: { workouts?: CompletedWorkout[]; summaries?: JsonValue };
+  completedWorkout: CompletedWorkout;
+}
+
 export type Severity = "info" | "warning" | "error";
 
 export interface ValidationIssue {
@@ -173,6 +184,27 @@ export interface RecommendationResult {
   metadata: ResultMetadata;
 }
 
+export interface ExerciseEvaluation {
+  exerciseId: string;
+  outcome: string;
+  explanationRefs?: string[];
+}
+
+export interface PerformanceEvaluation {
+  outcome: string;
+  exercises: ExerciseEvaluation[];
+}
+
+export interface EvaluationResult {
+  ok: boolean;
+  evaluation?: PerformanceEvaluation;
+  nextMethodologyState?: MethodologyState;
+  explanations?: Explanation[];
+  warnings?: ValidationIssue[];
+  issues?: ValidationIssue[];
+  metadata: ResultMetadata;
+}
+
 export type InitializationErrorCode =
   | "wasm_load_failed"
   | "wasm_compile_failed"
@@ -199,6 +231,7 @@ export interface CreateCaudexOptions {
 
 export interface Caudex {
   recommendSession(request: RecommendationRequest): RecommendationResult;
+  evaluatePerformance(request: EvaluationRequest): EvaluationResult;
   dispose(): void;
 }
 

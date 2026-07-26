@@ -18,6 +18,7 @@ The v1 module exports:
 - `memory`
 - `caudex_abi_version`
 - `caudex_runtime_execute`
+- `caudex_wasm_runtime_evaluate`
 - `caudex_buffer_free`
 - `caudex_wasm_alloc`
 - `caudex_wasm_free`
@@ -27,6 +28,10 @@ The v1 module exports:
 These are an internal wrapper boundary for the TypeScript loader. They are not
 the intended JavaScript user API, and raw pointers must not escape the facade
 implemented by CWE-061.
+
+`caudex_runtime_execute` accepts canonical recommendation requests.
+`caudex_wasm_runtime_evaluate` accepts canonical evaluation requests. Both use
+the same request, result-descriptor, status, and ownership conventions.
 
 ## Ownership
 
@@ -59,10 +64,14 @@ With Zig 0.16.0 on 2026-07-26:
 mode: ReleaseSmall
 target: wasm32-freestanding
 artifact: caudex.wasm
-size: 201,481 bytes
+size: 233,102 bytes
 imports: 0
 ```
 
 This is a tracking baseline, not yet a release-size budget. Changes should
 record and explain material growth rather than optimizing away validation,
 determinism, or safe ownership.
+
+The increase from the original 201,481-byte baseline adds canonical evaluation
+translation, deterministic evaluation result construction, and proposed-state
+encoding to the npm/WebAssembly boundary.

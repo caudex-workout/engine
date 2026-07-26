@@ -76,21 +76,30 @@ pub export fn caudex_runtime_execute(
     else
         request_data.?[0..request_len];
 
-    execute(active, input, result) catch |err| return switch (err) {
-        error.OutOfMemory => .out_of_memory,
-        error.UnsupportedVersion => .unsupported_version,
-        error.UnsupportedMethodology => .unsupported_methodology,
-        error.OutputLimitReached => .output_limit_reached,
-        error.InvalidRequest,
-        error.InputTooLarge,
-        error.InvalidUtf8,
-        error.MalformedJson,
-        error.NestingLimitExceeded,
-        error.CollectionLimitExceeded,
-        error.ValueTooLarge,
-        error.InvalidDecimal,
-        => .invalid_request,
-    };
+    execute(active, input, result) catch |err| return statusForError(err);
+    return .ok;
+}
+
+/// Executes the canonical evaluation operation for the WebAssembly facade.
+pub fn runtimeEvaluate(
+    runtime: ?*Runtime,
+    request_data: ?[*]const u8,
+    request_len: usize,
+    out_result: ?*Buffer,
+) Status {
+    const active = runtime orelse return .invalid_argument;
+    const result = out_result orelse return .invalid_argument;
+    if (result.data != null or result.len != 0 or result.capacity != 0) {
+        return .invalid_argument;
+    }
+    if (request_data == null and request_len != 0) return .invalid_argument;
+    const input = if (request_len == 0)
+        @as([]const u8, &.{})
+    else
+        request_data.?[0..request_len];
+
+    executeEvaluation(active, input, result) catch |err|
+        return statusForError(err);
     return .ok;
 }
 
@@ -110,6 +119,24 @@ pub export fn caudex_buffer_free(
 
 const ExecuteError = canonical_json.DecodeError || engine.RecommendError ||
     error{InvalidRequest};
+
+fn statusForError(err: ExecuteError) Status {
+    return switch (err) {
+        error.OutOfMemory => .out_of_memory,
+        error.UnsupportedVersion => .unsupported_version,
+        error.UnsupportedMethodology => .unsupported_methodology,
+        error.OutputLimitReached => .output_limit_reached,
+        error.InvalidRequest,
+        error.InputTooLarge,
+        error.InvalidUtf8,
+        error.MalformedJson,
+        error.NestingLimitExceeded,
+        error.CollectionLimitExceeded,
+        error.ValueTooLarge,
+        error.InvalidDecimal,
+        => .invalid_request,
+    };
+}
 
 fn execute(
     runtime: *Runtime,
@@ -139,6 +166,217 @@ fn execute(
         .len = encoded.len,
         .capacity = bytes.len,
     };
+}
+
+const EvaluationWireResult = struct {
+    ok: bool = true,
+    evaluation: canonical.PerformanceEvaluation,
+    nextMethodologyState: double_progression.State,
+    explanations: []const canonical.Explanation,
+    warnings: []const canonical.ValidationIssue,
+    issues: []const canonical.ValidationIssue = &.{},
+    metadata: canonical.ResultMetadata,
+};
+
+fn executeEvaluation(
+    runtime: *Runtime,
+    input: []const u8,
+    out: *Buffer,
+) ExecuteError!void {
+    const document = try canonical_json.decodeEvaluationRequest(
+        runtime.allocator(),
+        input,
+        .{},
+    );
+    defer document.deinit();
+
+    var arena = std.heap.ArenaAllocator.init(runtime.allocator());
+    defer arena.deinit();
+    const request = try translateEvaluationRequest(
+        arena.allocator(),
+        document.value,
+    );
+    var engine_output: engine.EvaluationOutput = .{};
+    const evaluation = try engine.evaluatePerformance(request, &engine_output);
+
+    const exercise_count = evaluation.exercises.len;
+    const exercises = arena.allocator().alloc(
+        canonical.ExerciseEvaluation,
+        exercise_count,
+    ) catch return error.OutOfMemory;
+    const explanations = arena.allocator().alloc(
+        canonical.Explanation,
+        exercise_count,
+    ) catch return error.OutOfMemory;
+    const warning_storage = arena.allocator().alloc(
+        canonical.ValidationIssue,
+        exercise_count,
+    ) catch return error.OutOfMemory;
+    const reference_storage = arena.allocator().alloc(
+        [1][]const u8,
+        exercise_count,
+    ) catch return error.OutOfMemory;
+    var warning_len: usize = 0;
+    for (evaluation.exercises, 0..) |item, index| {
+        const explanation_id = std.fmt.allocPrint(
+            arena.allocator(),
+            "explanation-{d}",
+            .{index + 1},
+        ) catch return error.OutOfMemory;
+        reference_storage[index] = .{explanation_id};
+        exercises[index] = .{
+            .exerciseId = item.exercise_id,
+            .outcome = item.outcome,
+            .explanationRefs = &reference_storage[index],
+        };
+        explanations[index] = .{
+            .id = explanation_id,
+            .code = item.explanation.code,
+            .category = "progression",
+            .summary = item.explanation.summary,
+            .subject = .{ .exerciseId = item.exercise_id },
+            .evidence = &.{.{ .path = "/completedWorkout" }},
+            .ruleId = item.explanation.rule_id,
+            .severity = .info,
+        };
+        if (item.warning) |warning| {
+            warning_storage[warning_len] = warning;
+            warning_len += 1;
+        }
+    }
+
+    var input_fingerprint: [64]u8 = undefined;
+    var result_fingerprint: [64]u8 = undefined;
+    const canonical_input_storage = arena.allocator().alloc(
+        u8,
+        max_result_bytes,
+    ) catch return error.OutOfMemory;
+    const canonical_input = canonical_json.encode(
+        document.value,
+        canonical_input_storage,
+    ) catch return error.OutputLimitReached;
+    fingerprintBytes(
+        "caudex:evaluation-request:v1\x00",
+        canonical_input,
+        &input_fingerprint,
+    );
+    var result_hash = std.crypto.hash.sha2.Sha256.init(.{});
+    result_hash.update("caudex:evaluation-result:v1\x00");
+    result_hash.update(&input_fingerprint);
+    result_hash.update(evaluation.outcome);
+    for (evaluation.exercises) |item| {
+        result_hash.update(item.exercise_id);
+        result_hash.update(item.outcome);
+        result_hash.update(item.explanation.code);
+    }
+    finishHex(&result_hash, &result_fingerprint);
+
+    const wire = EvaluationWireResult{
+        .evaluation = .{
+            .outcome = evaluation.outcome,
+            .exercises = exercises,
+        },
+        .nextMethodologyState = evaluation.next_state,
+        .explanations = explanations,
+        .warnings = warning_storage[0..warning_len],
+        .metadata = .{
+            .engineVersion = engine.engine_version,
+            .schemaVersion = engine.schema_version,
+            .methodology = .{
+                .id = request.methodology_id.bytes,
+                .version = "0.1.0",
+                .configVersion = double_progression.config_version,
+            },
+            .inputFingerprint = &input_fingerprint,
+            .resultFingerprint = &result_fingerprint,
+        },
+    };
+    const bytes = runtime.allocator().alloc(u8, max_result_bytes) catch
+        return error.OutOfMemory;
+    errdefer runtime.allocator().free(bytes);
+    const encoded = canonical_json.encode(wire, bytes) catch
+        return error.OutputLimitReached;
+    out.* = .{
+        .data = bytes.ptr,
+        .len = encoded.len,
+        .capacity = bytes.len,
+    };
+}
+
+fn translateEvaluationRequest(
+    allocator: std.mem.Allocator,
+    request: canonical.EvaluationRequest,
+) ExecuteError!engine.EvaluationRequest {
+    if (!std.mem.eql(
+        u8,
+        request.methodology.id,
+        double_progression.methodology_id,
+    )) {
+        return error.UnsupportedMethodology;
+    }
+    if (request.methodology.configVersion != double_progression.config_version) {
+        return error.UnsupportedVersion;
+    }
+    const config = std.json.parseFromValueLeaky(
+        double_progression.Config,
+        allocator,
+        request.methodology.config,
+        .{ .ignore_unknown_fields = false },
+    ) catch return error.InvalidRequest;
+    const completed_workout = allocator.create(training.CompletedWorkout) catch
+        return error.OutOfMemory;
+    completed_workout.* = .{
+        .id = primitives.Id.parse(request.completedWorkout.id) catch
+            return error.InvalidRequest,
+        .started_at = primitives.Timestamp.parse(
+            request.completedWorkout.startedAt,
+        ) catch return error.InvalidRequest,
+        .completed_at = primitives.Timestamp.parse(
+            request.completedWorkout.completedAt,
+        ) catch return error.InvalidRequest,
+        .exercises = try translateCompletedExercises(
+            allocator,
+            request.completedWorkout.exercises,
+        ),
+    };
+    return .{
+        .as_of = primitives.Timestamp.parse(request.asOf) catch
+            return error.InvalidRequest,
+        .methodology_id = primitives.Id.parse(request.methodology.id) catch
+            return error.InvalidRequest,
+        .methodology_version = try resolvedVersion(
+            request.methodology.versionRequirement,
+        ),
+        .config = config,
+        .methodology_state = try translateState(
+            allocator,
+            request.methodologyState,
+            config,
+        ),
+        .catalog = try translateCatalog(allocator, request.catalog),
+        .completed_workout = completed_workout,
+    };
+}
+
+fn fingerprintBytes(
+    domain: []const u8,
+    bytes: []const u8,
+    out: *[64]u8,
+) void {
+    var hash = std.crypto.hash.sha2.Sha256.init(.{});
+    hash.update(domain);
+    hash.update(bytes);
+    finishHex(&hash, out);
+}
+
+fn finishHex(hash: *std.crypto.hash.sha2.Sha256, out: *[64]u8) void {
+    var digest: [32]u8 = undefined;
+    hash.final(&digest);
+    const alphabet = "0123456789abcdef";
+    for (digest, 0..) |byte, index| {
+        out[index * 2] = alphabet[byte >> 4];
+        out[index * 2 + 1] = alphabet[byte & 0x0f];
+    }
 }
 
 fn translateRequest(

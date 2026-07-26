@@ -45,6 +45,7 @@
     "provenance": true
   },
   "devDependencies": {
+    "@rollup/plugin-node-resolve": "16.0.3",
     "rollup": "4.62.2",
     "typescript": "5.9.2"
   },

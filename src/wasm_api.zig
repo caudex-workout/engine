@@ -6,6 +6,7 @@ comptime {
     _ = c_api.caudex_runtime_create;
     _ = c_api.caudex_runtime_destroy;
     _ = c_api.caudex_runtime_execute;
+    _ = c_api.runtimeEvaluate;
     _ = c_api.caudex_buffer_free;
 }
 
@@ -34,4 +35,27 @@ pub export fn caudex_wasm_runtime_create() usize {
 pub export fn caudex_wasm_runtime_destroy(runtime: usize) void {
     if (runtime == 0) return;
     c_api.caudex_runtime_destroy(@ptrFromInt(runtime));
+}
+
+/// Evaluates a canonical completed-workout request through the active runtime.
+pub export fn caudex_wasm_runtime_evaluate(
+    runtime: usize,
+    request_pointer: usize,
+    request_len: usize,
+    descriptor_pointer: usize,
+) c_api.Status {
+    const request: ?[*]const u8 = if (request_pointer == 0)
+        null
+    else
+        @ptrFromInt(request_pointer);
+    const descriptor: ?*c_api.Buffer = if (descriptor_pointer == 0)
+        null
+    else
+        @ptrFromInt(descriptor_pointer);
+    return c_api.runtimeEvaluate(
+        if (runtime == 0) null else @ptrFromInt(runtime),
+        request,
+        request_len,
+        descriptor,
+    );
 }

@@ -133,6 +133,17 @@ export interface RecommendationRequest {
   tieBreakSeed?: string;
 }
 
+export interface EvaluationRequest {
+  schemaVersion: 1;
+  asOf: string;
+  methodology: MethodologyRef<unknown>;
+  methodologyState?: MethodologyState;
+  catalog: Exercise[];
+  athlete?: Athlete;
+  history?: { workouts?: CompletedWorkout[]; summaries?: JsonValue };
+  completedWorkout: CompletedWorkout;
+}
+
 export type Severity = "info" | "warning" | "error";
 
 export interface ValidationIssue {
@@ -197,6 +208,27 @@ export interface RecommendationResult {
   metadata: ResultMetadata;
 }
 
+export interface ExerciseEvaluation {
+  exerciseId: string;
+  outcome: string;
+  explanationRefs?: string[];
+}
+
+export interface PerformanceEvaluation {
+  outcome: string;
+  exercises: ExerciseEvaluation[];
+}
+
+export interface EvaluationResult {
+  ok: boolean;
+  evaluation?: PerformanceEvaluation;
+  nextMethodologyState?: MethodologyState;
+  explanations?: Explanation[];
+  warnings?: ValidationIssue[];
+  issues?: ValidationIssue[];
+  metadata: ResultMetadata;
+}
+
 export type InitializationErrorCode =
   | "wasm_load_failed"
   | "wasm_compile_failed"
@@ -234,6 +266,7 @@ export interface CreateCaudexOptions {
 
 export interface Caudex {
   recommendSession(request: RecommendationRequest): RecommendationResult;
+  evaluatePerformance(request: EvaluationRequest): EvaluationResult;
   dispose(): void;
 }
 
@@ -241,6 +274,12 @@ interface WasmExports extends WebAssembly.Exports {
   memory: WebAssembly.Memory;
   caudex_abi_version(): number;
   caudex_runtime_execute(
+    runtime: number,
+    requestPointer: number,
+    requestLength: number,
+    descriptorPointer: number,
+  ): number;
+  caudex_wasm_runtime_evaluate(
     runtime: number,
     requestPointer: number,
     requestLength: number,
@@ -257,6 +296,7 @@ const REQUIRED_EXPORTS = [
   "memory",
   "caudex_abi_version",
   "caudex_runtime_execute",
+  "caudex_wasm_runtime_evaluate",
   "caudex_buffer_free",
   "caudex_wasm_alloc",
   "caudex_wasm_free",
@@ -377,69 +417,87 @@ function requireExports(raw: WebAssembly.Exports): WasmExports {
 
 function createFacade(exports: WasmExports, runtime: number): Caudex {
   let disposed = false;
-  return {
-    recommendSession(request) {
-      if (disposed) {
-        throw new CaudexRuntimeError("The Caudex runtime has been disposed.");
-      }
-      let requestBytes: Uint8Array;
-      try {
-        requestBytes = new TextEncoder().encode(JSON.stringify(request));
-      } catch {
-        return invalidResult(
-          request,
-          "protocol.invalid_request",
-          "The request is not JSON serializable.",
-        );
-      }
+  const execute = <
+    Request extends RecommendationRequest | EvaluationRequest,
+    Result extends RecommendationResult | EvaluationResult,
+  >(
+    request: Request,
+    operation: WasmExports["caudex_runtime_execute"],
+  ): Result => {
+    if (disposed) {
+      throw new CaudexRuntimeError("The Caudex runtime has been disposed.");
+    }
+    let requestBytes: Uint8Array;
+    try {
+      requestBytes = new TextEncoder().encode(JSON.stringify(request));
+    } catch {
+      return invalidResult<Result>(
+        request,
+        "protocol.invalid_request",
+        "The request is not JSON serializable.",
+      );
+    }
 
-      const requestPointer = exports.caudex_wasm_alloc(requestBytes.length);
-      const descriptorPointer = exports.caudex_wasm_alloc(12);
-      if (requestPointer === 0 || descriptorPointer === 0) {
-        if (descriptorPointer !== 0) exports.caudex_wasm_free(descriptorPointer, 12);
-        if (requestPointer !== 0) {
-          exports.caudex_wasm_free(requestPointer, requestBytes.length);
-        }
-        throw new CaudexRuntimeError("WebAssembly request allocation failed.");
-      }
-      try {
-        new Uint8Array(
-          exports.memory.buffer,
-          requestPointer,
-          requestBytes.length,
-        ).set(requestBytes);
-        new Uint8Array(exports.memory.buffer, descriptorPointer, 12).fill(0);
-        const status = exports.caudex_runtime_execute(
-          runtime,
-          requestPointer,
-          requestBytes.length,
-          descriptorPointer,
-        );
-        if (status !== 0) return statusResult(request, status);
-
-        const descriptor = new DataView(
-          exports.memory.buffer,
-          descriptorPointer,
-          12,
-        );
-        const resultPointer = descriptor.getUint32(0, true);
-        const resultLength = descriptor.getUint32(4, true);
-        const resultBytes = new Uint8Array(
-          exports.memory.buffer,
-          resultPointer,
-          resultLength,
-        );
-        return JSON.parse(new TextDecoder().decode(resultBytes)) as RecommendationResult;
-      } catch (cause) {
-        if (cause instanceof CaudexRuntimeError) throw cause;
-        throw new CaudexRuntimeError(
-          "The WebAssembly runtime returned an unreadable result.",
-        );
-      } finally {
-        exports.caudex_buffer_free(runtime, descriptorPointer);
-        exports.caudex_wasm_free(descriptorPointer, 12);
+    const requestPointer = exports.caudex_wasm_alloc(requestBytes.length);
+    const descriptorPointer = exports.caudex_wasm_alloc(12);
+    if (requestPointer === 0 || descriptorPointer === 0) {
+      if (descriptorPointer !== 0) exports.caudex_wasm_free(descriptorPointer, 12);
+      if (requestPointer !== 0) {
         exports.caudex_wasm_free(requestPointer, requestBytes.length);
       }
+      throw new CaudexRuntimeError("WebAssembly request allocation failed.");
+    }
+    try {
+      new Uint8Array(
+        exports.memory.buffer,
+        requestPointer,
+        requestBytes.length,
+      ).set(requestBytes);
+      new Uint8Array(exports.memory.buffer, descriptorPointer, 12).fill(0);
+      const status = operation(
+        runtime,
+        requestPointer,
+        requestBytes.length,
+        descriptorPointer,
+      );
+      if (status !== 0) return statusResult<Result>(request, status);
+
+      const descriptor = new DataView(
+        exports.memory.buffer,
+        descriptorPointer,
+        12,
+      );
+      const resultPointer = descriptor.getUint32(0, true);
+      const resultLength = descriptor.getUint32(4, true);
+      const resultBytes = new Uint8Array(
+        exports.memory.buffer,
+        resultPointer,
+        resultLength,
+      );
+      return JSON.parse(new TextDecoder().decode(resultBytes)) as Result;
+    } catch (cause) {
+      if (cause instanceof CaudexRuntimeError) throw cause;
+      throw new CaudexRuntimeError(
+        "The WebAssembly runtime returned an unreadable result.",
+      );
+    } finally {
+      exports.caudex_buffer_free(runtime, descriptorPointer);
+      exports.caudex_wasm_free(descriptorPointer, 12);
+      exports.caudex_wasm_free(requestPointer, requestBytes.length);
+    }
+  };
+  return {
+    recommendSession(request) {
+      return execute<RecommendationRequest, RecommendationResult>(
+        request,
+        exports.caudex_runtime_execute,
+      );
+    },
+    evaluatePerformance(request) {
+      return execute<EvaluationRequest, EvaluationResult>(
+        request,
+        exports.caudex_wasm_runtime_evaluate,
+      );
     },
     dispose() {
       if (!disposed) {
@@ -450,26 +508,26 @@ function createFacade(exports: WasmExports, runtime: number): Caudex {
   };
 }
 
-function statusResult(
-  request: RecommendationRequest,
+function statusResult<Result extends RecommendationResult | EvaluationResult>(
+  request: RecommendationRequest | EvaluationRequest,
   status: number,
-): RecommendationResult {
+): Result {
   if (status === STATUS_INVALID_REQUEST) {
-    return invalidResult(
+    return invalidResult<Result>(
       request,
       "protocol.invalid_request",
       "The canonical request is invalid.",
     );
   }
   if (status === STATUS_UNSUPPORTED_VERSION) {
-    return invalidResult(
+    return invalidResult<Result>(
       request,
       "protocol.unsupported_version",
       "A requested protocol or methodology version is unsupported.",
     );
   }
   if (status === STATUS_UNSUPPORTED_METHODOLOGY) {
-    return invalidResult(
+    return invalidResult<Result>(
       request,
       "methodology.unsupported",
       "The requested methodology is not compiled into this runtime.",
@@ -481,14 +539,15 @@ function statusResult(
   );
 }
 
-function invalidResult(
-  request: RecommendationRequest,
+function invalidResult<
+  Result extends RecommendationResult | EvaluationResult,
+>(
+  request: RecommendationRequest | EvaluationRequest,
   code: string,
   message: string,
-): RecommendationResult {
+): Result {
   return {
     ok: false,
-    alternatives: [],
     explanations: [],
     warnings: [],
     issues: [
@@ -510,7 +569,7 @@ function invalidResult(
       inputFingerprint: "",
       resultFingerprint: "",
     },
-  };
+  } as Result;
 }
 
 function isNode(): boolean {

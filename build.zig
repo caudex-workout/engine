@@ -280,6 +280,17 @@ pub fn build(b: *std.Build) void {
     );
     testing_utilities_step.dependOn(&testing_utilities_test.step);
 
+    const npm_examples_test = b.addSystemCommand(&.{
+        "node",
+        "tests/npm_examples_test.mjs",
+    });
+    npm_examples_test.step.dependOn(&npm_package_build.step);
+    const npm_examples_step = b.step(
+        "test-npm-examples",
+        "Compile and run the packed Node and browser examples",
+    );
+    npm_examples_step.dependOn(&npm_examples_test.step);
+
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&run_library_tests.step);
     test_step.dependOn(&run_contract_tests.step);
@@ -299,4 +310,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&methodology_guides_test.step);
     test_step.dependOn(&data_mapping_guide_test.step);
     test_step.dependOn(&testing_utilities_test.step);
+    test_step.dependOn(&npm_examples_test.step);
 }

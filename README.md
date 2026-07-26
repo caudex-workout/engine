@@ -81,6 +81,10 @@ Framework-neutral builders, determinism checks, explanation assertions, and
 canonical fixture loading are available from
 `@caudex/workout-engine/testing`.
 
+The checked-in [Node](examples/typescript-node/recommend-and-evaluate.ts) and
+[browser](examples/browser/README.md) examples consume the packed public API
+and demonstrate both recommendation and completed-performance evaluation.
+
 Caudex Workout Engine is an open-source, embeddable strength and hypertrophy
 programming engine for developers. Applications supply explicit training
 snapshots and methodology configuration; Caudex returns deterministic,
