@@ -2,13 +2,14 @@
 
 ## npm quickstart
 
-> **Design target:** The npm package is not published yet. This example defines
-> the intended five-minute API and is saved as a future executable
-> documentation test.
+Install the package into a Node.js 22 or newer project:
 
 ```bash
 npm install @caudex/workout-engine
 ```
+
+Then create an engine, supply a complete request snapshot, and inspect the
+result:
 
 ```ts
 import {
@@ -43,17 +44,30 @@ const request: RecommendationRequest = {
 
 const result = caudex.recommendSession(request);
 if (!result.ok) {
-  console.error(result.issues);
+  throw new Error(`Request rejected: ${JSON.stringify(result.issues)}`);
 } else {
-  console.log(result.recommendation);
-  console.log(result.explanations);
+  const exercise = result.recommendation?.exercises[0];
+  const explanation = result.explanations?.[0];
+  console.log(exercise?.exerciseId);
+  console.log(explanation?.code, explanation?.summary);
 }
+
+caudex.dispose();
 ```
 
-The complete future documentation test is
+This produces an `incline-dumbbell-press` recommendation and a structured
+`exercise.selected.available_equipment` explanation. The complete example is
 [`examples/typescript-node/quickstart.ts`](examples/typescript-node/quickstart.ts).
-After package installation, it runs locally without a database, account, or
-runtime network request.
+It is compiled and executed against the packed npm artifact by
+`zig build test-docs-quickstart`.
+
+The package is not yet published to the public npm registry. Until the first
+release, the same flow is exercised from the locally packed artifact.
+
+See the [quickstart and concepts guide](docs/quickstart-and-concepts.md) for the
+request/result model, explanation references, data ownership, deterministic
+inputs, and error handling. No database, account, or runtime network request is
+required.
 
 Caudex Workout Engine is an open-source, embeddable strength and hypertrophy
 programming engine for developers. Applications supply explicit training

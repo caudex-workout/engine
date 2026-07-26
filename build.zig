@@ -237,6 +237,17 @@ pub fn build(b: *std.Build) void {
     );
     npm_release_step.dependOn(&npm_release_test.step);
 
+    const docs_quickstart_test = b.addSystemCommand(&.{
+        "node",
+        "tests/docs_quickstart_test.mjs",
+    });
+    docs_quickstart_test.step.dependOn(&npm_package_build.step);
+    const docs_quickstart_step = b.step(
+        "test-docs-quickstart",
+        "Compile and run the packaged TypeScript quickstart",
+    );
+    docs_quickstart_step.dependOn(&docs_quickstart_test.step);
+
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&run_library_tests.step);
     test_step.dependOn(&run_contract_tests.step);
@@ -252,4 +263,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&npm_package_test.step);
     test_step.dependOn(&npm_clean_smoke.step);
     test_step.dependOn(&npm_release_test.step);
+    test_step.dependOn(&docs_quickstart_test.step);
 }

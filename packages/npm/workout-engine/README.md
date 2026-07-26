@@ -1,4 +1,17 @@
-# TypeScript loader and facade
+# Caudex Workout Engine
+
+Install the ESM package on Node.js 22 or newer:
+
+```bash
+npm install @caudex/workout-engine
+```
+
+The repository's
+[quickstart and concepts guide](../../../docs/quickstart-and-concepts.md) shows
+the complete install-to-result flow, explanation inspection, and host data
+ownership model. It requires no database, account, or runtime network request.
+
+## TypeScript loader and facade
 
 The v0.1 facade is initialized once and accepts ordinary canonical request
 objects:
