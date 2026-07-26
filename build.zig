@@ -420,6 +420,72 @@ pub fn build(b: *std.Build) void {
     sqlite_test_step.dependOn(&run_sqlite_adapter_tests.step);
     sqlite_test_step.dependOn(&run_sqlite_tracking_tests.step);
 
+    const cli_module = b.createModule(.{
+        .root_source_file = b.path("apps/caudex-cli/src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "caudex", .module = module },
+            .{ .name = "caudex_persistence", .module = persistence_module },
+            .{ .name = "caudex_sqlite", .module = sqlite_module },
+        },
+    });
+    const cli = b.addExecutable(.{
+        .name = "caudex",
+        .root_module = cli_module,
+    });
+    b.installArtifact(cli);
+
+    const cli_build_step = b.step("caudex-cli", "Build the caudex reference client");
+    cli_build_step.dependOn(&cli.step);
+
+    const run_cli = b.addRunArtifact(cli);
+    if (b.args) |args| run_cli.addArgs(args);
+    const run_cli_step = b.step("run-caudex-cli", "Run the caudex reference client");
+    run_cli_step.dependOn(&run_cli.step);
+
+    const cli_tests = b.addTest(.{
+        .root_module = cli_module,
+    });
+    const run_cli_tests = b.addRunArtifact(cli_tests);
+
+    const cli_help = b.addRunArtifact(cli);
+    cli_help.addArg("--help");
+    cli_help.expectStdOutEqual(
+        \\Caudex Workout Engine reference client
+        \\
+        \\Usage:
+        \\  caudex --help
+        \\  caudex version
+        \\
+    );
+
+    const cli_version = b.addRunArtifact(cli);
+    cli_version.addArg("version");
+    cli_version.expectStdOutEqual("caudex 0.1.0\n");
+
+    const architecture_probe_files = b.addWriteFiles();
+    const private_import_probe = architecture_probe_files.add("caudex_private_import.zig",
+        \\const private = @import("caudex_private_root");
+        \\pub fn main() void {
+        \\    _ = private;
+        \\}
+        \\
+    );
+    const private_import_check = b.addSystemCommand(&.{
+        "zig",
+        "build-exe",
+        "-fno-emit-bin",
+    });
+    private_import_check.addFileArg(private_import_probe);
+    private_import_check.expectExitCode(1);
+
+    const cli_test_step = b.step("test-caudex-cli", "Test the caudex reference client");
+    cli_test_step.dependOn(&run_cli_tests.step);
+    cli_test_step.dependOn(&cli_help.step);
+    cli_test_step.dependOn(&cli_version.step);
+    cli_test_step.dependOn(&private_import_check.step);
+
     const npm_package_test = b.addSystemCommand(&.{
         "node",
         "tests/npm_package_artifact_test.mjs",
@@ -576,6 +642,10 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&indexeddb_clean_smoke.step);
     test_step.dependOn(&run_sqlite_adapter_tests.step);
     test_step.dependOn(&run_sqlite_tracking_tests.step);
+    test_step.dependOn(&run_cli_tests.step);
+    test_step.dependOn(&cli_help.step);
+    test_step.dependOn(&cli_version.step);
+    test_step.dependOn(&private_import_check.step);
     test_step.dependOn(&npm_clean_smoke.step);
     test_step.dependOn(&npm_release_test.step);
     test_step.dependOn(&docs_quickstart_test.step);
