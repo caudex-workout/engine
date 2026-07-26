@@ -6,8 +6,9 @@ Configuration version: `1`
 
 State schema version: `1`
 
-CWE-040 defines and validates this methodology contract. Recommendation,
-backoff prescription, and evaluation behavior belong to CWE-041 and CWE-042.
+CWE-040 defines and validates this methodology contract. CWE-041 defines the
+top-set recommendation below. Backoff prescription and evaluation behavior
+belong to CWE-042.
 
 ## Configuration
 
@@ -38,3 +39,39 @@ proposal owned by the host and is never implicitly persisted or accepted.
 
 The authoritative schema is
 [`rpe-top-set-backoff-state-v1.schema.json`](../../schemas/methodologies/rpe-top-set-backoff-state-v1.schema.json).
+
+## Top-set recommendation
+
+The recommendation selects an estimated 1RM in this order:
+
+1. The newest completed exercise's first completed `top` set with compatible
+   load, repetitions, and exertion evidence.
+2. The matching exercise's estimated 1RM from methodology state.
+3. `initialEstimatedOneRepMax` from configuration.
+
+History evidence must contain a positive integer `repetitions` metric and
+exactly one `rpe` or `rir` metric. RPE is valid from 1 through 10; RIR is valid
+from 0 through 9. The two scales are equivalent under `RPE = 10 - RIR`.
+Conflicting or out-of-range evidence is rejected. A history load using a
+different mass unit from configuration is rejected rather than converted
+implicitly. Missing compatible evidence uses the next fallback and returns the
+`history.insufficient_evidence` warning.
+
+The Epley v1 calculation is:
+
+```text
+effective repetitions = completed repetitions + (10 - completed RPE)
+estimated 1RM = completed load × (1 + effective repetitions / 30)
+
+target effective repetitions = topSetRepetitions + (10 - targetRpe)
+top-set load = estimated 1RM ÷ (1 + target effective repetitions / 30)
+```
+
+RIR evidence substitutes directly for `(10 - completed RPE)`. Intermediate
+estimated 1RM and load values use exact decimal arithmetic at 0.001 mass-unit
+precision, with ties rounded away from zero. The final load follows the
+configured quantum and `nearest`, `up`, or `down` mode.
+
+The result reports the estimated 1RM, evidence source, formula identity, target
+repetitions and RPE, final load, and a stable explanation code identifying
+whether history, state, or initial configuration determined the estimate.
