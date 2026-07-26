@@ -7,8 +7,8 @@ Configuration version: `1`
 State schema version: `1`
 
 CWE-040 defines and validates this methodology contract. CWE-041 defines the
-top-set recommendation below. Backoff prescription and evaluation behavior
-belong to CWE-042.
+top-set recommendation below. CWE-042 defines backoff prescription and
+evaluation behavior.
 
 ## Configuration
 
@@ -75,3 +75,39 @@ configured quantum and `nearest`, `up`, or `down` mode.
 The result reports the estimated 1RM, evidence source, formula identity, target
 repetitions and RPE, final load, and a stable explanation code identifying
 whether history, state, or initial configuration determined the estimate.
+
+## Backoff prescription
+
+`backoff.calculation` determines the only calculation base:
+
+- `percentage_of_top_set` applies `backoff.percentage` to the rounded
+  recommended top-set load.
+- `percentage_of_estimated_one_rep_max` applies the percentage to the
+  recommendation's estimated 1RM.
+
+The percentage product uses 0.001 mass-unit precision with ties rounded away
+from zero. The resulting load then follows the configured load-rounding mode
+and quantum. Every backoff set receives that load, `backoff.repetitions`, and
+the configured `backoff.setCount`. The explanation code identifies which base
+was used.
+
+## Performance evaluation and proposed state
+
+Evaluation considers each exercise's completed `top` set. It first derives an
+observed estimated 1RM from the completed load, repetitions, and RPE/RIR using
+the same Epley evidence calculation as recommendation. It then independently
+applies exertion policy:
+
+- Actual RPE inside the inclusive
+  `[targetRpe - tolerance, targetRpe + tolerance]` band holds the observed
+  estimate.
+- RPE above the band follows `onOvershoot`: hold, or reduce the observed
+  estimate by `estimateAdjustmentPercentage`.
+- RPE below the band follows `onUndershoot`: hold, or increase the observed
+  estimate by `estimateAdjustmentPercentage`.
+
+Adjustment uses 0.001 mass-unit precision with ties rounded away from zero.
+Evaluation reports separate stable explanations for the evidence estimate and
+the policy decision. Its versioned next state is a proposal written into
+caller-provided buffers; input state is borrowed, remains unchanged, and is
+never implicitly accepted or persisted.
