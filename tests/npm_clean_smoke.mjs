@@ -1,0 +1,208 @@
+import { spawnSync } from "node:child_process";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+
+const packageRoot = resolve("packages/npm/workout-engine");
+const fixturePath = resolve("fixtures/requests/recommendation.json");
+const keep = process.argv.includes("--keep");
+const temporary = await mkdtemp(join(tmpdir(), "caudex-npm-smoke-"));
+const packDirectory = join(temporary, "pack");
+const project = join(temporary, "project");
+await mkdir(packDirectory);
+await mkdir(project);
+
+try {
+  run("npm", [
+    "pack",
+    "--json",
+    "--ignore-scripts",
+    "--pack-destination",
+    packDirectory,
+    packageRoot,
+  ]);
+  const [tarballName] = await readdir(packDirectory);
+  const tarball = join(packDirectory, tarballName);
+  await writeFile(
+    join(project, "package.json"),
+    JSON.stringify({ private: true, type: "module" }),
+  );
+  run(
+    "npm",
+    [
+      "install",
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-fund",
+      tarball,
+    ],
+    project,
+  );
+  await cp(fixturePath, join(project, "request.json"));
+
+  await writeFile(
+    join(project, "node-smoke.mjs"),
+    `import { readFile } from "node:fs/promises";
+import { createCaudex, methodologies } from "@caudex/workout-engine";
+import canonicalSchema from "@caudex/workout-engine/schema/canonical" with { type: "json" };
+
+const request = JSON.parse(await readFile(new URL("./request.json", import.meta.url)));
+request.methodology = methodologies.doubleProgression(request.methodology.config);
+const caudex = await createCaudex();
+const result = caudex.recommendSession(request);
+const invalid = caudex.recommendSession({ ...request, schemaVersion: 2 });
+caudex.dispose();
+if (!result.ok || result.metadata.resultFingerprint !==
+  "83481330a812bb41384d958c104038d230bf93ceee163fd47b7c62a41361fd6f") {
+  throw new Error("canonical tarball fixture failed");
+}
+if (invalid.ok || invalid.issues?.[0]?.code !== "protocol.unsupported_version") {
+  throw new Error("error fixture did not return a structured issue");
+}
+if (canonicalSchema.$id !== "https://caudex.dev/schemas/v0/canonical.schema.json") {
+  throw new Error("schema subpath export failed");
+}
+`,
+  );
+  run(process.execPath, ["node-smoke.mjs"], project);
+
+  await writeFile(
+    join(project, "smoke.ts"),
+    `import {
+  createCaudex,
+  methodologies,
+  type RecommendationRequest,
+  type RecommendationResult,
+} from "@caudex/workout-engine";
+
+const methodology = methodologies.doubleProgression({
+  repRange: { min: 8, max: 12 },
+  workingSets: 3,
+  advancementCriteria: { minimumSuccessfulSets: 3, minimumRepetitions: 12 },
+  initialLoad: { amount: "45", unit: "lb" },
+  loadIncrement: { amount: "5", unit: "lb" },
+  failurePolicy: {
+    onPartial: "hold",
+    onFailure: "regress",
+    regressionAmount: { amount: "5", unit: "lb" },
+  },
+  rounding: { mode: "nearest", quantum: { amount: "2.5", unit: "lb" } },
+});
+const request: RecommendationRequest = {
+  schemaVersion: 1,
+  asOf: "2026-07-25T14:00:00Z",
+  methodology,
+  catalog: [{ id: "press" }],
+};
+const check = async (): Promise<RecommendationResult> => {
+  const caudex = await createCaudex();
+  const result = caudex.recommendSession(request);
+  caudex.dispose();
+  return result;
+};
+void check;
+`,
+  );
+  await writeFile(
+    join(project, "tsconfig.json"),
+    JSON.stringify({
+      compilerOptions: {
+        strict: true,
+        noEmit: true,
+        target: "ES2022",
+        module: "NodeNext",
+        moduleResolution: "NodeNext",
+        lib: ["ES2022", "DOM"],
+      },
+      files: ["smoke.ts"],
+    }),
+  );
+  run(process.execPath, [
+    resolve(packageRoot, "node_modules/typescript/bin/tsc"),
+    "--project",
+    join(project, "tsconfig.json"),
+  ]);
+
+  const browser = join(project, "browser");
+  await mkdir(join(browser, "dist"), { recursive: true });
+  await mkdir(join(browser, "wasm"), { recursive: true });
+  await cp(join(project, "request.json"), join(browser, "request.json"));
+  await cp(
+    join(
+      project,
+      "node_modules/@caudex/workout-engine/wasm/caudex.wasm",
+    ),
+    join(browser, "wasm/caudex.wasm"),
+  );
+  await writeFile(
+    join(browser, "app.js"),
+    `import { createCaudex } from "../node_modules/@caudex/workout-engine/dist/index.js";
+const output = document.querySelector("#output");
+try {
+  const request = await fetch("/request.json").then((response) => response.json());
+  const caudex = await createCaudex();
+  const result = caudex.recommendSession(request);
+  const invalid = caudex.recommendSession({ ...request, schemaVersion: 2 });
+  caudex.dispose();
+  if (!result.ok || invalid.ok ||
+      invalid.issues?.[0]?.code !== "protocol.unsupported_version") {
+    throw new Error("browser canonical/error fixture failed");
+  }
+  document.body.dataset.status = "passed";
+  output.textContent = result.metadata.resultFingerprint;
+} catch (error) {
+  document.body.dataset.status = "failed";
+  output.textContent = String(error?.stack ?? error);
+}
+`,
+  );
+  await writeFile(
+    join(browser, "index.html"),
+    `<!doctype html>
+<html><head><meta charset="utf-8"><title>Caudex npm smoke</title></head>
+<body data-status="running"><pre id="output">running</pre>
+<script type="module" src="/dist/app.js"></script></body></html>
+`,
+  );
+  run(process.execPath, [
+    resolve(packageRoot, "node_modules/rollup/dist/bin/rollup"),
+    join(browser, "app.js"),
+    "--format",
+    "esm",
+    "--file",
+    join(browser, "dist/app.js"),
+  ]);
+
+  console.log(
+    `caudex clean npm smoke passed: Node ESM, TypeScript 5.9, ` +
+      `Rollup 4.62; browser fixture ${browser}`,
+  );
+  if (keep) {
+    console.log(`CAUDEX_BROWSER_FIXTURE=${browser}`);
+  }
+} finally {
+  if (!keep) await rm(temporary, { recursive: true, force: true });
+}
+
+function run(command, args, cwd = undefined) {
+  console.log(`> ${command} ${args.join(" ")}`);
+  const result = spawnSync(command, args, {
+    cwd,
+    encoding: "utf8",
+    stdio: "inherit",
+    timeout: 30_000,
+  });
+  if (result.status !== 0) {
+    throw new Error(
+      `${command} ${args.join(" ")} failed with status ${result.status}` +
+        (result.error ? `: ${result.error.message}` : ""),
+    );
+  }
+}

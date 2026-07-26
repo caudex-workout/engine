@@ -3,3 +3,4 @@ wasm/
 schemas/
 LICENSE
 *.tgz
+node_modules/

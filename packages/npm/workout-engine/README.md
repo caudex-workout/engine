@@ -86,6 +86,32 @@ Build and inspect the actual tarball with:
 zig build package-npm
 ```
 
+## Tested compatibility
+
+The package's clean-project smoke test packs the publish artifact, installs that
+tarball into a temporary project, and verifies:
+
+- Node.js 22 or newer through the ESM export
+- strict TypeScript 5.9 compilation against the published declarations
+- browser ESM bundling with Rollup 4.62
+- default WASM discovery in both Node.js and a browser
+- the canonical request fixture and a structured unsupported-version error
+- the controlled package-content allowlist
+
+Run it with:
+
+```bash
+zig build test-npm-clean
+```
+
+CommonJS is not exported or supported. Rollup is the documented browser
+bundler for v0.1; other bundlers are not part of the current compatibility
+claim.
+
+The package has no runtime dependencies. Its development-only dependencies are
+TypeScript (Apache-2.0), used to compile the installed declarations, and Rollup
+(MIT), used to bundle the installed browser entry point.
+
 On 2026-07-26, a read-only lookup of `@caudex/workout-engine` against the public
 npm registry returned `E404`, meaning no published package currently claims
 that full name. Publication still requires the maintainer to create or control

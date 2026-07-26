@@ -216,6 +216,17 @@ pub fn build(b: *std.Build) void {
     );
     npm_package_step.dependOn(&npm_package_test.step);
 
+    const npm_clean_smoke = b.addSystemCommand(&.{
+        "node",
+        "tests/npm_clean_smoke.mjs",
+    });
+    npm_clean_smoke.step.dependOn(&npm_package_build.step);
+    const npm_smoke_step = b.step(
+        "test-npm-clean",
+        "Test the packed npm artifact from a clean temporary project",
+    );
+    npm_smoke_step.dependOn(&npm_clean_smoke.step);
+
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&run_library_tests.step);
     test_step.dependOn(&run_contract_tests.step);
@@ -229,4 +240,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&typescript_loader_test.step);
     test_step.dependOn(&methodology_factory_test.step);
     test_step.dependOn(&npm_package_test.step);
+    test_step.dependOn(&npm_clean_smoke.step);
 }

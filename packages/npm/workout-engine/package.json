@@ -39,6 +39,10 @@
     "access": "public",
     "provenance": true
   },
+  "devDependencies": {
+    "rollup": "4.62.2",
+    "typescript": "5.9.2"
+  },
   "scripts": {
     "build": "node scripts/build-package.mjs"
   }
