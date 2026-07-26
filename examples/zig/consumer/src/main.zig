@@ -1,6 +1,7 @@
 const std = @import("std");
 const caudex = @import("caudex");
 const caudex_persistence = @import("caudex_persistence");
+const caudex_sqlite = @import("caudex_sqlite");
 const caudex_tracking = @import("caudex_tracking");
 
 const Config = struct {
@@ -79,6 +80,11 @@ pub fn main() !void {
         return error.PersistenceUsesDifferentCanonicalContract;
     if (caudex_tracking.contract_version != 1)
         return error.UnsupportedTrackingContract;
+    const database = try caudex_sqlite.openInMemory(.{});
+    defer database.close();
+    const database_metadata = try database.metadata();
+    if (database_metadata.schema_version != caudex_sqlite.schema_version)
+        return error.UnexpectedSqliteSchema;
 
     const registry = caudex.methodology.Registry.initComptime(
         &.{simple_methodology},
@@ -108,11 +114,12 @@ pub fn main() !void {
     if (output.recommendations != 1) return error.UnexpectedOutput;
 
     std.debug.print(
-        "{s} registered through @import(\"caudex\"); persistence contract v{d} and tracking contract v{d} imported\n",
+        "{s} registered; persistence contract v{d}, tracking contract v{d}, and SQLite schema v{d} imported\n",
         .{
             implementation.metadata.id.bytes,
             caudex_persistence.contract_version,
             caudex_tracking.contract_version,
+            database_metadata.schema_version,
         },
     );
 }

@@ -45,6 +45,10 @@ const executable = b.addExecutable(.{
                 .name = "caudex_tracking",
                 .module = caudex_dependency.module("caudex_tracking"),
             },
+            .{
+                .name = "caudex_sqlite",
+                .module = caudex_dependency.module("caudex_sqlite"),
+            },
         },
     }),
 });
@@ -56,6 +60,7 @@ Application code imports the public modules it needs:
 const caudex = @import("caudex");
 const caudex_persistence = @import("caudex_persistence");
 const caudex_tracking = @import("caudex_tracking");
+const caudex_sqlite = @import("caudex_sqlite");
 ```
 
 The complete [`examples/zig/consumer`](../examples/zig/consumer) package
@@ -136,9 +141,29 @@ contract tests. It is not a public module and is excluded from the published
 source-package paths. External adapters may implement the public capabilities
 but must not depend on that test utility.
 
-The SQLite implementation is still private and build-local. A later issue will
-publish it separately as `caudex_sqlite`; consumers must not import
-`adapters/sqlite.zig` or migrations by repository-relative path.
+## SQLite adapter
+
+`caudex_sqlite` is the optional public SQLite package. Consumers wire it from
+the same dependency:
+
+```zig
+const caudex_sqlite = @import("caudex_sqlite");
+
+const database = try caudex_sqlite.openInMemory(.{});
+defer database.close();
+const metadata = try database.metadata();
+```
+
+The package links the platform SQLite library. Its `Adapter` is opaque, and its
+raw handle, prepared statements, SQL, tables, and migration bodies remain
+private. File databases use `open(path, options)`; `create_if_missing` controls
+creation and supported forward migrations run automatically.
+
+Open lifecycle failures distinguish busy, corrupt, migration-failed,
+unsupported-newer-schema, and general open errors. Metadata reports adapter
+version, schema compatibility bounds, current schema, and memory/file kind.
+See the [SQLite adapter guide](../adapters/sqlite/README.md) for the complete
+lifecycle and error contract.
 
 ## Zig version policy
 

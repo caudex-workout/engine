@@ -17,6 +17,8 @@ try {
   if (
     !paths.includes("src") ||
     !paths.includes("adapters/persistence.zig") ||
+    !paths.includes("adapters/sqlite.zig") ||
+    !paths.includes("adapters/sqlite/migrations") ||
     !paths.includes("tracking") ||
     !paths.includes("include") ||
     !paths.includes("examples/zig") ||
@@ -46,6 +48,9 @@ try {
   }
   if (!result.stderr.includes("tracking contract v1")) {
     throw new Error(`tracking package was not imported: ${result.stderr}`);
+  }
+  if (!result.stderr.includes("SQLite schema v1")) {
+    throw new Error(`SQLite package was not exercised: ${result.stderr}`);
   }
   console.log("caudex clean Zig package consumer passed");
 } finally {

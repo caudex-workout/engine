@@ -23,6 +23,10 @@ pub fn build(b: *std.Build) void {
                     .name = "caudex_tracking",
                     .module = caudex.module("caudex_tracking"),
                 },
+                .{
+                    .name = "caudex_sqlite",
+                    .module = caudex.module("caudex_sqlite"),
+                },
             },
         }),
     });

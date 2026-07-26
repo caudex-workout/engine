@@ -1,3 +1,8 @@
+//! Public SQLite adapter for optional Caudex persistence capabilities.
+//!
+//! Import as `@import("caudex_sqlite")`. SQLite handles, SQL, migrations,
+//! statements, and physical schema details are private implementation data.
+
 const std = @import("std");
 const caudex = @import("caudex");
 const persistence = @import("caudex_persistence");
@@ -5,37 +10,76 @@ const c = @cImport({
     @cInclude("sqlite3.h");
 });
 
+pub const adapter_version = "0.1.0";
 pub const schema_version: u32 = 1;
+pub const minimum_schema_version: u32 = 1;
 
 pub const Options = struct {
     busy_timeout_ms: u32 = 250,
+    create_if_missing: bool = true,
 };
 
-pub const Adapter = struct {
-    db: *c.sqlite3,
+pub const DatabaseKind = enum {
+    memory,
+    file,
+};
 
-    pub fn open(path: [:0]const u8, options: Options) persistence.AdapterError!Adapter {
-        var database: ?*c.sqlite3 = null;
-        const status = c.sqlite3_open_v2(
-            path.ptr,
-            &database,
-            c.SQLITE_OPEN_READWRITE | c.SQLITE_OPEN_CREATE | c.SQLITE_OPEN_FULLMUTEX,
-            null,
-        );
-        if (status != c.SQLITE_OK or database == null) {
-            if (database) |db| _ = c.sqlite3_close(db);
-            return mapStatus(status);
-        }
-        const adapter: Adapter = .{ .db = database.? };
-        errdefer adapter.close();
-        if (c.sqlite3_busy_timeout(adapter.db, @intCast(options.busy_timeout_ms)) !=
-            c.SQLITE_OK) return error.OperationFailed;
-        adapter.migrate() catch |err| return err;
-        return adapter;
+pub const Compatibility = enum {
+    current,
+};
+
+pub const Metadata = struct {
+    adapter_version: []const u8,
+    schema_version: u32,
+    minimum_schema_version: u32,
+    latest_schema_version: u32,
+    compatibility: Compatibility,
+    database_kind: DatabaseKind,
+};
+
+pub const OpenError = error{
+    Busy,
+    Corrupt,
+    MigrationFailed,
+    UnsupportedSchema,
+    OpenFailed,
+};
+
+pub const MetadataError = error{
+    Busy,
+    Corrupt,
+    OperationFailed,
+};
+
+/// Opaque connection handle. Its representation is not public API.
+pub const Adapter = opaque {
+    pub fn close(self: *Adapter) void {
+        _ = c.sqlite3_close(raw(self));
     }
 
-    pub fn close(self: Adapter) void {
-        _ = c.sqlite3_close(self.db);
+    pub fn metadata(self: *Adapter) MetadataError!Metadata {
+        var query = self.prepare(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_migrations",
+        ) catch |err| return mapMetadataError(err);
+        defer query.finalize();
+        if (!(query.row() catch |err| return mapMetadataError(err)))
+            return error.Corrupt;
+        const current = c.sqlite3_column_int64(query.raw, 0);
+        if (current < 0 or current > std.math.maxInt(u32))
+            return error.Corrupt;
+        const filename = c.sqlite3_db_filename(raw(self), "main");
+        const kind: DatabaseKind = if (filename == null or filename[0] == 0)
+            .memory
+        else
+            .file;
+        return .{
+            .adapter_version = adapter_version,
+            .schema_version = @intCast(current),
+            .minimum_schema_version = minimum_schema_version,
+            .latest_schema_version = schema_version,
+            .compatibility = .current,
+            .database_kind = kind,
+        };
     }
 
     pub fn catalogSource(self: *Adapter) persistence.CatalogSource {
@@ -110,7 +154,7 @@ pub const Adapter = struct {
         try statement.done();
     }
 
-    fn migrate(self: Adapter) persistence.AdapterError!void {
+    fn migrate(self: *Adapter) persistence.AdapterError!void {
         try self.execute(
             \\CREATE TABLE IF NOT EXISTS schema_migrations (
             \\  version INTEGER PRIMARY KEY
@@ -139,14 +183,14 @@ pub const Adapter = struct {
         try self.execute("COMMIT");
     }
 
-    fn execute(self: Adapter, sql: []const u8) persistence.AdapterError!void {
+    fn execute(self: *Adapter, sql: []const u8) persistence.AdapterError!void {
         var statement = try self.prepare(sql);
         defer statement.finalize();
         try statement.done();
     }
 
     fn executeScript(
-        self: Adapter,
+        self: *Adapter,
         script: []const u8,
     ) persistence.AdapterError!void {
         var statements = std.mem.splitScalar(u8, script, ';');
@@ -157,19 +201,44 @@ pub const Adapter = struct {
         }
     }
 
-    fn prepare(self: Adapter, sql: []const u8) persistence.AdapterError!Statement {
-        var raw: ?*c.sqlite3_stmt = null;
+    fn prepare(self: *Adapter, sql: []const u8) persistence.AdapterError!Statement {
+        var statement: ?*c.sqlite3_stmt = null;
         const status = c.sqlite3_prepare_v2(
-            self.db,
+            raw(self),
             sql.ptr,
             @intCast(sql.len),
-            &raw,
+            &statement,
             null,
         );
-        if (status != c.SQLITE_OK or raw == null) return mapStatus(status);
-        return .{ .raw = raw.? };
+        if (status != c.SQLITE_OK or statement == null) return mapStatus(status);
+        return .{ .raw = statement.? };
     }
 };
+
+pub fn open(path: [:0]const u8, options: Options) OpenError!*Adapter {
+    var database: ?*c.sqlite3 = null;
+    var flags = c.SQLITE_OPEN_READWRITE | c.SQLITE_OPEN_FULLMUTEX;
+    if (options.create_if_missing) flags |= c.SQLITE_OPEN_CREATE;
+    const status = c.sqlite3_open_v2(path.ptr, &database, flags, null);
+    if (status != c.SQLITE_OK or database == null) {
+        if (database) |db| _ = c.sqlite3_close(db);
+        return mapOpenStatus(status);
+    }
+    const adapter: *Adapter = @ptrCast(database.?);
+    errdefer adapter.close();
+    if (c.sqlite3_busy_timeout(raw(adapter), @intCast(options.busy_timeout_ms)) !=
+        c.SQLITE_OK) return error.OpenFailed;
+    adapter.migrate() catch |err| return mapMigrationError(err);
+    return adapter;
+}
+
+pub fn openInMemory(options: Options) OpenError!*Adapter {
+    return open(":memory:", options);
+}
+
+fn raw(self: *Adapter) *c.sqlite3 {
+    return @ptrCast(@alignCast(self));
+}
 
 const Statement = struct {
     raw: *c.sqlite3_stmt,
@@ -457,5 +526,30 @@ fn mapStatus(status: c_int) persistence.AdapterError {
         c.SQLITE_SCHEMA => error.UnsupportedVersion,
         c.SQLITE_CORRUPT, c.SQLITE_NOTADB => error.InvalidData,
         else => error.OperationFailed,
+    };
+}
+
+fn mapOpenStatus(status: c_int) OpenError {
+    return switch (status) {
+        c.SQLITE_BUSY, c.SQLITE_LOCKED => error.Busy,
+        c.SQLITE_CORRUPT, c.SQLITE_NOTADB => error.Corrupt,
+        else => error.OpenFailed,
+    };
+}
+
+fn mapMigrationError(err: persistence.AdapterError) OpenError {
+    return switch (err) {
+        error.Unavailable => error.Busy,
+        error.InvalidData => error.Corrupt,
+        error.UnsupportedVersion => error.UnsupportedSchema,
+        error.OperationFailed => error.MigrationFailed,
+    };
+}
+
+fn mapMetadataError(err: persistence.AdapterError) MetadataError {
+    return switch (err) {
+        error.Unavailable => error.Busy,
+        error.InvalidData, error.UnsupportedVersion => error.Corrupt,
+        error.OperationFailed => error.OperationFailed,
     };
 }

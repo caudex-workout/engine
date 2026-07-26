@@ -371,7 +371,7 @@ pub fn build(b: *std.Build) void {
     indexeddb_test_step.dependOn(&indexeddb_adapter_test.step);
     indexeddb_test_step.dependOn(&indexeddb_clean_smoke.step);
 
-    const sqlite_module = b.createModule(.{
+    const sqlite_module = b.addModule("caudex_sqlite", .{
         .root_source_file = b.path("adapters/sqlite.zig"),
         .target = target,
         .optimize = optimize,
@@ -395,7 +395,7 @@ pub fn build(b: *std.Build) void {
                     .name = "caudex_persistence",
                     .module = persistence_module,
                 },
-                .{ .name = "sqlite", .module = sqlite_module },
+                .{ .name = "caudex_sqlite", .module = sqlite_module },
             },
         }),
     });
