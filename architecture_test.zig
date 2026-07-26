@@ -51,6 +51,9 @@ test "core source has no forbidden effect or dependency imports" {
         "f32",
         "f64",
         "sqlite",
+        "@import(\"persistence",
+        "adapters/persistence",
+        "@caudex/persistence",
         "zig-cats",
     };
 

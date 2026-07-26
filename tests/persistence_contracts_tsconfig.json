@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "allowImportingTsExtensions": true,
+    "exactOptionalPropertyTypes": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "strict": true,
+    "target": "ES2022",
+    "verbatimModuleSyntax": true,
+    "paths": {
+      "@caudex/workout-engine": [
+        "../packages/npm/workout-engine/types/index.d.ts"
+      ]
+    }
+  },
+  "files": [
+    "persistence_contracts_test.ts"
+  ]
+}

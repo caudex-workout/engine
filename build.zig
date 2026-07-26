@@ -62,6 +62,46 @@ pub fn build(b: *std.Build) void {
     });
     const run_architecture_tests = b.addRunArtifact(architecture_tests);
 
+    const persistence_module = b.createModule(.{
+        .root_source_file = b.path("adapters/persistence.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "caudex", .module = module },
+        },
+    });
+    const persistence_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("persistence_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "persistence", .module = persistence_module },
+            },
+        }),
+    });
+    const run_persistence_tests = b.addRunArtifact(persistence_tests);
+    const persistence_test_step = b.step(
+        "test-persistence-contracts",
+        "Test optional Zig persistence capability contracts",
+    );
+    persistence_test_step.dependOn(&run_persistence_tests.step);
+
+    const persistence_typescript_check = b.addSystemCommand(&.{
+        "node",
+        "packages/npm/workout-engine/node_modules/typescript/bin/tsc",
+        "--project",
+        "tests/persistence_contracts_tsconfig.json",
+    });
+    const persistence_typescript_test = b.addSystemCommand(&.{
+        "node",
+        "--experimental-strip-types",
+        "--disable-warning=ExperimentalWarning",
+        "tests/persistence_contracts_test.ts",
+    });
+    persistence_typescript_test.step.dependOn(&persistence_typescript_check.step);
+    persistence_test_step.dependOn(&persistence_typescript_test.step);
+
     const c_api_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("c_api_test.zig"),
@@ -329,6 +369,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_library_tests.step);
     test_step.dependOn(&run_contract_tests.step);
     test_step.dependOn(&run_architecture_tests.step);
+    test_step.dependOn(&run_persistence_tests.step);
+    test_step.dependOn(&persistence_typescript_test.step);
     test_step.dependOn(&run_c_api_tests.step);
     test_step.dependOn(&c_header_test.step);
     test_step.dependOn(&cpp_header_test.step);
