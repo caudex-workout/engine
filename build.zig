@@ -248,6 +248,16 @@ pub fn build(b: *std.Build) void {
     );
     docs_quickstart_step.dependOn(&docs_quickstart_test.step);
 
+    const methodology_guides_test = b.addSystemCommand(&.{
+        "node",
+        "tests/methodology_guides_test.mjs",
+    });
+    const methodology_guides_step = b.step(
+        "test-methodology-guides",
+        "Check first-party methodology guide coverage",
+    );
+    methodology_guides_step.dependOn(&methodology_guides_test.step);
+
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&run_library_tests.step);
     test_step.dependOn(&run_contract_tests.step);
@@ -264,4 +274,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&npm_clean_smoke.step);
     test_step.dependOn(&npm_release_test.step);
     test_step.dependOn(&docs_quickstart_test.step);
+    test_step.dependOn(&methodology_guides_test.step);
 }

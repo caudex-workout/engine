@@ -69,6 +69,10 @@ request/result model, explanation references, data ownership, deterministic
 inputs, and error handling. No database, account, or runtime network request is
 required.
 
+The [methodology guides](docs/methodologies/README.md) compare the two
+first-party approaches and document their configuration, state, explanation
+codes, and limitations.
+
 Caudex Workout Engine is an open-source, embeddable strength and hypertrophy
 programming engine for developers. Applications supply explicit training
 snapshots and methodology configuration; Caudex returns deterministic,

@@ -9,6 +9,17 @@ State schema version: `1`
 Double progression advances repetitions within a configured range, then
 advances load after the configured successful-set threshold is met.
 
+## When to use it
+
+Choose double progression when the host wants a fixed number of working sets,
+an explicit repetition range, and a predictable rule that increases
+repetitions before load. It fits integrations whose completed sets reliably
+record load, repetitions, and completion status but do not require subjective
+RPE or RIR observations.
+
+It is also useful when exercise-specific rep ranges, increments, or failure
+policies must be configured through `exerciseOverrides`.
+
 ## Configuration
 
 - `repRange` is inclusive. Both values are positive and `min <= max`.
@@ -86,6 +97,44 @@ rounding rules as recommendation to a host-supplied completed workout.
   may discard the proposal without any persistence or other side effect.
 - Re-evaluating identical config, state, and completed performance returns the
   same outcomes and state JSON.
+
+## Explanation and warning codes
+
+| Code | Meaning |
+| --- | --- |
+| `double_progression.prescribed.initial` | Initial configuration supplied the first prescription. |
+| `double_progression.prescribed.state_without_history` | Existing state was held because no matching completed performance was available. |
+| `repetitions.increased.completed_target` | Successful performance advanced the repetition target within the configured range. |
+| `load.increased.rep_range_completed` | Successful performance at the advancement threshold increased load and reset repetitions. |
+| `load.held.partial_completion` | Partial completion followed a configured hold policy. |
+| `load.regressed.partial_completion` | Partial completion followed a configured regression policy. |
+| `load.held.failed_completion` | Failed completion followed a configured hold policy. |
+| `load.regressed.failed_completion` | Failed completion followed a configured regression policy. |
+| `load.held.insufficient_successful_sets` | Completed evidence did not meet the configured successful-set threshold. |
+| `sets.reduced.available_time` | An explicit session set cap reduced the working-set prescription. |
+| `history.insufficient_evidence` | No compatible completed performance was available for progression. |
+
+Configuration and state rejection use the shared issue codes
+`methodology.config_invalid`, `methodology.state_invalid`, and
+`methodology.state_unsupported_version`. Issue codes describe rejected inputs;
+the decision codes above describe a completed calculation.
+
+## Limitations
+
+- Version 1 progresses one exercise independently from its compatible completed
+  performance. It does not coordinate blocks, phases, or long-term calendars.
+- It does not infer fatigue, readiness, recovery, deload timing, or medical
+  restrictions. A host must supply any relevant session constraints.
+- It does not convert load units or infer missing loads and repetitions.
+- The failure policy is deliberately limited to hold or subtract a configured
+  amount. It is not a generalized progression language.
+- Exercise overrides are exact host-ID matches; the methodology does not infer
+  equivalent exercises.
+
+Double progression is not universally better than RPE top-set/backoff. It is
+the more direct choice when progression should follow rep-range completion;
+RPE top-set/backoff models a different workflow based on exertion evidence and
+an estimated 1RM.
 
 ## Conformance suite
 

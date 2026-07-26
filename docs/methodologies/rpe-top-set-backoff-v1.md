@@ -10,6 +10,17 @@ CWE-040 defines and validates this methodology contract. CWE-041 defines the
 top-set recommendation below. CWE-042 defines backoff prescription and
 evaluation behavior.
 
+## When to use it
+
+Choose RPE top-set/backoff when the host records a primary top set with RPE or
+RIR and wants backoff work derived from either that top-set load or an estimated
+1RM. It fits integrations that intentionally use subjective exertion evidence
+and want an explicit tolerance policy for updating the next estimate.
+
+Use double progression instead when the desired rule is to advance repetitions
+through a range before adding load and the host does not collect dependable RPE
+or RIR evidence.
+
 ## Configuration
 
 - `initialEstimatedOneRepMax` is a non-negative mass measurement used when
@@ -111,3 +122,45 @@ Evaluation reports separate stable explanations for the evidence estimate and
 the policy decision. Its versioned next state is a proposal written into
 caller-provided buffers; input state is borrowed, remains unchanged, and is
 never implicitly accepted or persisted.
+
+## Explanation and warning codes
+
+| Code | Meaning |
+| --- | --- |
+| `load.selected.history_estimated_one_rep_max` | Compatible completed top-set evidence supplied the estimate. |
+| `load.selected.state_estimated_one_rep_max` | Existing methodology state supplied the estimate. |
+| `load.selected.initial_estimated_one_rep_max` | Configuration supplied the fallback estimate. |
+| `backoff.selected.percentage_of_top_set` | Backoff load used the rounded recommended top-set load. |
+| `backoff.selected.percentage_of_estimated_one_rep_max` | Backoff load used the estimated 1RM. |
+| `estimate.observed.completed_top_set` | Evaluation derived an observed estimate from a completed top set. |
+| `estimate.decreased.rpe_overshoot` | RPE above the tolerance band decreased the estimate. |
+| `estimate.increased.rpe_undershoot` | RPE below the tolerance band increased the estimate. |
+| `estimate.held.rpe_overshoot` | RPE above the tolerance band followed a hold policy. |
+| `estimate.held.rpe_undershoot` | RPE below the tolerance band followed a hold policy. |
+| `estimate.held.rpe_within_tolerance` | RPE inside the inclusive tolerance band held the estimate. |
+| `history.insufficient_evidence` | No compatible completed top-set evidence was available. |
+
+Configuration and state rejection use the shared issue codes
+`methodology.config_invalid`, `methodology.state_invalid`, and
+`methodology.state_unsupported_version`.
+
+## Limitations
+
+- Version 1 supports only the Epley formula. It does not compare or dynamically
+  select estimation formulas.
+- Recommendation uses only the newest compatible first completed `top` set for
+  an exercise; it does not aggregate multiple sets or model statistical
+  confidence.
+- RPE and RIR are accepted as explicit host observations. The methodology does
+  not judge their accuracy or infer them from bar speed, sensors, or free text.
+- It does not prescribe warmups, fatigue management, deloads, training blocks,
+  or long-term calendars.
+- It does not convert load units or infer missing load, repetition, or exertion
+  evidence.
+- The percentage and exertion policies are deterministic configuration rules,
+  not individualized medical or recovery advice.
+
+RPE top-set/backoff is not universally better than double progression. It
+represents a different evidence and prescription model; the host should choose
+the model that matches the data it can supply and the progression behavior it
+wants to expose.
