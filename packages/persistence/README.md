@@ -29,3 +29,10 @@ No persistence package is required to construct that request or execute the
 engine. See the
 [custom-repository guide](../../docs/persistence/custom-repositories.md) for
 implementation guidance.
+
+Zig adapters can reuse
+[`adapters/persistence/testing.zig`](../../adapters/persistence/testing.zig)
+to verify source loading, deterministic history ordering, missing scopes,
+methodology-state round trips, optimistic conflicts, canonical snapshot
+equivalence, and advertised transaction rollback. `InMemoryAdapter` is the
+database-independent reference test double.

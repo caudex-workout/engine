@@ -117,5 +117,15 @@ read or calculation call. After the host explicitly accepts a result, it may:
 If the backing system supports transactions, the host may group those writes.
 The common contract does not claim transaction behavior.
 
-The reusable cross-adapter contract test kit and in-memory test doubles are
-introduced by CWE-091.
+## Contract tests
+
+Zig adapters should run the reusable functions in
+[`adapters/persistence/testing.zig`](../../adapters/persistence/testing.zig).
+The suite checks loading, deterministic chronological history ordering, missing
+scopes, state round trips, optimistic conflicts, and canonical equivalence with
+direct snapshot assembly.
+
+Pass a `TransactionProbe` only when the adapter advertises transactional
+rollback. Adapters without that guarantee omit it and are not tested against a
+behavior they do not claim. `InMemoryAdapter` is a database-independent test
+double suitable for host integration tests.
