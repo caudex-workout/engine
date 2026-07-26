@@ -6,12 +6,13 @@
 const std = @import("std");
 const caudex = @import("caudex");
 const persistence = @import("caudex_persistence");
+const tracking = @import("caudex_tracking");
 const c = @cImport({
     @cInclude("sqlite3.h");
 });
 
 pub const adapter_version = "0.1.0";
-pub const schema_version: u32 = 1;
+pub const schema_version: u32 = 2;
 pub const minimum_schema_version: u32 = 1;
 
 pub const Options = struct {
@@ -50,6 +51,8 @@ pub const MetadataError = error{
     Corrupt,
     OperationFailed,
 };
+
+pub const TrackingError = persistence.CapabilityError;
 
 /// Opaque connection handle. Its representation is not public API.
 pub const Adapter = opaque {
@@ -96,6 +99,22 @@ pub const Adapter = opaque {
             .load_fn = loadStateCallback,
             .compare_and_set_fn = compareAndSetStateCallback,
         };
+    }
+
+    pub fn startWorkout(
+        self: *Adapter,
+        allocator: std.mem.Allocator,
+        command: tracking.StartWorkoutCommand,
+    ) TrackingError!tracking.CommandResult {
+        return startTrackedWorkout(self, allocator, command);
+    }
+
+    pub fn readWorkout(
+        self: *Adapter,
+        allocator: std.mem.Allocator,
+        query: tracking.ReadWorkoutQuery,
+    ) TrackingError!tracking.ReadWorkoutResult {
+        return readTrackedWorkout(self, allocator, query);
     }
 
     pub fn replaceCatalog(
@@ -169,16 +188,29 @@ pub const Adapter = opaque {
         if (current > schema_version) return error.UnsupportedVersion;
         if (current == schema_version) return;
 
-        try self.execute("BEGIN IMMEDIATE");
-        errdefer self.execute("ROLLBACK") catch {};
-        try self.executeScript(
+        if (current < 1) try self.applyMigration(
+            1,
             @embedFile("sqlite/migrations/001_initial.sql"),
         );
+        if (current < 2) try self.applyMigration(
+            2,
+            @embedFile("sqlite/migrations/002_tracking_start.sql"),
+        );
+    }
+
+    fn applyMigration(
+        self: *Adapter,
+        version: u32,
+        script: []const u8,
+    ) persistence.AdapterError!void {
+        try self.execute("BEGIN IMMEDIATE");
+        errdefer self.execute("ROLLBACK") catch {};
+        try self.executeScript(script);
         var record = try self.prepare(
             "INSERT INTO schema_migrations (version) VALUES (?1)",
         );
         defer record.finalize();
-        try record.bindInt(1, schema_version);
+        try record.bindInt(1, version);
         try record.done();
         try self.execute("COMMIT");
     }
@@ -238,6 +270,306 @@ pub fn openInMemory(options: Options) OpenError!*Adapter {
 
 fn raw(self: *Adapter) *c.sqlite3 {
     return @ptrCast(@alignCast(self));
+}
+
+fn startTrackedWorkout(
+    self: *Adapter,
+    allocator: std.mem.Allocator,
+    command: tracking.StartWorkoutCommand,
+) TrackingError!tracking.CommandResult {
+    var issue_storage: [1]tracking.Issue = undefined;
+    const validated = tracking.startWorkout(.{}, command, &issue_storage) catch
+        unreachable;
+    switch (validated) {
+        .accepted => {},
+        .rejected => |rejected| return ownRejected(allocator, rejected),
+    }
+
+    try self.execute("BEGIN IMMEDIATE");
+    errdefer self.execute("ROLLBACK") catch {};
+
+    const prior_receipt = try loadStartReceipt(
+        self,
+        allocator,
+        command.scope,
+        command.metadata.command_id,
+    );
+    if (prior_receipt) |receipt| {
+        const replay = tracking.startWorkout(
+            .{ .start_receipts = &.{receipt} },
+            command,
+            &issue_storage,
+        ) catch unreachable;
+        const owned = switch (replay) {
+            .accepted => replay,
+            .rejected => |rejected| try ownRejected(allocator, rejected),
+        };
+        try self.execute("COMMIT");
+        return owned;
+    }
+
+    const existing = try loadTrackedWorkout(
+        self,
+        allocator,
+        command.scope,
+        command.workout_id,
+    );
+    const decided = tracking.startWorkout(
+        .{ .workouts = if (existing) |workout| &.{workout} else &.{} },
+        command,
+        &issue_storage,
+    ) catch unreachable;
+    const proposed = switch (decided) {
+        .accepted => |accepted| accepted,
+        .rejected => |rejected| {
+            const owned = try ownRejected(allocator, rejected);
+            try self.execute("ROLLBACK");
+            return owned;
+        },
+    };
+
+    const accepted = try ownAccepted(allocator, proposed);
+    try insertTrackedWorkout(self, accepted.workout);
+    try insertStartReceipt(self, command, accepted);
+    try self.execute("COMMIT");
+    return .{ .accepted = accepted };
+}
+
+fn readTrackedWorkout(
+    self: *Adapter,
+    allocator: std.mem.Allocator,
+    query: tracking.ReadWorkoutQuery,
+) TrackingError!tracking.ReadWorkoutResult {
+    const workout = try loadTrackedWorkout(
+        self,
+        allocator,
+        query.scope,
+        query.workout_id,
+    );
+    if (workout) |found| return .{ .found = found };
+    return .{ .not_found = .{
+        .code = tracking.issue_codes.workout_not_found,
+        .category = .not_found,
+        .severity = .@"error",
+        .message = "No workout matched the requested scope and ID.",
+    } };
+}
+
+fn loadTrackedWorkout(
+    self: *Adapter,
+    allocator: std.mem.Allocator,
+    scope: tracking.Scope,
+    workout_id: tracking.Id,
+) TrackingError!?tracking.Workout {
+    var statement = try self.prepare(
+        \\SELECT revision, status, started_at, completed_at
+        \\FROM tracking_workouts
+        \\WHERE host_scope_key = ?1 AND athlete_id = ?2 AND workout_id = ?3
+    );
+    defer statement.finalize();
+    try statement.bindText(1, scope.host_scope_key.bytes);
+    try statement.bindText(2, athleteKey(scope));
+    try statement.bindText(3, workout_id.bytes);
+    if (!try statement.row()) return null;
+    const revision = c.sqlite3_column_int64(statement.raw, 0);
+    if (revision < 1) return error.InvalidData;
+    const status = try parseWorkoutStatus(
+        column(statement.raw, 1) orelse return error.InvalidData,
+    );
+    const started_at = tracking.Timestamp{
+        .bytes = try dupeColumn(allocator, statement.raw, 2),
+    };
+    _ = tracking.Timestamp.parse(started_at.bytes) catch return error.InvalidData;
+    const completed_bytes = column(statement.raw, 3);
+    const completed_at: ?tracking.Timestamp = if (completed_bytes) |value|
+        .{ .bytes = try allocator.dupe(u8, value) }
+    else
+        null;
+    return .{
+        .id = try ownId(allocator, workout_id),
+        .scope = try ownScope(allocator, scope),
+        .revision = @intCast(revision),
+        .status = status,
+        .started_at = started_at,
+        .completed_at = completed_at,
+    };
+}
+
+fn loadStartReceipt(
+    self: *Adapter,
+    allocator: std.mem.Allocator,
+    scope: tracking.Scope,
+    command_id: tracking.Id,
+) TrackingError!?tracking.StartReceipt {
+    var statement = try self.prepare(
+        \\SELECT command_kind, occurred_at, workout_id, started_at,
+        \\       result_revision, result_status
+        \\FROM tracking_command_receipts
+        \\WHERE host_scope_key = ?1 AND athlete_id = ?2 AND command_id = ?3
+    );
+    defer statement.finalize();
+    try statement.bindText(1, scope.host_scope_key.bytes);
+    try statement.bindText(2, athleteKey(scope));
+    try statement.bindText(3, command_id.bytes);
+    if (!try statement.row()) return null;
+    const kind = column(statement.raw, 0) orelse return error.InvalidData;
+    if (!std.mem.eql(u8, kind, "start_workout")) return error.InvalidData;
+    const occurred_at = tracking.Timestamp{
+        .bytes = try dupeColumn(allocator, statement.raw, 1),
+    };
+    const workout_id = tracking.Id{
+        .bytes = try dupeColumn(allocator, statement.raw, 2),
+    };
+    const started_at = tracking.Timestamp{
+        .bytes = try dupeColumn(allocator, statement.raw, 3),
+    };
+    const revision = c.sqlite3_column_int64(statement.raw, 4);
+    if (revision < 1) return error.InvalidData;
+    const status = try parseWorkoutStatus(
+        column(statement.raw, 5) orelse return error.InvalidData,
+    );
+    const owned_scope = try ownScope(allocator, scope);
+    const owned_command_id = try ownId(allocator, command_id);
+    const command: tracking.StartWorkoutCommand = .{
+        .metadata = .{
+            .command_id = owned_command_id,
+            .occurred_at = occurred_at,
+        },
+        .scope = owned_scope,
+        .workout_id = workout_id,
+        .started_at = started_at,
+    };
+    return .{
+        .command = command,
+        .accepted = .{
+            .command_id = owned_command_id,
+            .disposition = .applied,
+            .workout = .{
+                .id = workout_id,
+                .scope = owned_scope,
+                .revision = @intCast(revision),
+                .status = status,
+                .started_at = started_at,
+            },
+        },
+    };
+}
+
+fn insertTrackedWorkout(
+    self: *Adapter,
+    workout: tracking.Workout,
+) persistence.AdapterError!void {
+    var statement = try self.prepare(
+        \\INSERT INTO tracking_workouts
+        \\  (host_scope_key, athlete_id, workout_id, revision, status,
+        \\   started_at, completed_at)
+        \\VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)
+    );
+    defer statement.finalize();
+    try statement.bindText(1, workout.scope.host_scope_key.bytes);
+    try statement.bindText(2, athleteKey(workout.scope));
+    try statement.bindText(3, workout.id.bytes);
+    try statement.bindInt(4, workout.revision);
+    try statement.bindText(5, workoutStatusText(workout.status));
+    try statement.bindText(6, workout.started_at.bytes);
+    try statement.done();
+}
+
+fn insertStartReceipt(
+    self: *Adapter,
+    command: tracking.StartWorkoutCommand,
+    accepted: tracking.AcceptedCommand,
+) persistence.AdapterError!void {
+    var statement = try self.prepare(
+        \\INSERT INTO tracking_command_receipts
+        \\  (host_scope_key, athlete_id, command_id, command_kind, occurred_at,
+        \\   workout_id, started_at, result_revision, result_status)
+        \\VALUES (?1, ?2, ?3, 'start_workout', ?4, ?5, ?6, ?7, ?8)
+    );
+    defer statement.finalize();
+    try statement.bindText(1, command.scope.host_scope_key.bytes);
+    try statement.bindText(2, athleteKey(command.scope));
+    try statement.bindText(3, command.metadata.command_id.bytes);
+    try statement.bindText(4, command.metadata.occurred_at.bytes);
+    try statement.bindText(5, command.workout_id.bytes);
+    try statement.bindText(6, command.started_at.bytes);
+    try statement.bindInt(7, accepted.workout.revision);
+    try statement.bindText(8, workoutStatusText(accepted.workout.status));
+    try statement.done();
+}
+
+fn ownRejected(
+    allocator: std.mem.Allocator,
+    rejected: tracking.RejectedCommand,
+) std.mem.Allocator.Error!tracking.CommandResult {
+    return .{ .rejected = .{
+        .command_id = try ownId(allocator, rejected.command_id),
+        .issues = try allocator.dupe(tracking.Issue, rejected.issues),
+    } };
+}
+
+fn ownAccepted(
+    allocator: std.mem.Allocator,
+    accepted: tracking.AcceptedCommand,
+) std.mem.Allocator.Error!tracking.AcceptedCommand {
+    return .{
+        .command_id = try ownId(allocator, accepted.command_id),
+        .disposition = accepted.disposition,
+        .workout = .{
+            .id = try ownId(allocator, accepted.workout.id),
+            .scope = try ownScope(allocator, accepted.workout.scope),
+            .revision = accepted.workout.revision,
+            .status = accepted.workout.status,
+            .started_at = .{
+                .bytes = try allocator.dupe(
+                    u8,
+                    accepted.workout.started_at.bytes,
+                ),
+            },
+            .completed_at = if (accepted.workout.completed_at) |timestamp|
+                .{ .bytes = try allocator.dupe(u8, timestamp.bytes) }
+            else
+                null,
+        },
+        .issues = try allocator.dupe(tracking.Issue, accepted.issues),
+    };
+}
+
+fn ownId(
+    allocator: std.mem.Allocator,
+    id: tracking.Id,
+) std.mem.Allocator.Error!tracking.Id {
+    return .{ .bytes = try allocator.dupe(u8, id.bytes) };
+}
+
+fn ownScope(
+    allocator: std.mem.Allocator,
+    scope: tracking.Scope,
+) std.mem.Allocator.Error!tracking.Scope {
+    return .{
+        .host_scope_key = try ownId(allocator, scope.host_scope_key),
+        .athlete_id = if (scope.athlete_id) |athlete|
+            try ownId(allocator, athlete)
+        else
+            null,
+    };
+}
+
+fn athleteKey(scope: tracking.Scope) []const u8 {
+    return if (scope.athlete_id) |athlete| athlete.bytes else "";
+}
+
+fn workoutStatusText(status: tracking.WorkoutStatus) []const u8 {
+    return switch (status) {
+        .active => "active",
+        .completed => "completed",
+    };
+}
+
+fn parseWorkoutStatus(value: []const u8) persistence.AdapterError!tracking.WorkoutStatus {
+    if (std.mem.eql(u8, value, "active")) return .active;
+    if (std.mem.eql(u8, value, "completed")) return .completed;
+    return error.InvalidData;
 }
 
 const Statement = struct {

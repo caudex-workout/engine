@@ -39,6 +39,25 @@ through the adapter's eventual public host-facing API.
 Canonical exercises, workouts, and methodology state are stored as JSON
 payloads alongside narrow relational keys used for deterministic retrieval.
 
+Schema version 2 adds the minimal public tracking vertical slice. The opaque
+adapter exposes:
+
+```zig
+const result = try database.startWorkout(allocator, command);
+const loaded = try database.readWorkout(allocator, query);
+```
+
+The allocator owns strings and issue slices returned by these operations.
+Starting a workout loads any prior receipt or conflicting workout, invokes the
+deterministic `caudex_tracking` decision, and stores the accepted workout plus
+its command receipt in one `BEGIN IMMEDIATE` transaction. An identical command
+ID and payload returns the stored result as `replayed`. Reusing the ID with a
+different payload returns `tracking.command_payload_conflict`. Rejected
+commands store neither a workout nor a receipt.
+
+Only start and read are implemented by this slice. Exercise membership, set
+logging, completion, and broader history queries remain later capabilities.
+
 ## SQL and concurrency
 
 All production SQL is prepared with `sqlite3_prepare_v2`. Host values are bound

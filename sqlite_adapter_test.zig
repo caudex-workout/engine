@@ -159,12 +159,40 @@ test "newer schema is rejected distinctly" {
         database,
         "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY)",
     );
-    try execRaw(database, "INSERT INTO schema_migrations (version) VALUES (2)");
+    try execRaw(database, "INSERT INTO schema_migrations (version) VALUES (3)");
 
     try std.testing.expectError(
         error.UnsupportedSchema,
         sqlite.open(database_path, .{}),
     );
+}
+
+test "schema version one migrates forward to current metadata" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    const database_path = try databasePath(temporary, "version-one.sqlite");
+    defer std.testing.allocator.free(database_path);
+    {
+        const database = try openRaw(database_path);
+        defer _ = c.sqlite3_close(database);
+        try execRaw(
+            database,
+            "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY)",
+        );
+        try execRaw(
+            database,
+            @embedFile("adapters/sqlite/migrations/001_initial.sql"),
+        );
+        try execRaw(
+            database,
+            "INSERT INTO schema_migrations (version) VALUES (1)",
+        );
+    }
+
+    const migrated = try sqlite.open(database_path, .{});
+    defer migrated.close();
+    const metadata = try migrated.metadata();
+    try std.testing.expectEqual(sqlite.schema_version, metadata.schema_version);
 }
 
 test "corrupt database is rejected distinctly" {

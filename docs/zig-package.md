@@ -162,6 +162,9 @@ creation and supported forward migrations run automatically.
 Open lifecycle failures distinguish busy, corrupt, migration-failed,
 unsupported-newer-schema, and general open errors. Metadata reports adapter
 version, schema compatibility bounds, current schema, and memory/file kind.
+The adapter also exposes typed `startWorkout` and `readWorkout` operations using
+`caudex_tracking`; accepted workout state and its idempotency receipt are
+committed atomically, and all returned owned values use the caller's allocator.
 See the [SQLite adapter guide](../adapters/sqlite/README.md) for the complete
 lifecycle and error contract.
 
