@@ -428,6 +428,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "caudex", .module = module },
             .{ .name = "caudex_persistence", .module = persistence_module },
             .{ .name = "caudex_sqlite", .module = sqlite_module },
+            .{ .name = "caudex_tracking", .module = tracking_module },
         },
     });
     const cli = b.addExecutable(.{
@@ -456,11 +457,23 @@ pub fn build(b: *std.Build) void {
         \\
         \\Usage:
         \\  caudex [--database PATH] [--format human|json] [--color auto|always|never] database info
+        \\  caudex [global options] workout start [start options]
+        \\  caudex [global options] workout show --workout ID
         \\  caudex --help
         \\  caudex version
         \\
         \\Environment:
         \\  CAUDEX_DATABASE  Database path used when --database is omitted
+        \\
+        \\Global options:
+        \\  --scope ID        Host scope (default: local)
+        \\  --athlete ID      Optional athlete within the host scope
+        \\
+        \\Workout start options:
+        \\  --command-id ID   Idempotency key (generated when omitted)
+        \\  --workout ID      Workout ID (generated when omitted)
+        \\  --started-at TIME RFC 3339 start time (current UTC time when omitted)
+        \\  --occurred-at TIME RFC 3339 command time (defaults to started-at)
         \\
     );
 
@@ -542,6 +555,12 @@ pub fn build(b: *std.Build) void {
             "\"latestSchemaVersion\":2,\"compatibility\":\"current\"}}\n",
     );
 
+    const cli_workout_start_test = b.addSystemCommand(&.{
+        "bash",
+        "tests/cli_workout_start_test.sh",
+    });
+    cli_workout_start_test.addArtifactArg(cli);
+
     const architecture_probe_files = b.addWriteFiles();
     const private_import_probe = architecture_probe_files.add("caudex_private_import.zig",
         \\const private = @import("caudex_private_root");
@@ -567,6 +586,7 @@ pub fn build(b: *std.Build) void {
     cli_test_step.dependOn(&cli_invalid.step);
     cli_test_step.dependOn(&cli_invalid_json.step);
     cli_test_step.dependOn(&cli_after_broken_pipe.step);
+    cli_test_step.dependOn(&cli_workout_start_test.step);
     cli_test_step.dependOn(&private_import_check.step);
 
     const npm_package_test = b.addSystemCommand(&.{
@@ -733,6 +753,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&cli_invalid.step);
     test_step.dependOn(&cli_invalid_json.step);
     test_step.dependOn(&cli_after_broken_pipe.step);
+    test_step.dependOn(&cli_workout_start_test.step);
     test_step.dependOn(&private_import_check.step);
     test_step.dependOn(&npm_clean_smoke.step);
     test_step.dependOn(&npm_release_test.step);

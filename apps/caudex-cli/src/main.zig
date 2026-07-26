@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const caudex = @import("caudex");
 const persistence = @import("caudex_persistence");
 const sqlite = @import("caudex_sqlite");
+const tracking = @import("caudex_tracking");
 const errors = @import("errors.zig");
 const output = @import("output.zig");
 
@@ -13,18 +14,40 @@ const help_text =
     \\
     \\Usage:
     \\  caudex [--database PATH] [--format human|json] [--color auto|always|never] database info
+    \\  caudex [global options] workout start [start options]
+    \\  caudex [global options] workout show --workout ID
     \\  caudex --help
     \\  caudex version
     \\
     \\Environment:
     \\  CAUDEX_DATABASE  Database path used when --database is omitted
     \\
+    \\Global options:
+    \\  --scope ID        Host scope (default: local)
+    \\  --athlete ID      Optional athlete within the host scope
+    \\
+    \\Workout start options:
+    \\  --command-id ID   Idempotency key (generated when omitted)
+    \\  --workout ID      Workout ID (generated when omitted)
+    \\  --started-at TIME RFC 3339 start time (current UTC time when omitted)
+    \\  --occurred-at TIME RFC 3339 command time (defaults to started-at)
+    \\
 ;
 
-const DatabaseInfoOptions = struct {
-    explicit_path: ?[]const u8 = null,
+const GlobalOptions = struct {
+    database_path: ?[]const u8 = null,
     format: output.Format = .human,
     color: output.Color = .auto,
+    scope: []const u8 = "local",
+    athlete: ?[]const u8 = null,
+    command_index: usize = 1,
+};
+
+const StartOptions = struct {
+    command_id: ?[]const u8 = null,
+    workout_id: ?[]const u8 = null,
+    started_at: ?[]const u8 = null,
+    occurred_at: ?[]const u8 = null,
 };
 
 const PathEnvironment = struct {
@@ -54,12 +77,18 @@ pub fn main(init: std.process.Init) !void {
     const stderr = &stderr_writer.interface;
 
     const requested_format = output.requestedFormat(args);
-    run(init.io, init.arena.allocator(), init.environ_map, args, stdout) catch |err| {
-        const failure = errors.fromError(err);
+    const maybe_failure = run(
+        init.io,
+        init.arena.allocator(),
+        init.environ_map,
+        args,
+        stdout,
+    ) catch |err| errors.fromError(err);
+    if (maybe_failure) |failure| {
         output.writeFailure(stderr, requested_format, failure) catch {};
         stderr_writer.flush() catch {};
         std.process.exit(@intFromEnum(failure.exit_class));
-    };
+    }
     stdout_writer.flush() catch |err| switch (err) {
         error.BrokenPipe => return,
         else => |unexpected| return unexpected,
@@ -72,21 +101,21 @@ fn run(
     environ: *const std.process.Environ.Map,
     args: []const []const u8,
     stdout: *std.Io.Writer,
-) !void {
+) !?errors.Failure {
     if (args.len == 1 or
         (args.len == 2 and
             (std.mem.eql(u8, args[1], "--help") or std.mem.eql(u8, args[1], "help"))))
     {
         try output.writeHelp(stdout, help_text);
-        return;
+        return null;
     }
 
     if (args.len == 2 and std.mem.eql(u8, args[1], "version")) {
         try output.writeVersion(stdout, version);
-        return;
+        return null;
     }
 
-    const options = try parseDatabaseInfo(args);
+    const global = try parseGlobalOptions(args);
     const environment = PathEnvironment{
         .database_override = nonEmpty(environ.get("CAUDEX_DATABASE")),
         .xdg_data_home = nonEmpty(environ.get("XDG_DATA_HOME")),
@@ -95,7 +124,7 @@ fn run(
     };
     const path = try resolveDatabasePath(
         allocator,
-        options.explicit_path,
+        global.database_path,
         environment,
         nativePlatform(),
     );
@@ -103,34 +132,70 @@ fn run(
 
     const adapter = try sqlite.open(path, .{});
     defer adapter.close();
-    const metadata = try adapter.metadata();
 
     const no_color = environ.get("NO_COLOR") != null;
     const is_terminal = std.Io.File.stdout().isTty(io) catch false;
-    try output.writeDatabaseInfo(stdout, .{
-        .format = options.format,
-        .color = options.color,
+    const settings = output.Settings{
+        .format = global.format,
+        .color = global.color,
         .is_terminal = is_terminal,
         .no_color = no_color,
-    }, .{
-        .path = path,
-        .database_kind = @tagName(metadata.database_kind),
-        .adapter_version = metadata.adapter_version,
-        .database_schema_version = metadata.schema_version,
-        .minimum_schema_version = metadata.minimum_schema_version,
-        .latest_schema_version = metadata.latest_schema_version,
-        .compatibility = @tagName(metadata.compatibility),
-    });
+    };
+    const remaining = args[global.command_index..];
+    if (remaining.len == 2 and
+        std.mem.eql(u8, remaining[0], "database") and
+        std.mem.eql(u8, remaining[1], "info"))
+    {
+        const metadata = try adapter.metadata();
+        try output.writeDatabaseInfo(stdout, settings, .{
+            .path = path,
+            .database_kind = @tagName(metadata.database_kind),
+            .adapter_version = metadata.adapter_version,
+            .database_schema_version = metadata.schema_version,
+            .minimum_schema_version = metadata.minimum_schema_version,
+            .latest_schema_version = metadata.latest_schema_version,
+            .compatibility = @tagName(metadata.compatibility),
+        });
+        return null;
+    }
+    if (remaining.len >= 2 and
+        std.mem.eql(u8, remaining[0], "workout") and
+        std.mem.eql(u8, remaining[1], "start"))
+    {
+        return try startWorkout(
+            io,
+            allocator,
+            adapter,
+            global,
+            remaining[2..],
+            settings,
+            stdout,
+        );
+    }
+    if (remaining.len >= 2 and
+        std.mem.eql(u8, remaining[0], "workout") and
+        std.mem.eql(u8, remaining[1], "show"))
+    {
+        return try showWorkout(
+            allocator,
+            adapter,
+            global,
+            remaining[2..],
+            settings,
+            stdout,
+        );
+    }
+    return error.InvalidArguments;
 }
 
-fn parseDatabaseInfo(args: []const []const u8) !DatabaseInfoOptions {
-    var options = DatabaseInfoOptions{};
+fn parseGlobalOptions(args: []const []const u8) !GlobalOptions {
+    var options = GlobalOptions{};
     var index: usize = 1;
     while (index < args.len and std.mem.startsWith(u8, args[index], "--")) {
         if (std.mem.eql(u8, args[index], "--database")) {
             index += 1;
             if (index >= args.len or args[index].len == 0) return error.InvalidArguments;
-            options.explicit_path = args[index];
+            options.database_path = args[index];
         } else if (std.mem.eql(u8, args[index], "--format")) {
             index += 1;
             if (index >= args.len) return error.InvalidArguments;
@@ -140,6 +205,14 @@ fn parseDatabaseInfo(args: []const []const u8) !DatabaseInfoOptions {
                 .json
             else
                 return error.InvalidArguments;
+        } else if (std.mem.eql(u8, args[index], "--scope")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.InvalidArguments;
+            options.scope = args[index];
+        } else if (std.mem.eql(u8, args[index], "--athlete")) {
+            index += 1;
+            if (index >= args.len or args[index].len == 0) return error.InvalidArguments;
+            options.athlete = args[index];
         } else if (std.mem.eql(u8, args[index], "--color")) {
             index += 1;
             if (index >= args.len) return error.InvalidArguments;
@@ -156,14 +229,157 @@ fn parseDatabaseInfo(args: []const []const u8) !DatabaseInfoOptions {
         }
         index += 1;
     }
+    options.command_index = index;
+    return options;
+}
 
-    if (args.len - index != 2 or
-        !std.mem.eql(u8, args[index], "database") or
-        !std.mem.eql(u8, args[index + 1], "info"))
-    {
+fn startWorkout(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    adapter: *sqlite.Adapter,
+    global: GlobalOptions,
+    args: []const []const u8,
+    settings: output.Settings,
+    stdout: *std.Io.Writer,
+) !?errors.Failure {
+    const options = try parseStartOptions(args);
+    const command_id = options.command_id orelse try generateId(io, allocator, "command");
+    const workout_id = options.workout_id orelse try generateId(io, allocator, "workout");
+    const started_at = options.started_at orelse try currentTimestamp(io, allocator);
+    const occurred_at = options.occurred_at orelse started_at;
+    const scope = tracking.Scope{
+        .host_scope_key = try tracking.Id.parse(global.scope),
+        .athlete_id = if (global.athlete) |athlete|
+            try tracking.Id.parse(athlete)
+        else
+            null,
+    };
+
+    const result = try adapter.startWorkout(allocator, .{
+        .metadata = .{
+            .command_id = try tracking.Id.parse(command_id),
+            .occurred_at = try tracking.Timestamp.parse(occurred_at),
+        },
+        .scope = scope,
+        .workout_id = try tracking.Id.parse(workout_id),
+        .started_at = try tracking.Timestamp.parse(started_at),
+    });
+    switch (result) {
+        .accepted => |accepted| {
+            try output.writeWorkout(stdout, settings, .{
+                .document_kind = "caudex.workout.start",
+                .command_id = accepted.command_id.bytes,
+                .disposition = @tagName(accepted.disposition),
+                .workout_id = accepted.workout.id.bytes,
+                .host_scope_key = accepted.workout.scope.host_scope_key.bytes,
+                .athlete_id = if (accepted.workout.scope.athlete_id) |id|
+                    id.bytes
+                else
+                    null,
+                .revision = accepted.workout.revision,
+                .status = @tagName(accepted.workout.status),
+                .started_at = accepted.workout.started_at.bytes,
+                .completed_at = null,
+            });
+            return null;
+        },
+        .rejected => |rejected| {
+            if (rejected.issues.len == 0) return error.InvalidTrackingResult;
+            return errors.fromTrackingIssue(rejected.issues[0]);
+        },
+    }
+}
+
+fn showWorkout(
+    allocator: std.mem.Allocator,
+    adapter: *sqlite.Adapter,
+    global: GlobalOptions,
+    args: []const []const u8,
+    settings: output.Settings,
+    stdout: *std.Io.Writer,
+) !?errors.Failure {
+    if (args.len != 2 or !std.mem.eql(u8, args[0], "--workout"))
         return error.InvalidArguments;
+    const scope = tracking.Scope{
+        .host_scope_key = try tracking.Id.parse(global.scope),
+        .athlete_id = if (global.athlete) |athlete|
+            try tracking.Id.parse(athlete)
+        else
+            null,
+    };
+    const result = try adapter.readWorkout(allocator, .{
+        .scope = scope,
+        .workout_id = try tracking.Id.parse(args[1]),
+    });
+    switch (result) {
+        .found => |workout| {
+            try output.writeWorkout(stdout, settings, .{
+                .document_kind = "caudex.workout.show",
+                .workout_id = workout.id.bytes,
+                .host_scope_key = workout.scope.host_scope_key.bytes,
+                .athlete_id = if (workout.scope.athlete_id) |id| id.bytes else null,
+                .revision = workout.revision,
+                .status = @tagName(workout.status),
+                .started_at = workout.started_at.bytes,
+                .completed_at = if (workout.completed_at) |timestamp|
+                    timestamp.bytes
+                else
+                    null,
+            });
+            return null;
+        },
+        .not_found => |issue| return errors.fromTrackingIssue(issue),
+    }
+}
+
+fn parseStartOptions(args: []const []const u8) !StartOptions {
+    var options = StartOptions{};
+    var index: usize = 0;
+    while (index < args.len) : (index += 1) {
+        const target: *?[]const u8 = if (std.mem.eql(u8, args[index], "--command-id"))
+            &options.command_id
+        else if (std.mem.eql(u8, args[index], "--workout"))
+            &options.workout_id
+        else if (std.mem.eql(u8, args[index], "--started-at"))
+            &options.started_at
+        else if (std.mem.eql(u8, args[index], "--occurred-at"))
+            &options.occurred_at
+        else
+            return error.InvalidArguments;
+        index += 1;
+        if (index >= args.len or args[index].len == 0 or target.* != null)
+            return error.InvalidArguments;
+        target.* = args[index];
     }
     return options;
+}
+
+fn generateId(io: std.Io, allocator: std.mem.Allocator, prefix: []const u8) ![]const u8 {
+    var random_bytes: [16]u8 = undefined;
+    try io.randomSecure(&random_bytes);
+    const encoded = std.fmt.bytesToHex(random_bytes, .lower);
+    return std.fmt.allocPrint(allocator, "{s}-{s}", .{ prefix, encoded });
+}
+
+fn currentTimestamp(io: std.Io, allocator: std.mem.Allocator) ![]const u8 {
+    const seconds = std.Io.Clock.real.now(io).toSeconds();
+    if (seconds < 0) return error.ClockBeforeUnixEpoch;
+    const epoch_seconds = std.time.epoch.EpochSeconds{ .secs = @intCast(seconds) };
+    const year_day = epoch_seconds.getEpochDay().calculateYearDay();
+    const month_day = year_day.calculateMonthDay();
+    const day_seconds = epoch_seconds.getDaySeconds();
+    return std.fmt.allocPrint(
+        allocator,
+        "{d:0>4}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}Z",
+        .{
+            year_day.year,
+            month_day.month.numeric(),
+            month_day.day_index + 1,
+            day_seconds.getHoursIntoDay(),
+            day_seconds.getMinutesIntoHour(),
+            day_seconds.getSecondsIntoMinute(),
+        },
+    );
 }
 
 fn resolveDatabasePath(
@@ -357,6 +573,7 @@ test "client source imports only approved public packages" {
                 std.mem.eql(u8, name, "caudex") or
                 std.mem.eql(u8, name, "caudex_persistence") or
                 std.mem.eql(u8, name, "caudex_sqlite") or
+                std.mem.eql(u8, name, "caudex_tracking") or
                 std.mem.eql(u8, name, "errors.zig") or
                 std.mem.eql(u8, name, "output.zig"),
         );
@@ -365,7 +582,7 @@ test "client source imports only approved public packages" {
         remainder = tail[name_end + 1 ..];
     }
 
-    try std.testing.expectEqual(@as(usize, 7), import_count);
+    try std.testing.expectEqual(@as(usize, 8), import_count);
 }
 
 test "client sources contain no SQL or private path imports" {

@@ -18,9 +18,27 @@ pub const Failure = struct {
     message: []const u8,
 };
 
+pub fn fromTrackingIssue(issue: anytype) Failure {
+    return .{
+        .exit_class = switch (issue.category) {
+            .validation => .validation,
+            .not_found => .not_found,
+            .conflict => .conflict,
+        },
+        .code = issue.code,
+        .category = @tagName(issue.category),
+        .message = issue.message,
+    };
+}
+
 pub fn fromError(err: anyerror) Failure {
     return switch (err) {
-        error.InvalidArguments => .{
+        error.InvalidArguments,
+        error.Empty,
+        error.TooLong,
+        error.InvalidUtf8,
+        error.InvalidTimestamp,
+        => .{
             .exit_class = .syntax,
             .code = "client.invalid_arguments",
             .category = "syntax",

@@ -30,6 +30,19 @@ pub const DatabaseInfo = struct {
     compatibility: []const u8,
 };
 
+pub const WorkoutInfo = struct {
+    document_kind: []const u8,
+    command_id: ?[]const u8 = null,
+    disposition: ?[]const u8 = null,
+    workout_id: []const u8,
+    host_scope_key: []const u8,
+    athlete_id: ?[]const u8,
+    revision: u64,
+    status: []const u8,
+    started_at: []const u8,
+    completed_at: ?[]const u8,
+};
+
 pub fn requestedFormat(args: []const []const u8) Format {
     var index: usize = 1;
     while (index + 1 < args.len) : (index += 1) {
@@ -58,6 +71,43 @@ pub fn writeDatabaseInfo(
     switch (settings.format) {
         .human => try writeHumanDatabaseInfo(writer, settings.useColor(), info),
         .json => try writeJsonDatabaseInfo(writer, info),
+    }
+}
+
+pub fn writeWorkout(
+    writer: *std.Io.Writer,
+    settings: Settings,
+    info: WorkoutInfo,
+) !void {
+    switch (settings.format) {
+        .human => {
+            if (info.disposition) |disposition|
+                try writer.print("Workout {s}: {s}\n", .{ disposition, info.workout_id })
+            else
+                try writer.print("Workout: {s}\n", .{info.workout_id});
+            try writer.print(
+                "Status: {s}\nRevision: {d}\nStarted at: {s}\n",
+                .{ info.status, info.revision, info.started_at },
+            );
+        },
+        .json => {
+            try std.json.Stringify.value(.{
+                .schemaVersion = 1,
+                .kind = info.document_kind,
+                .data = .{
+                    .commandId = info.command_id,
+                    .disposition = info.disposition,
+                    .workoutId = info.workout_id,
+                    .hostScopeKey = info.host_scope_key,
+                    .athleteId = info.athlete_id,
+                    .revision = info.revision,
+                    .status = info.status,
+                    .startedAt = info.started_at,
+                    .completedAt = info.completed_at,
+                },
+            }, .{ .emit_null_optional_fields = false }, writer);
+            try writer.writeByte('\n');
+        },
     }
 }
 

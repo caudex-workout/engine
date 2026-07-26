@@ -9,6 +9,7 @@ caudex --help
 caudex version
 caudex --database :memory: database info
 caudex --format json database info
+caudex workout start
 ```
 
 Build and run it from the repository root:
@@ -19,9 +20,10 @@ zig build run-caudex-cli -- --help
 zig build test-caudex-cli
 ```
 
-The client receives only the public `caudex`, `caudex_persistence`, and
-`caudex_sqlite` packages from the root build graph. It must not import private
-engine, adapter, or migration source paths, and it contains no SQL.
+The client receives only the public `caudex`, `caudex_persistence`,
+`caudex_sqlite`, and `caudex_tracking` packages from the root build graph. It
+must not import private engine, adapter, or migration source paths, and it
+contains no SQL.
 
 Database selection uses `--database PATH`, then `CAUDEX_DATABASE`, then the
 platform default:
@@ -33,6 +35,22 @@ platform default:
 - Windows uses `%LOCALAPPDATA%\Caudex\caudex.sqlite`.
 
 Missing parent directories are created when the database is opened.
+
+The local reference client uses host scope `local` unless `--scope ID` is
+provided; `--athlete ID` selects an optional athlete within that scope. Workout
+start generates secure command and workout IDs plus a current UTC timestamp.
+For repeatable automation and idempotent retries, supply all values explicitly:
+
+```sh
+caudex --database caudex.sqlite --format json workout start \
+  --command-id command-example \
+  --workout workout-example \
+  --started-at 2026-07-26T12:00:00Z \
+  --occurred-at 2026-07-26T12:00:00Z
+
+caudex --database caudex.sqlite --format json \
+  workout show --workout workout-example
+```
 
 `--format human|json` selects human output or a versioned JSON envelope.
 Diagnostics use stderr and the same selected format; requested data remains on
