@@ -1,0 +1,131 @@
+name: npm release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to validate without publishing
+        required: true
+        type: string
+
+concurrency:
+  group: npm-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Validate and publish npm artifact
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      PACKAGE_DIRECTORY: packages/npm/workout-engine
+      RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
+      SHOULD_PUBLISH: ${{ github.event_name == 'push' }}
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || github.sha }}
+          persist-credentials: false
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Install locked test tools
+        run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: ${{ env.PACKAGE_DIRECTORY }}
+
+      - name: Validate versions and changelog
+        id: release
+        env:
+          CAUDEX_RELEASE_NOTES_PATH: release/notes.md
+        run: |
+          mkdir release
+          node tools/release/validate-npm-release.mjs "$RELEASE_TAG"
+
+      - name: Run release tests
+        run: |
+          zig fmt --check .
+          zig build
+          zig build test
+
+      - name: Set provenance repository metadata
+        run: |
+          npm pkg set repository.type=git
+          npm pkg set "repository.url=git+${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+        working-directory: ${{ env.PACKAGE_DIRECTORY }}
+
+      - name: Build publish artifact
+        run: zig build package-npm
+
+      - name: Pack artifact once
+        id: pack
+        shell: bash
+        run: |
+          npm pack "$PACKAGE_DIRECTORY" \
+            --json \
+            --ignore-scripts \
+            --pack-destination release > release/pack.json
+          filename="$(node -e \
+            'const fs=require("fs"); const [p]=JSON.parse(fs.readFileSync(process.argv[1])); process.stdout.write(p.filename)' \
+            release/pack.json)"
+          printf 'tarball=release/%s\n' "$filename" >> "$GITHUB_OUTPUT"
+
+      - name: Verify packed version and dry-run publication
+        shell: bash
+        run: |
+          packed_version="$(tar -xOf "${{ steps.pack.outputs.tarball }}" package/package.json |
+            node -e 'let input=""; process.stdin.on("data", c => input += c); process.stdin.on("end", () => process.stdout.write(JSON.parse(input).version))')"
+          test "$packed_version" = "${{ steps.release.outputs.version }}"
+          npm publish "${{ steps.pack.outputs.tarball }}" \
+            --dry-run \
+            --ignore-scripts \
+            --access public
+
+      - name: Save exact dry-run artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: npm-${{ steps.release.outputs.version }}
+          path: ${{ steps.pack.outputs.tarball }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Create draft GitHub release with exact artifact
+        if: env.SHOULD_PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$RELEASE_TAG" \
+            "${{ steps.pack.outputs.tarball }}" \
+            --draft \
+            --verify-tag \
+            --title "Caudex ${{ steps.release.outputs.version }}" \
+            --notes-file release/notes.md
+
+      - name: Publish exact artifact to npm with provenance
+        if: env.SHOULD_PUBLISH == 'true'
+        run: npm publish "${{ steps.pack.outputs.tarball }}" --provenance --access public
+
+      - name: Publish GitHub release
+        if: env.SHOULD_PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$RELEASE_TAG" --draft=false

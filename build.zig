@@ -227,6 +227,16 @@ pub fn build(b: *std.Build) void {
     );
     npm_smoke_step.dependOn(&npm_clean_smoke.step);
 
+    const npm_release_test = b.addSystemCommand(&.{
+        "node",
+        "tests/npm_release_test.mjs",
+    });
+    const npm_release_step = b.step(
+        "test-npm-release",
+        "Test npm release metadata validation",
+    );
+    npm_release_step.dependOn(&npm_release_test.step);
+
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&run_library_tests.step);
     test_step.dependOn(&run_contract_tests.step);
@@ -241,4 +251,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&methodology_factory_test.step);
     test_step.dependOn(&npm_package_test.step);
     test_step.dependOn(&npm_clean_smoke.step);
+    test_step.dependOn(&npm_release_test.step);
 }
