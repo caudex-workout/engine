@@ -97,6 +97,28 @@ pub fn build(b: *std.Build) void {
         .flags = &.{ "-std=c++17", "-Werror" },
     });
 
+    const c_conformance = b.addExecutable(.{
+        .name = "caudex_c_conformance",
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    c_conformance.root_module.addIncludePath(b.path("include"));
+    c_conformance.root_module.addCSourceFile(.{
+        .file = b.path("examples/c/conformance.c"),
+        .flags = &.{ "-std=c11", "-Wall", "-Wextra", "-Werror" },
+    });
+    c_conformance.root_module.linkLibrary(c_library);
+    c_conformance.root_module.link_libc = true;
+    const run_c_conformance = b.addRunArtifact(c_conformance);
+    run_c_conformance.addFileArg(b.path("fixtures/requests/recommendation.json"));
+    const c_example_step = b.step(
+        "example-c",
+        "Run the C canonical-request conformance example",
+    );
+    c_example_step.dependOn(&run_c_conformance.step);
+
     const wasm_target = b.resolveTargetQuery(.{
         .cpu_arch = .wasm32,
         .os_tag = .freestanding,
@@ -123,5 +145,6 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_c_api_tests.step);
     test_step.dependOn(&c_header_test.step);
     test_step.dependOn(&cpp_header_test.step);
+    test_step.dependOn(&run_c_conformance.step);
     test_step.dependOn(&wasm_library.step);
 }

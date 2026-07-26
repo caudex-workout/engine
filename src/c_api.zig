@@ -27,8 +27,14 @@ pub const Buffer = extern struct {
     capacity: usize = 0,
 };
 
+const RuntimeAllocator = std.heap.DebugAllocator(.{});
+
 pub const Runtime = struct {
-    allocator: std.mem.Allocator,
+    debug_allocator: RuntimeAllocator,
+
+    fn allocator(self: *Runtime) std.mem.Allocator {
+        return self.debug_allocator.allocator();
+    }
 };
 
 pub export fn caudex_abi_version() callconv(.c) u32 {
@@ -41,13 +47,16 @@ pub export fn caudex_runtime_create(
     const destination = out_runtime orelse return .invalid_argument;
     const runtime = std.heap.page_allocator.create(Runtime) catch
         return .out_of_memory;
-    runtime.* = .{ .allocator = std.heap.page_allocator };
+    runtime.* = .{ .debug_allocator = .init };
     destination.* = runtime;
     return .ok;
 }
 
 pub export fn caudex_runtime_destroy(runtime: ?*Runtime) callconv(.c) void {
-    if (runtime) |value| value.allocator.destroy(value);
+    if (runtime) |value| {
+        _ = value.debug_allocator.deinit();
+        std.heap.page_allocator.destroy(value);
+    }
 }
 
 pub export fn caudex_runtime_execute(
@@ -93,7 +102,7 @@ pub export fn caudex_buffer_free(
     const value = buffer orelse return;
     if (value.data) |data| {
         if (value.capacity != 0) {
-            active.allocator.free(data[0..value.capacity]);
+            active.allocator().free(data[0..value.capacity]);
         }
     }
     value.* = .{};
@@ -108,21 +117,21 @@ fn execute(
     out: *Buffer,
 ) ExecuteError!void {
     const document = try canonical_json.decodeRecommendationRequest(
-        runtime.allocator,
+        runtime.allocator(),
         input,
         .{},
     );
     defer document.deinit();
 
-    var arena = std.heap.ArenaAllocator.init(runtime.allocator);
+    var arena = std.heap.ArenaAllocator.init(runtime.allocator());
     defer arena.deinit();
     const request = try translateRequest(arena.allocator(), document.value);
     var engine_output: engine.Output = .{};
     const result = try engine.recommendSession(request, &engine_output);
 
-    const bytes = runtime.allocator.alloc(u8, max_result_bytes) catch
+    const bytes = runtime.allocator().alloc(u8, max_result_bytes) catch
         return error.OutOfMemory;
-    errdefer runtime.allocator.free(bytes);
+    errdefer runtime.allocator().free(bytes);
     const encoded = canonical_json.encode(result, bytes) catch
         return error.OutputLimitReached;
     out.* = .{
