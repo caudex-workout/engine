@@ -69,5 +69,17 @@ The authoritative schema is
   rejected rather than converted implicitly.
 - Each decision returns a stable explanation code and methodology rule ID.
 
-Performance evaluation and proposed next-state generation remain separate from
-recommendation and are implemented by CWE-032.
+## Performance evaluation and proposed state
+
+Evaluation applies the same advancement, hold, regression, exact-unit, and
+rounding rules as recommendation to a host-supplied completed workout.
+
+- Each completed exercise receives an `advanced`, `held`, `regressed`, or
+  `insufficient_evidence` outcome and the explanation for the decision.
+- Evaluated exercise entries are inserted or replaced in a proposed state.
+- State entries for exercises absent from the completed workout are preserved.
+- The proposal always uses state schema version `1`.
+- Evaluation borrows and never mutates the supplied state or workout. The host
+  may discard the proposal without any persistence or other side effect.
+- Re-evaluating identical config, state, and completed performance returns the
+  same outcomes and state JSON.

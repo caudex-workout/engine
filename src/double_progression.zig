@@ -259,6 +259,160 @@ pub const RecommendationError = error{
     Overflow,
 };
 
+pub const ExerciseEvaluation = struct {
+    exercise_id: []const u8,
+    outcome: []const u8,
+    explanation: DecisionExplanation,
+    warning: ?canonical.ValidationIssue = null,
+};
+
+pub const EvaluationBuffers = struct {
+    state_exercises: []ExerciseState,
+    exercise_evaluations: []ExerciseEvaluation,
+    load_amounts: []u8,
+};
+
+pub const Evaluation = struct {
+    outcome: []const u8,
+    exercises: []const ExerciseEvaluation,
+    next_state: State,
+};
+
+pub const EvaluationError = RecommendationError || error{
+    DuplicateExercise,
+    OutputLimitReached,
+};
+
+/// Evaluates a completed workout and returns a versioned proposed next state.
+///
+/// The supplied state and completed workout are borrowed and never mutated.
+/// The host may discard the returned proposal without any side effects.
+pub fn evaluatePerformance(
+    config: Config,
+    current_state: ?State,
+    completed_workout: *const training.CompletedWorkout,
+    buffers: EvaluationBuffers,
+) EvaluationError!Evaluation {
+    var validation_storage: [64]canonical.ValidationIssue = undefined;
+    var validation_issues: diagnostics.IssueWriter = .init(&validation_storage);
+    validateConfig(config, &validation_issues) catch return error.InvalidConfig;
+    if (current_state) |state| {
+        validateState(config, state, &validation_issues) catch
+            return error.InvalidConfig;
+    }
+    if (validation_issues.items().len != 0) return error.InvalidConfig;
+
+    if (current_state) |state| {
+        if (state.data.exercises.len > buffers.state_exercises.len) {
+            return error.OutputLimitReached;
+        }
+        @memcpy(
+            buffers.state_exercises[0..state.data.exercises.len],
+            state.data.exercises,
+        );
+    }
+    var state_len: usize = if (current_state) |state|
+        state.data.exercises.len
+    else
+        0;
+    var evaluation_len: usize = 0;
+    var load_amount_len: usize = 0;
+    var any_advanced = false;
+    var any_regressed = false;
+    var any_held = false;
+
+    const workout_snapshot = [_]training.CompletedWorkout{completed_workout.*};
+    const history = training.HistorySnapshot{ .workouts = &workout_snapshot };
+    for (completed_workout.exercises, 0..) |*completed_exercise, exercise_index| {
+        for (completed_workout.exercises[0..exercise_index]) |prior| {
+            if (prior.exercise_id.eql(completed_exercise.exercise_id)) {
+                return error.DuplicateExercise;
+            }
+        }
+        if (evaluation_len == buffers.exercise_evaluations.len) {
+            return error.OutputLimitReached;
+        }
+        const recommendation = try recommendExercise(
+            config,
+            current_state,
+            history,
+            completed_exercise.exercise_id,
+        );
+        const outcome = outcomeFor(recommendation.decision);
+        buffers.exercise_evaluations[evaluation_len] = .{
+            .exercise_id = completed_exercise.exercise_id.bytes,
+            .outcome = outcome,
+            .explanation = recommendation.explanation,
+            .warning = recommendation.warning,
+        };
+        evaluation_len += 1;
+        if (std.mem.eql(u8, outcome, "advanced")) {
+            any_advanced = true;
+        } else if (std.mem.eql(u8, outcome, "regressed")) {
+            any_regressed = true;
+        } else {
+            any_held = true;
+        }
+
+        const amount = recommendation.load.value.format(
+            buffers.load_amounts[load_amount_len..],
+        ) catch return error.OutputLimitReached;
+        load_amount_len += amount.len;
+        const proposed = ExerciseState{
+            .exerciseId = completed_exercise.exercise_id.bytes,
+            .load = .{
+                .amount = amount,
+                .unit = recommendation.load.unit.code(),
+            },
+            .targetRepetitions = recommendation.repetitions,
+        };
+        if (findStateIndex(buffers.state_exercises[0..state_len], completed_exercise.exercise_id)) |index| {
+            buffers.state_exercises[index] = proposed;
+        } else {
+            if (state_len == buffers.state_exercises.len) {
+                return error.OutputLimitReached;
+            }
+            buffers.state_exercises[state_len] = proposed;
+            state_len += 1;
+        }
+    }
+
+    return .{
+        .outcome = if (any_regressed)
+            "regressed"
+        else if (any_held)
+            "held"
+        else if (any_advanced)
+            "advanced"
+        else
+            "no_completed_exercises",
+        .exercises = buffers.exercise_evaluations[0..evaluation_len],
+        .next_state = .{
+            .schemaVersion = state_schema_version,
+            .data = .{ .exercises = buffers.state_exercises[0..state_len] },
+        },
+    };
+}
+
+fn outcomeFor(decision: RecommendationDecision) []const u8 {
+    return switch (decision) {
+        .repetitions_advanced, .load_advanced => "advanced",
+        .partial_regressed, .failure_regressed => "regressed",
+        .initial, .state_without_history => "insufficient_evidence",
+        .partial_held,
+        .failure_held,
+        .insufficient_sets_held,
+        => "held",
+    };
+}
+
+fn findStateIndex(states: []const ExerciseState, exercise_id: primitives.Id) ?usize {
+    for (states, 0..) |state, index| {
+        if (std.mem.eql(u8, state.exerciseId, exercise_id.bytes)) return index;
+    }
+    return null;
+}
+
 /// Recommends one exercise from explicit config, state, and history snapshots.
 ///
 /// This function proposes no next state and performs no evaluation-side
@@ -291,7 +445,7 @@ pub fn recommendExercise(
         null;
     const performance = history_helpers.lastCompletedExercise(history, exercise_id);
     const prior = if (performance) |value|
-        try analyzePerformance(value, state_entry, state_load, resolved)
+        try analyzePerformance(value.exercise, state_entry, state_load, resolved)
     else
         null;
 
@@ -386,7 +540,7 @@ const PriorPerformance = struct {
 };
 
 fn analyzePerformance(
-    performance: history_helpers.ExercisePerformance,
+    completed_exercise: *const training.CompletedExercise,
     state_entry: ?*const ExerciseState,
     state_load: ?primitives.Measurement,
     resolved: ResolvedConfig,
@@ -402,7 +556,7 @@ fn analyzePerformance(
     var had_failure = false;
     var working_set_count: usize = 0;
 
-    for (performance.exercise.sets) |set| {
+    for (completed_exercise.sets) |set| {
         if (!std.mem.eql(u8, set.kind.bytes, "working")) continue;
         working_set_count += 1;
         switch (set.status) {
@@ -440,7 +594,7 @@ fn analyzePerformance(
         resolved.advancementCriteria.minimumRepetitions,
     );
 
-    for (performance.exercise.sets) |set| {
+    for (completed_exercise.sets) |set| {
         if (!std.mem.eql(u8, set.kind.bytes, "working") or
             set.status != .completed)
         {
@@ -674,6 +828,19 @@ fn decimalGreaterThan(left: primitives.Decimal, right: primitives.Decimal) bool 
     const left_value = scaledMantissa(left, scale) catch return false;
     const right_value = scaledMantissa(right, scale) catch return false;
     return left_value > right_value;
+}
+
+pub fn writeStateJson(
+    state: State,
+    out: []u8,
+) std.Io.Writer.Error![]const u8 {
+    var writer: std.Io.Writer = .fixed(out);
+    try std.json.Stringify.value(
+        state,
+        .{ .emit_null_optional_fields = false },
+        &writer,
+    );
+    return writer.buffered();
 }
 
 fn validateResolvedConfig(
@@ -1078,5 +1245,116 @@ test "rounding modes are exact and incompatible units fail" {
             load,
             .{ .mode = .down, .quantum = .{ .amount = "2.5", .unit = "kg" } },
         ),
+    );
+}
+
+test "evaluation proposes versioned state without mutating supplied state" {
+    var performance: TestPerformance = undefined;
+    try performance.init(.completed, 45, 12, 12, .lb);
+    const existing_states = [_]ExerciseState{
+        .{
+            .exerciseId = "squat",
+            .load = .{ .amount = "45", .unit = "lb" },
+            .targetRepetitions = 12,
+        },
+        .{
+            .exerciseId = "row",
+            .load = .{ .amount = "60", .unit = "lb" },
+            .targetRepetitions = 10,
+        },
+    };
+    const original_state = State{
+        .schemaVersion = 1,
+        .data = .{ .exercises = &existing_states },
+    };
+    var proposed_states: [2]ExerciseState = undefined;
+    var evaluations: [1]ExerciseEvaluation = undefined;
+    var load_amounts: [32]u8 = undefined;
+    const evaluation = try evaluatePerformance(
+        validConfig(&.{}),
+        original_state,
+        &performance.workout[0],
+        .{
+            .state_exercises = &proposed_states,
+            .exercise_evaluations = &evaluations,
+            .load_amounts = &load_amounts,
+        },
+    );
+
+    try std.testing.expectEqualStrings("advanced", evaluation.outcome);
+    try std.testing.expectEqual(@as(u32, 1), evaluation.next_state.schemaVersion);
+    try std.testing.expectEqualStrings(
+        "50.0",
+        evaluation.next_state.data.exercises[0].load.amount,
+    );
+    try std.testing.expectEqual(
+        @as(u16, 8),
+        evaluation.next_state.data.exercises[0].targetRepetitions,
+    );
+    try std.testing.expectEqualStrings(
+        "60",
+        evaluation.next_state.data.exercises[1].load.amount,
+    );
+    try std.testing.expectEqualStrings("45", original_state.data.exercises[0].load.amount);
+    try std.testing.expectEqual(
+        @as(u16, 12),
+        original_state.data.exercises[0].targetRepetitions,
+    );
+}
+
+test "re-evaluation is deterministic and proposed state round-trips" {
+    var performance: TestPerformance = undefined;
+    try performance.init(.partial, 45, 9, 9, .lb);
+    const existing_states = [_]ExerciseState{.{
+        .exerciseId = "squat",
+        .load = .{ .amount = "45", .unit = "lb" },
+        .targetRepetitions = 9,
+    }};
+    const state = State{ .schemaVersion = 1, .data = .{ .exercises = &existing_states } };
+
+    var first_states: [1]ExerciseState = undefined;
+    var first_evaluations: [1]ExerciseEvaluation = undefined;
+    var first_amounts: [32]u8 = undefined;
+    const first = try evaluatePerformance(
+        validConfig(&.{}),
+        state,
+        &performance.workout[0],
+        .{
+            .state_exercises = &first_states,
+            .exercise_evaluations = &first_evaluations,
+            .load_amounts = &first_amounts,
+        },
+    );
+    var second_states: [1]ExerciseState = undefined;
+    var second_evaluations: [1]ExerciseEvaluation = undefined;
+    var second_amounts: [32]u8 = undefined;
+    const second = try evaluatePerformance(
+        validConfig(&.{}),
+        state,
+        &performance.workout[0],
+        .{
+            .state_exercises = &second_states,
+            .exercise_evaluations = &second_evaluations,
+            .load_amounts = &second_amounts,
+        },
+    );
+    var first_json: [512]u8 = undefined;
+    var second_json: [512]u8 = undefined;
+    try std.testing.expectEqualStrings(
+        try writeStateJson(first.next_state, &first_json),
+        try writeStateJson(second.next_state, &second_json),
+    );
+
+    const encoded = try writeStateJson(first.next_state, &first_json);
+    const reparsed = try std.json.parseFromSlice(
+        State,
+        std.testing.allocator,
+        encoded,
+        .{},
+    );
+    defer reparsed.deinit();
+    try std.testing.expectEqualStrings(
+        first.next_state.data.exercises[0].load.amount,
+        reparsed.value.data.exercises[0].load.amount,
     );
 }

@@ -26,6 +26,31 @@ pub const RecommendationRequest = struct {
     available_equipment_ids: []const primitives.Id,
 };
 
+pub const EvaluationRequest = struct {
+    as_of: primitives.Timestamp,
+    methodology_id: primitives.Id,
+    methodology_version: methodology.Version,
+    config: DoubleProgressionConfig,
+    methodology_state: ?double_progression_contract.State = null,
+    catalog: training.ExerciseCatalog,
+    completed_workout: *const training.CompletedWorkout,
+};
+
+pub const EvaluationOutput = struct {
+    state_exercises: [64]double_progression_contract.ExerciseState = undefined,
+    exercise_evaluations: [64]double_progression_contract.ExerciseEvaluation = undefined,
+    load_amounts: [2048]u8 = undefined,
+    result: ?double_progression_contract.Evaluation = null,
+
+    fn buffers(self: *EvaluationOutput) double_progression_contract.EvaluationBuffers {
+        return .{
+            .state_exercises = &self.state_exercises,
+            .exercise_evaluations = &self.exercise_evaluations,
+            .load_amounts = &self.load_amounts,
+        };
+    }
+};
+
 pub const RecommendError = error{
     UnsupportedMethodology,
     InvalidRequest,
@@ -73,6 +98,11 @@ pub const Output = struct {
 const MethodologyOutput = struct {
     request: *const RecommendationRequest,
     output: *Output,
+};
+
+const MethodologyEvaluationOutput = struct {
+    request: *const EvaluationRequest,
+    output: *EvaluationOutput,
 };
 
 const available_equipment_evidence = [_]canonical.EvidenceRef{
@@ -171,15 +201,24 @@ fn recommendDoubleProgression(
     }
 }
 
-fn evaluateUnsupported(
+fn evaluateDoubleProgression(
     view: methodology.EvaluationView,
     scratch: *methodology.Scratch,
     writer: *methodology.EvaluationWriter,
 ) methodology.MethodologyError!void {
-    _ = view;
     _ = scratch;
-    _ = writer;
-    return error.InvalidInput;
+    const request: *const EvaluationRequest = @ptrCast(@alignCast(view.context));
+    const destination: *MethodologyEvaluationOutput =
+        @ptrCast(@alignCast(writer.context));
+    destination.output.result = double_progression_contract.evaluatePerformance(
+        request.config,
+        request.methodology_state,
+        request.completed_workout,
+        destination.output.buffers(),
+    ) catch |err| return switch (err) {
+        error.OutputLimitReached => error.OutputLimitReached,
+        else => error.InvalidInput,
+    };
 }
 
 const double_progression = methodology.Methodology{
@@ -190,7 +229,7 @@ const double_progression = methodology.Methodology{
     },
     .validate_config = validateDoubleProgressionConfig,
     .recommend_session = recommendDoubleProgression,
-    .evaluate_performance = evaluateUnsupported,
+    .evaluate_performance = evaluateDoubleProgression,
 };
 
 const registry = methodology.Registry.initComptime(&.{double_progression});
@@ -246,6 +285,37 @@ pub fn recommendSession(
     fingerprintRequest(request, &output.input_fingerprint);
     fingerprintResult(request, output, &output.result_fingerprint);
     return output.result(request);
+}
+
+/// Evaluates completed performance and returns a discardable state proposal.
+pub fn evaluatePerformance(
+    request: EvaluationRequest,
+    output: *EvaluationOutput,
+) RecommendError!double_progression_contract.Evaluation {
+    const implementation = registry.find(
+        request.methodology_id,
+        request.methodology_version,
+    ) orelse return error.UnsupportedMethodology;
+    for (request.completed_workout.exercises) |exercise| {
+        if (request.catalog.find(exercise.exercise_id) == null) {
+            return error.InvalidRequest;
+        }
+    }
+    var destination = MethodologyEvaluationOutput{
+        .request = &request,
+        .output = output,
+    };
+    var scratch = methodology.Scratch{ .bytes = &.{} };
+    var writer = methodology.EvaluationWriter{ .context = &destination };
+    implementation.evaluate_performance(
+        .{ .context = &request },
+        &scratch,
+        &writer,
+    ) catch |err| return switch (err) {
+        error.InvalidInput => error.InvalidRequest,
+        error.OutputLimitReached => error.OutputLimitReached,
+    };
+    return output.result orelse error.InvalidRequest;
 }
 
 fn equipmentAvailable(required: []const primitives.Id, available: []const primitives.Id) bool {
@@ -576,4 +646,71 @@ fn testConfig() DoubleProgressionConfig {
             .quantum = .{ .amount = "2.5", .unit = "lb" },
         },
     };
+}
+
+test "typed evaluation routes through registry and proposes state" {
+    const load_id = try primitives.Id.parse("load");
+    const repetitions_id = try primitives.Id.parse("repetitions");
+    const working_id = try primitives.Id.parse("working");
+    const actual_metrics = [_]training.Metric{
+        .{
+            .code = load_id,
+            .value = .{ .value = try .parse("45"), .unit = .lb },
+        },
+        .{
+            .code = repetitions_id,
+            .value = .{ .value = try .parse("12"), .unit = .count },
+        },
+    };
+    const target_metrics = [_]training.Metric{.{
+        .code = repetitions_id,
+        .value = .{ .value = try .parse("12"), .unit = .count },
+    }};
+    const sets = [_]training.CompletedSet{.{
+        .kind = working_id,
+        .actual_metrics = &actual_metrics,
+        .target_metrics = &target_metrics,
+        .status = .completed,
+    }};
+    const completed_exercises = [_]training.CompletedExercise{.{
+        .exercise_id = try .parse("squat"),
+        .sets = &sets,
+    }};
+    const workout = training.CompletedWorkout{
+        .id = try .parse("workout-1"),
+        .started_at = try .parse("2026-07-25T14:00:00Z"),
+        .completed_at = try .parse("2026-07-25T14:30:00Z"),
+        .exercises = &completed_exercises,
+    };
+    const catalog_exercises = [_]training.Exercise{.{
+        .id = try .parse("squat"),
+    }};
+    const states = [_]double_progression_contract.ExerciseState{.{
+        .exerciseId = "squat",
+        .load = .{ .amount = "45", .unit = "lb" },
+        .targetRepetitions = 12,
+    }};
+    var output: EvaluationOutput = .{};
+    const evaluation = try evaluatePerformance(
+        .{
+            .as_of = try .parse("2026-07-25T15:00:00Z"),
+            .methodology_id = try .parse("caudex.double-progression"),
+            .methodology_version = .{ .major = 0, .minor = 1, .patch = 0 },
+            .config = testConfig(),
+            .methodology_state = .{
+                .schemaVersion = 1,
+                .data = .{ .exercises = &states },
+            },
+            .catalog = .{ .exercises = &catalog_exercises },
+            .completed_workout = &workout,
+        },
+        &output,
+    );
+
+    try std.testing.expectEqualStrings("advanced", evaluation.outcome);
+    try std.testing.expectEqualStrings(
+        "50.0",
+        evaluation.next_state.data.exercises[0].load.amount,
+    );
+    try std.testing.expectEqualStrings("45", states[0].load.amount);
 }

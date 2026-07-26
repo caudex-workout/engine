@@ -78,6 +78,41 @@ test "double-progression schemas are valid JSON documents" {
     }
 }
 
+test "double-progression state fixture round-trips" {
+    const parsed = try std.json.parseFromSlice(
+        caudex.double_progression.State,
+        std.testing.allocator,
+        @embedFile("fixtures/methodologies/double-progression-state-v1.json"),
+        .{},
+    );
+    defer parsed.deinit();
+    var encoded_buffer: [1024]u8 = undefined;
+    const encoded = try caudex.double_progression.writeStateJson(
+        parsed.value,
+        &encoded_buffer,
+    );
+    const reparsed = try std.json.parseFromSlice(
+        caudex.double_progression.State,
+        std.testing.allocator,
+        encoded,
+        .{},
+    );
+    defer reparsed.deinit();
+
+    try std.testing.expectEqual(
+        parsed.value.schemaVersion,
+        reparsed.value.schemaVersion,
+    );
+    try std.testing.expectEqualStrings(
+        parsed.value.data.exercises[0].load.amount,
+        reparsed.value.data.exercises[0].load.amount,
+    );
+    try std.testing.expectEqual(
+        parsed.value.data.exercises[0].targetRepetitions,
+        reparsed.value.data.exercises[0].targetRepetitions,
+    );
+}
+
 test "measurement rejects a JSON number at the decimal boundary" {
     const invalid = "{\"amount\":72.5,\"unit\":\"lb\"}";
     try std.testing.expectError(
