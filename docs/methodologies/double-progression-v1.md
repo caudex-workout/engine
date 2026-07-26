@@ -7,9 +7,7 @@ Configuration version: `1`
 State schema version: `1`
 
 Double progression advances repetitions within a configured range, then
-advances load after the configured successful-set threshold is met. CWE-030
-defines and validates the contract only; recommendation and evaluation behavior
-is implemented by later issues.
+advances load after the configured successful-set threshold is met.
 
 ## Configuration
 
@@ -17,13 +15,16 @@ is implemented by later issues.
 - `workingSets` is the prescribed number of working sets.
 - `advancementCriteria.minimumSuccessfulSets` cannot exceed `workingSets`.
 - `advancementCriteria.minimumRepetitions` must be inside `repRange`.
+- `initialLoad` is the explicit first-exposure load when neither usable state
+  nor completed exercise history exists.
 - `loadIncrement` is the exact load added after advancement criteria are met.
 - `failurePolicy.onPartial` and `onFailure` explicitly choose `hold` or
   `regress`. `regressionAmount` is the exact load removed by regression.
 - `rounding.mode` is `nearest`, `up`, or `down`. `rounding.quantum` is the
   smallest representable load step.
-- Load increment, regression amount, and rounding quantum must be positive mass
-  measurements using one unit within each resolved configuration.
+- Initial load is non-negative. Load increment, regression amount, and rounding
+  quantum are positive mass measurements. All four values use one unit within
+  each resolved configuration.
 - `exerciseOverrides` selectively replaces fields for a host exercise ID.
   Override IDs are unique. Omitted fields inherit the top-level value, and the
   fully resolved override must satisfy the same validation rules.
@@ -48,3 +49,25 @@ envelope has `schemaVersion: 1`; unsupported versions produce
 
 The authoritative schema is
 [`double-progression-state-v1.schema.json`](../../schemas/methodologies/double-progression-state-v1.schema.json).
+
+## Recommendation behavior
+
+- With neither usable state nor completed exercise history, the methodology
+  prescribes `initialLoad`, `repRange.min`, and `workingSets`, and returns
+  `history.insufficient_evidence`.
+- State supplies the current load and repetition target when present. Without a
+  matching completed performance, those values are held with the same warning.
+- Meeting `minimumSuccessfulSets` at the current target advances repetitions by
+  one. Meeting the threshold at `minimumRepetitions` adds `loadIncrement` and
+  resets repetitions to `repRange.min`.
+- Partial and failed sets use their respective configured `hold` or `regress`
+  action. Regression subtracts `regressionAmount`, never below zero, resets
+  repetitions to the range minimum, and applies configured rounding.
+- Rounding is applied to initial, advanced, and regressed loads. Held loads are
+  preserved exactly.
+- Completed set load units must match state/config units. Unit mismatches are
+  rejected rather than converted implicitly.
+- Each decision returns a stable explanation code and methodology rule ID.
+
+Performance evaluation and proposed next-state generation remain separate from
+recommendation and are implemented by CWE-032.

@@ -20,6 +20,7 @@ pub const RecommendationRequest = struct {
     methodology_id: primitives.Id,
     methodology_version: methodology.Version,
     config: DoubleProgressionConfig,
+    methodology_state: ?double_progression_contract.State = null,
     catalog: training.ExerciseCatalog,
     history: training.HistorySnapshot = .{},
     available_equipment_ids: []const primitives.Id,
@@ -33,20 +34,27 @@ pub const RecommendError = error{
 
 /// Caller-owned storage for the bounded CWE-015 recommendation result.
 pub const Output = struct {
-    metrics: [1]canonical.Metric = undefined,
-    sets: [1]canonical.SetRecommendation = undefined,
+    metrics: [128]canonical.Metric = undefined,
+    sets: [64]canonical.SetRecommendation = undefined,
     exercises: [1]canonical.ExerciseRecommendation = undefined,
-    explanations: [1]canonical.Explanation = undefined,
+    explanations: [2]canonical.Explanation = undefined,
+    warnings: [1]canonical.ValidationIssue = undefined,
     input_fingerprint: [64]u8 = undefined,
     result_fingerprint: [64]u8 = undefined,
     rep_amount: [20]u8 = undefined,
     rep_amount_len: usize = 0,
+    load_amount: [32]u8 = undefined,
+    load_amount_len: usize = 0,
+    set_len: usize = 0,
+    explanation_len: usize = 0,
+    warning_len: usize = 0,
 
     fn result(self: *Output, request: RecommendationRequest) canonical.RecommendationResult {
         return .{
             .ok = true,
             .recommendation = .{ .exercises = self.exercises[0..1] },
-            .explanations = self.explanations[0..1],
+            .explanations = self.explanations[0..self.explanation_len],
+            .warnings = self.warnings[0..self.warning_len],
             .metadata = .{
                 .engineVersion = engine_version,
                 .schemaVersion = schema_version,
@@ -70,7 +78,7 @@ const MethodologyOutput = struct {
 const available_equipment_evidence = [_]canonical.EvidenceRef{
     .{ .path = "/session/availableEquipmentIds" },
 };
-const set_explanation_refs = [_][]const u8{"explanation-1"};
+const set_explanation_refs = [_][]const u8{ "explanation-1", "explanation-2" };
 
 fn validateDoubleProgressionConfig(
     view: methodology.ConfigView,
@@ -78,14 +86,6 @@ fn validateDoubleProgressionConfig(
 ) diagnostics.IssueWriter.AppendError!void {
     const config: *const DoubleProgressionConfig = @ptrCast(@alignCast(view.context));
     try double_progression_contract.validateConfig(config.*, issues);
-    if (config.workingSets != 1) {
-        try issues.append(.{
-            .code = "methodology.config_invalid",
-            .path = "/methodology/config/workingSets",
-            .message = "The first recommendation slice requires one working set.",
-            .severity = .@"error",
-        });
-    }
 }
 
 fn recommendDoubleProgression(
@@ -99,27 +99,47 @@ fn recommendDoubleProgression(
     const destination: *MethodologyOutput =
         @ptrCast(@alignCast(writer.context));
     const exercise = &request.catalog.exercises[0];
+    const prescription = double_progression_contract.recommendExercise(
+        request.config,
+        request.methodology_state,
+        request.history,
+        exercise.id,
+    ) catch return error.InvalidInput;
 
     destination.output.rep_amount_len = (std.fmt.bufPrint(
         &destination.output.rep_amount,
         "{d}",
-        .{request.config.repRange.min},
+        .{prescription.repetitions},
     ) catch return error.OutputLimitReached).len;
-    destination.output.metrics[0] = .{
-        .code = "repetitions",
-        .value = .{
-            .amount = destination.output.rep_amount[0..destination.output.rep_amount_len],
-            .unit = "count",
-        },
-    };
-    destination.output.sets[0] = .{
-        .kind = "working",
-        .targetMetrics = destination.output.metrics[0..1],
-        .explanationRefs = &set_explanation_refs,
-    };
+    destination.output.load_amount_len = (prescription.load.value.format(
+        &destination.output.load_amount,
+    ) catch return error.OutputLimitReached).len;
+    destination.output.set_len = prescription.working_sets;
+    for (0..destination.output.set_len) |set_index| {
+        const metric_index = set_index * 2;
+        destination.output.metrics[metric_index] = .{
+            .code = "load",
+            .value = .{
+                .amount = destination.output.load_amount[0..destination.output.load_amount_len],
+                .unit = prescription.load.unit.code(),
+            },
+        };
+        destination.output.metrics[metric_index + 1] = .{
+            .code = "repetitions",
+            .value = .{
+                .amount = destination.output.rep_amount[0..destination.output.rep_amount_len],
+                .unit = "count",
+            },
+        };
+        destination.output.sets[set_index] = .{
+            .kind = "working",
+            .targetMetrics = destination.output.metrics[metric_index .. metric_index + 2],
+            .explanationRefs = &set_explanation_refs,
+        };
+    }
     destination.output.exercises[0] = .{
         .exerciseId = exercise.id.bytes,
-        .sets = destination.output.sets[0..1],
+        .sets = destination.output.sets[0..destination.output.set_len],
         .explanationRefs = &set_explanation_refs,
     };
     destination.output.explanations[0] = .{
@@ -132,6 +152,23 @@ fn recommendDoubleProgression(
         .ruleId = "double-progression.initial-working-set",
         .severity = .info,
     };
+    destination.output.explanations[1] = .{
+        .id = "explanation-2",
+        .code = prescription.explanation.code,
+        .category = "progression",
+        .summary = prescription.explanation.summary,
+        .subject = .{ .exerciseId = exercise.id.bytes },
+        .evidence = &.{.{ .path = "/@derived/history/lastCompletedExercise" }},
+        .ruleId = prescription.explanation.rule_id,
+        .severity = .info,
+    };
+    destination.output.explanation_len = 2;
+    if (prescription.warning) |warning| {
+        destination.output.warnings[0] = warning;
+        destination.output.warning_len = 1;
+    } else {
+        destination.output.warning_len = 0;
+    }
 }
 
 fn evaluateUnsupported(
@@ -167,15 +204,22 @@ pub fn recommendSession(
         request.methodology_id,
         request.methodology_version,
     ) orelse return error.UnsupportedMethodology;
-    if (request.catalog.exercises.len != 1 or request.history.workouts.len != 0) {
+    if (request.catalog.exercises.len != 1) {
         return error.InvalidRequest;
     }
-    var issue_storage: [1]canonical.ValidationIssue = undefined;
+    var issue_storage: [16]canonical.ValidationIssue = undefined;
     var issues: diagnostics.IssueWriter = .init(&issue_storage);
     implementation.validate_config(
         .{ .context = &request.config },
         &issues,
     ) catch return error.OutputLimitReached;
+    if (request.methodology_state) |state| {
+        double_progression_contract.validateState(
+            request.config,
+            state,
+            &issues,
+        ) catch return error.OutputLimitReached;
+    }
     if (issues.items().len != 0) return error.InvalidRequest;
     if (!equipmentAvailable(
         request.catalog.exercises[0].equipment_ids,
@@ -224,11 +268,47 @@ fn fingerprintRequest(request: RecommendationRequest, out: *[64]u8) void {
     updateU64(&hash, request.methodology_version.minor);
     updateU64(&hash, request.methodology_version.patch);
     fingerprintConfig(&hash, request.config);
+    updatePresence(&hash, request.methodology_state != null);
+    if (request.methodology_state) |state| {
+        updateU64(&hash, state.schemaVersion);
+        for (state.data.exercises) |exercise| {
+            hash.update(exercise.exerciseId);
+            hash.update("\x00");
+            updateMeasurement(&hash, exercise.load);
+            updateU64(&hash, exercise.targetRepetitions);
+        }
+    }
+    fingerprintHistory(&hash, request.history);
     for (request.catalog.exercises) |exercise| {
         hash.update(exercise.id.bytes);
         hash.update("\x00");
+        updatePresence(&hash, exercise.name != null);
+        if (exercise.name) |name| {
+            hash.update(name);
+            hash.update("\x00");
+        }
         for (exercise.equipment_ids) |equipment| {
             hash.update(equipment.bytes);
+            hash.update("\x00");
+        }
+        for (exercise.movement_tags) |tag| {
+            hash.update(tag.bytes);
+            hash.update("\x00");
+        }
+        for (exercise.muscle_contributions) |contribution| {
+            hash.update(contribution.muscle_id.bytes);
+            hash.update("\x00");
+            hash.update(@tagName(contribution.role));
+            hash.update("\x00");
+            updatePresence(&hash, contribution.weight != null);
+            if (contribution.weight) |weight| updateDecimal(&hash, weight);
+        }
+        updatePresence(&hash, exercise.unilateral != null);
+        if (exercise.unilateral) |unilateral| {
+            hash.update(if (unilateral) "\x01" else "\x00");
+        }
+        for (exercise.aliases) |alias| {
+            hash.update(alias);
             hash.update("\x00");
         }
     }
@@ -237,6 +317,81 @@ fn fingerprintRequest(request: RecommendationRequest, out: *[64]u8) void {
         hash.update("\x00");
     }
     finishHex(&hash, out);
+}
+
+fn fingerprintHistory(
+    hash: *std.crypto.hash.sha2.Sha256,
+    history: training.HistorySnapshot,
+) void {
+    updateU64(hash, history.workouts.len);
+    for (history.workouts) |workout| {
+        hash.update(workout.id.bytes);
+        hash.update("\x00");
+        hash.update(workout.started_at.bytes);
+        hash.update("\x00");
+        hash.update(workout.completed_at.bytes);
+        hash.update("\x00");
+        updateU64(hash, workout.exercises.len);
+        for (workout.exercises) |exercise| {
+            hash.update(exercise.exercise_id.bytes);
+            hash.update("\x00");
+            updateU64(hash, exercise.sets.len);
+            for (exercise.sets) |set| {
+                updatePresence(hash, set.id != null);
+                if (set.id) |id| {
+                    hash.update(id.bytes);
+                    hash.update("\x00");
+                }
+                hash.update(set.kind.bytes);
+                hash.update("\x00");
+                hash.update(@tagName(set.status));
+                hash.update("\x00");
+                updatePresence(hash, set.completed_at != null);
+                if (set.completed_at) |completed_at| {
+                    hash.update(completed_at.bytes);
+                    hash.update("\x00");
+                }
+                updateU64(hash, set.actual_metrics.len);
+                for (set.actual_metrics) |metric| {
+                    hash.update(metric.code.bytes);
+                    hash.update("\x00");
+                    updateTrainingMeasurement(hash, metric.value);
+                }
+                updateU64(hash, set.target_metrics.len);
+                for (set.target_metrics) |metric| {
+                    hash.update(metric.code.bytes);
+                    hash.update("\x00");
+                    updateTrainingMeasurement(hash, metric.value);
+                }
+            }
+            for (exercise.tags) |tag| {
+                hash.update(tag.bytes);
+                hash.update("\x00");
+            }
+            updatePresence(hash, exercise.notes != null);
+            if (exercise.notes) |notes| {
+                hash.update(notes);
+                hash.update("\x00");
+            }
+        }
+    }
+}
+
+fn updateTrainingMeasurement(
+    hash: *std.crypto.hash.sha2.Sha256,
+    measurement: primitives.Measurement,
+) void {
+    updateDecimal(hash, measurement.value);
+    hash.update(measurement.unit.code());
+    hash.update("\x00");
+}
+
+fn updateDecimal(
+    hash: *std.crypto.hash.sha2.Sha256,
+    decimal: primitives.Decimal,
+) void {
+    updateU64(hash, @as(u64, @bitCast(decimal.mantissa)));
+    updateU64(hash, decimal.scale);
 }
 
 fn fingerprintResult(
@@ -249,9 +404,24 @@ fn fingerprintResult(
     hash.update(request.methodology_id.bytes);
     hash.update("\x00");
     hash.update(output.exercises[0].exerciseId);
-    hash.update("\x00working\x00repetitions\x00");
+    hash.update("\x00working\x00load\x00");
+    hash.update(output.load_amount[0..output.load_amount_len]);
+    hash.update("\x00");
+    hash.update(output.metrics[0].value.unit);
+    hash.update("\x00repetitions\x00");
     hash.update(output.rep_amount[0..output.rep_amount_len]);
-    hash.update("\x00count\x00exercise.selected.available_equipment");
+    updateU64(&hash, output.set_len);
+    hash.update("\x00count\x00");
+    for (output.explanations[0..output.explanation_len]) |explanation| {
+        hash.update(explanation.code);
+        hash.update("\x00");
+        hash.update(explanation.ruleId orelse "");
+        hash.update("\x00");
+    }
+    for (output.warnings[0..output.warning_len]) |warning| {
+        hash.update(warning.code);
+        hash.update("\x00");
+    }
     finishHex(&hash, out);
 }
 
@@ -270,6 +440,7 @@ fn fingerprintConfig(
     updateU64(hash, config.workingSets);
     updateU64(hash, config.advancementCriteria.minimumSuccessfulSets);
     updateU64(hash, config.advancementCriteria.minimumRepetitions);
+    updateMeasurement(hash, config.initialLoad);
     updateMeasurement(hash, config.loadIncrement);
     hash.update(@tagName(config.failurePolicy.onPartial));
     hash.update("\x00");
@@ -294,6 +465,8 @@ fn fingerprintConfig(
             updateU64(hash, advancement.minimumSuccessfulSets);
             updateU64(hash, advancement.minimumRepetitions);
         }
+        updatePresence(hash, override.initialLoad != null);
+        if (override.initialLoad) |measurement| updateMeasurement(hash, measurement);
         updatePresence(hash, override.loadIncrement != null);
         if (override.loadIncrement) |measurement| updateMeasurement(hash, measurement);
         updatePresence(hash, override.failurePolicy != null);
@@ -391,6 +564,7 @@ fn testConfig() DoubleProgressionConfig {
             .minimumSuccessfulSets = 1,
             .minimumRepetitions = 12,
         },
+        .initialLoad = .{ .amount = "45", .unit = "lb" },
         .loadIncrement = .{ .amount = "5", .unit = "lb" },
         .failurePolicy = .{
             .onPartial = .hold,

@@ -57,8 +57,9 @@
       "properties": {
         "exerciseId": { "$ref": "#/$defs/identifier" },
         "repRange": { "$ref": "#/$defs/repRange" },
-        "workingSets": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "workingSets": { "type": "integer", "minimum": 1, "maximum": 64 },
         "advancementCriteria": { "$ref": "#/$defs/advancementCriteria" },
+        "initialLoad": { "$ref": "#/$defs/measurement" },
         "loadIncrement": { "$ref": "#/$defs/measurement" },
         "failurePolicy": { "$ref": "#/$defs/failurePolicy" },
         "rounding": { "$ref": "#/$defs/rounding" }
@@ -71,14 +72,16 @@
     "repRange",
     "workingSets",
     "advancementCriteria",
+    "initialLoad",
     "loadIncrement",
     "failurePolicy",
     "rounding"
   ],
   "properties": {
     "repRange": { "$ref": "#/$defs/repRange" },
-    "workingSets": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "workingSets": { "type": "integer", "minimum": 1, "maximum": 64 },
     "advancementCriteria": { "$ref": "#/$defs/advancementCriteria" },
+    "initialLoad": { "$ref": "#/$defs/measurement" },
     "loadIncrement": { "$ref": "#/$defs/measurement" },
     "failurePolicy": { "$ref": "#/$defs/failurePolicy" },
     "rounding": { "$ref": "#/$defs/rounding" },

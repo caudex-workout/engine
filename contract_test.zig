@@ -203,6 +203,7 @@ test "deterministic recommendation matches the golden canonical fixture" {
                 .minimumSuccessfulSets = 1,
                 .minimumRepetitions = 12,
             },
+            .initialLoad = .{ .amount = "45", .unit = "lb" },
             .loadIncrement = .{ .amount = "5", .unit = "lb" },
             .failurePolicy = .{
                 .onPartial = .hold,

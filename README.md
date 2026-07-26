@@ -23,6 +23,7 @@ const methodology = methodologies.doubleProgression({
   repRange: { min: 8, max: 12 },
   workingSets: 3,
   advancementCriteria: { minimumSuccessfulSets: 3, minimumRepetitions: 12 },
+  initialLoad: { amount: "45", unit: "lb" },
   loadIncrement: { amount: "5", unit: "lb" },
   failurePolicy: { onPartial: "hold", onFailure: "regress", regressionAmount: { amount: "5", unit: "lb" } },
   rounding: { mode: "nearest", quantum: { amount: "2.5", unit: "lb" } },
