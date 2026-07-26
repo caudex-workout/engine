@@ -77,6 +77,10 @@ The [data-mapping guide](docs/data-mapping.md) shows how existing applications
 map catalogs and workout records, preserve host IDs, handle missing fields, and
 explicitly accept or reject proposed methodology state.
 
+Framework-neutral builders, determinism checks, explanation assertions, and
+canonical fixture loading are available from
+`@caudex/workout-engine/testing`.
+
 Caudex Workout Engine is an open-source, embeddable strength and hypertrophy
 programming engine for developers. Applications supply explicit training
 snapshots and methodology configuration; Caudex returns deterministic,

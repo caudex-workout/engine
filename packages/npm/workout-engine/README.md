@@ -125,6 +125,41 @@ The package has no runtime dependencies. Its development-only dependencies are
 TypeScript (Apache-2.0), used to compile the installed declarations, and Rollup
 (MIT), used to bundle the installed browser entry point.
 
+## Testing utilities
+
+The dependency-free `@caudex/workout-engine/testing` subpath provides
+framework-neutral builders, assertions, and bundled canonical fixtures:
+
+```ts
+import { createCaudex } from "@caudex/workout-engine";
+import {
+  assertDeterministic,
+  assertExplanationCode,
+  buildRecommendationRequest,
+  loadCanonicalFixture,
+} from "@caudex/workout-engine/testing";
+
+const fixture = await loadCanonicalFixture("recommendation-request");
+const caudex = await createCaudex();
+try {
+  const result = assertDeterministic(
+    () => caudex.recommendSession(fixture),
+  );
+  assertExplanationCode(
+    result,
+    "exercise.selected.available_equipment",
+  );
+} finally {
+  caudex.dispose();
+}
+
+const request = buildRecommendationRequest();
+```
+
+Assertions throw `CaudexTestAssertionError` and do not depend on Jest, Vitest,
+or another test runner. Builders use fixed explicit timestamps and return
+ordinary mutable objects that callers may customize.
+
 On 2026-07-26, a read-only lookup of `@caudex/workout-engine` against the public
 npm registry returned `E404`, meaning no published package currently claims
 that full name. Publication still requires the maintainer to create or control

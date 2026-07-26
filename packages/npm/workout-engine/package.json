@@ -14,6 +14,10 @@
       "types": "./dist/methodologies/index.d.ts",
       "import": "./dist/methodologies/index.js"
     },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
+    },
     "./schema/canonical": "./schemas/v0/canonical.schema.json",
     "./schema/recommendation-request": "./schemas/v0/recommendation-request.schema.json",
     "./schema/recommendation-result": "./schemas/v0/recommendation-result.schema.json",
@@ -28,6 +32,7 @@
     "dist/",
     "wasm/",
     "schemas/",
+    "fixtures/",
     "README.md",
     "LICENSE",
     "NOTICE"

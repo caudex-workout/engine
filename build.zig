@@ -269,6 +269,17 @@ pub fn build(b: *std.Build) void {
     );
     data_mapping_guide_step.dependOn(&data_mapping_guide_test.step);
 
+    const testing_utilities_test = b.addSystemCommand(&.{
+        "node",
+        "tests/testing_utilities_test.mjs",
+    });
+    testing_utilities_test.step.dependOn(&npm_package_build.step);
+    const testing_utilities_step = b.step(
+        "test-testing-utilities",
+        "Test the public framework-neutral npm testing utilities",
+    );
+    testing_utilities_step.dependOn(&testing_utilities_test.step);
+
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&run_library_tests.step);
     test_step.dependOn(&run_contract_tests.step);
@@ -287,4 +298,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&docs_quickstart_test.step);
     test_step.dependOn(&methodology_guides_test.step);
     test_step.dependOn(&data_mapping_guide_test.step);
+    test_step.dependOn(&testing_utilities_test.step);
 }

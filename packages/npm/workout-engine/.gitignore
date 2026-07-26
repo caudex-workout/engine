@@ -1,6 +1,7 @@
 dist/
 wasm/
 schemas/
+fixtures/
 LICENSE
 *.tgz
 node_modules/

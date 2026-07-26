@@ -10,7 +10,7 @@ const wasmSource = resolve(
 );
 
 await Promise.all(
-  ["dist", "wasm", "schemas"].map((directory) =>
+  ["dist", "wasm", "schemas", "fixtures"].map((directory) =>
     rm(resolve(packageRoot, directory), { recursive: true, force: true }),
   ),
 );
@@ -19,12 +19,14 @@ await Promise.all([
   mkdir(resolve(packageRoot, "wasm"), { recursive: true }),
 ]);
 
-for (const name of ["index", "methodologies"]) {
+for (const name of ["index", "methodologies", "testing"]) {
   const source = await readFile(resolve(packageRoot, `src/${name}.ts`), "utf8");
   const javascript = stripTypeScriptTypes(source, {
     mode: "strip",
     sourceMap: false,
-  }).replaceAll("./methodologies.ts", "./methodologies.js");
+  })
+    .replaceAll("./methodologies.ts", "./methodologies.js")
+    .replaceAll("./index.ts", "./index.js");
   await writeFile(resolve(packageRoot, `dist/${name}.js`), javascript);
 }
 await cp(
@@ -34,6 +36,10 @@ await cp(
 await cp(
   resolve(packageRoot, "types/methodologies.d.ts"),
   resolve(packageRoot, "dist/methodologies.d.ts"),
+);
+await cp(
+  resolve(packageRoot, "types/testing.d.ts"),
+  resolve(packageRoot, "dist/testing.d.ts"),
 );
 await writeFile(
   resolve(packageRoot, "dist/methodologies/index.js"),
@@ -45,6 +51,18 @@ await writeFile(
 );
 await cp(wasmSource, resolve(packageRoot, "wasm/caudex.wasm"));
 await cp(resolve(repositoryRoot, "schemas"), resolve(packageRoot, "schemas"), {
+  recursive: true,
+});
+await cp(resolve(repositoryRoot, "fixtures/requests"), resolve(
+  packageRoot,
+  "fixtures/requests",
+), {
+  recursive: true,
+});
+await cp(resolve(repositoryRoot, "fixtures/results"), resolve(
+  packageRoot,
+  "fixtures/results",
+), {
   recursive: true,
 });
 await cp(resolve(repositoryRoot, "LICENSE"), resolve(packageRoot, "LICENSE"));
