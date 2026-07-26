@@ -4,7 +4,7 @@ const caudex = @import("caudex");
 test "public root exports are intentional" {
     const declarations = std.meta.declarations(caudex);
 
-    try std.testing.expectEqual(@as(usize, 11), declarations.len);
+    try std.testing.expectEqual(@as(usize, 12), declarations.len);
     try std.testing.expectEqualStrings("canonical", declarations[0].name);
     try std.testing.expectEqualStrings("diagnostics", declarations[1].name);
     try std.testing.expectEqualStrings("double_progression", declarations[2].name);
@@ -15,7 +15,8 @@ test "public root exports are intentional" {
     try std.testing.expectEqualStrings("methodology", declarations[7].name);
     try std.testing.expectEqualStrings("ordering", declarations[8].name);
     try std.testing.expectEqualStrings("primitives", declarations[9].name);
-    try std.testing.expectEqualStrings("training", declarations[10].name);
+    try std.testing.expectEqualStrings("rpe_top_set_backoff", declarations[10].name);
+    try std.testing.expectEqualStrings("training", declarations[11].name);
 }
 
 test "core source has no forbidden effect or dependency imports" {
@@ -31,6 +32,7 @@ test "core source has no forbidden effect or dependency imports" {
         @embedFile("src/methodology.zig"),
         @embedFile("src/ordering.zig"),
         @embedFile("src/primitives.zig"),
+        @embedFile("src/rpe_top_set_backoff.zig"),
         @embedFile("src/training.zig"),
     };
     const forbidden = .{

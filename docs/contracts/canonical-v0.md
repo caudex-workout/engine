@@ -233,7 +233,9 @@ application lifecycle remain outside the core.
 
 First-party methodology configuration and state remain methodology-owned rather
 than shared canonical definitions. Double progression v1 is defined in
-[`double-progression-v1.md`](../methodologies/double-progression-v1.md) and its
-dedicated schemas. Other methodology contracts are added by their corresponding
-implementation issues. This contract does not define parsing limits or wire
-encoding behavior, which belong to CWE-050.
+[`double-progression-v1.md`](../methodologies/double-progression-v1.md), and RPE
+top-set/backoff v1 is defined in
+[`rpe-top-set-backoff-v1.md`](../methodologies/rpe-top-set-backoff-v1.md).
+Each has dedicated configuration and state schemas. Other methodology contracts
+are added by their corresponding implementation issues. This contract does not
+define parsing limits or wire encoding behavior, which belong to CWE-050.

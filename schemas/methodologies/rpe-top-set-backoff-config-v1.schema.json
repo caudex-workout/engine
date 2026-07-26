@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://caudex.dev/schemas/methodologies/rpe-top-set-backoff-config-v1.schema.json",
+  "title": "Caudex RPE top-set/backoff configuration v1",
+  "$defs": {
+    "identifier": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "decimal": { "type": "string", "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$" },
+    "measurement": {
+      "type": "object",
+      "required": ["amount", "unit"],
+      "properties": {
+        "amount": { "$ref": "#/$defs/decimal" },
+        "unit": { "$ref": "#/$defs/identifier" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "type": "object",
+  "required": [
+    "initialEstimatedOneRepMax",
+    "topSetRepetitions",
+    "targetRpe",
+    "backoff",
+    "rounding",
+    "exertionPolicy",
+    "estimationFormula"
+  ],
+  "properties": {
+    "initialEstimatedOneRepMax": { "$ref": "#/$defs/measurement" },
+    "topSetRepetitions": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "targetRpe": { "$ref": "#/$defs/decimal" },
+    "backoff": {
+      "type": "object",
+      "required": ["calculation", "percentage", "repetitions", "setCount"],
+      "properties": {
+        "calculation": {
+          "enum": ["percentage_of_top_set", "percentage_of_estimated_one_rep_max"]
+        },
+        "percentage": { "$ref": "#/$defs/decimal" },
+        "repetitions": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "setCount": { "type": "integer", "minimum": 1, "maximum": 64 }
+      },
+      "additionalProperties": false
+    },
+    "rounding": {
+      "type": "object",
+      "required": ["mode", "quantum"],
+      "properties": {
+        "mode": { "enum": ["nearest", "up", "down"] },
+        "quantum": { "$ref": "#/$defs/measurement" }
+      },
+      "additionalProperties": false
+    },
+    "exertionPolicy": {
+      "type": "object",
+      "required": [
+        "tolerance",
+        "onOvershoot",
+        "onUndershoot",
+        "estimateAdjustmentPercentage"
+      ],
+      "properties": {
+        "tolerance": { "$ref": "#/$defs/decimal" },
+        "onOvershoot": { "enum": ["hold", "decrease_estimate"] },
+        "onUndershoot": { "enum": ["hold", "increase_estimate"] },
+        "estimateAdjustmentPercentage": { "$ref": "#/$defs/decimal" }
+      },
+      "additionalProperties": false
+    },
+    "estimationFormula": { "enum": ["epley"] }
+  },
+  "additionalProperties": false
+}

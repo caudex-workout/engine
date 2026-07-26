@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "data": {
+    "exercises": [
+      {
+        "exerciseId": "barbell-bench-press",
+        "estimatedOneRepMax": { "amount": "225", "unit": "lb" }
+      }
+    ]
+  }
+}

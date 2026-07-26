@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://caudex.dev/schemas/methodologies/rpe-top-set-backoff-state-v1.schema.json",
+  "title": "Caudex RPE top-set/backoff state v1",
+  "$defs": {
+    "identifier": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "decimal": { "type": "string", "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$" },
+    "measurement": {
+      "type": "object",
+      "required": ["amount", "unit"],
+      "properties": {
+        "amount": { "$ref": "#/$defs/decimal" },
+        "unit": { "$ref": "#/$defs/identifier" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "type": "object",
+  "required": ["schemaVersion", "data"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "data": {
+      "type": "object",
+      "required": ["exercises"],
+      "properties": {
+        "exercises": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["exerciseId", "estimatedOneRepMax"],
+            "properties": {
+              "exerciseId": { "$ref": "#/$defs/identifier" },
+              "estimatedOneRepMax": { "$ref": "#/$defs/measurement" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

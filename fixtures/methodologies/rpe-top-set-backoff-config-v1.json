@@ -1,0 +1,22 @@
+{
+  "initialEstimatedOneRepMax": { "amount": "225", "unit": "lb" },
+  "topSetRepetitions": 5,
+  "targetRpe": "8.0",
+  "backoff": {
+    "calculation": "percentage_of_top_set",
+    "percentage": "90",
+    "repetitions": 8,
+    "setCount": 3
+  },
+  "rounding": {
+    "mode": "nearest",
+    "quantum": { "amount": "2.5", "unit": "lb" }
+  },
+  "exertionPolicy": {
+    "tolerance": "0.5",
+    "onOvershoot": "decrease_estimate",
+    "onUndershoot": "increase_estimate",
+    "estimateAdjustmentPercentage": "2.5"
+  },
+  "estimationFormula": "epley"
+}

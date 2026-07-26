@@ -114,6 +114,69 @@ test "double-progression schemas are valid JSON documents" {
     }
 }
 
+test "RPE top-set/backoff config and state fixtures decode" {
+    inline for (.{
+        .{
+            caudex.rpe_top_set_backoff.Config,
+            @embedFile("fixtures/methodologies/rpe-top-set-backoff-config-v1.json"),
+        },
+        .{
+            caudex.rpe_top_set_backoff.State,
+            @embedFile("fixtures/methodologies/rpe-top-set-backoff-state-v1.json"),
+        },
+    }) |fixture| {
+        const parsed = try std.json.parseFromSlice(
+            fixture[0],
+            std.testing.allocator,
+            fixture[1],
+            .{},
+        );
+        defer parsed.deinit();
+    }
+}
+
+test "RPE top-set/backoff schemas are valid JSON documents" {
+    inline for (.{
+        @embedFile("schemas/methodologies/rpe-top-set-backoff-config-v1.schema.json"),
+        @embedFile("schemas/methodologies/rpe-top-set-backoff-state-v1.schema.json"),
+    }) |schema| {
+        const parsed = try std.json.parseFromSlice(
+            std.json.Value,
+            std.testing.allocator,
+            schema,
+            .{},
+        );
+        defer parsed.deinit();
+        try std.testing.expect(parsed.value == .object);
+    }
+}
+
+test "RPE top-set/backoff state fixture round-trips" {
+    const parsed = try std.json.parseFromSlice(
+        caudex.rpe_top_set_backoff.State,
+        std.testing.allocator,
+        @embedFile("fixtures/methodologies/rpe-top-set-backoff-state-v1.json"),
+        .{},
+    );
+    defer parsed.deinit();
+    var encoded_buffer: [1024]u8 = undefined;
+    const encoded = try caudex.rpe_top_set_backoff.writeStateJson(
+        parsed.value,
+        &encoded_buffer,
+    );
+    const reparsed = try std.json.parseFromSlice(
+        caudex.rpe_top_set_backoff.State,
+        std.testing.allocator,
+        encoded,
+        .{},
+    );
+    defer reparsed.deinit();
+    try std.testing.expectEqualStrings(
+        parsed.value.data.exercises[0].estimatedOneRepMax.amount,
+        reparsed.value.data.exercises[0].estimatedOneRepMax.amount,
+    );
+}
+
 test "double-progression state fixture round-trips" {
     const parsed = try std.json.parseFromSlice(
         caudex.double_progression.State,
