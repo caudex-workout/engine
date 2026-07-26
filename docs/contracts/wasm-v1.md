@@ -64,7 +64,7 @@ With Zig 0.16.0 on 2026-07-26:
 mode: ReleaseSmall
 target: wasm32-freestanding
 artifact: caudex.wasm
-size: 233,102 bytes
+size: 252,190 bytes
 imports: 0
 ```
 

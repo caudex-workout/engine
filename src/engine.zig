@@ -6,7 +6,7 @@ const methodology = @import("methodology.zig");
 const primitives = @import("primitives.zig");
 const training = @import("training.zig");
 
-pub const engine_version = "0.1.0-dev";
+pub const engine_version = "0.1.0";
 pub const schema_version: u32 = 1;
 
 pub const DoubleProgressionConfig = double_progression_contract.Config;

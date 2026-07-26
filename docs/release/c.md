@@ -21,16 +21,16 @@ claimed by this release matrix.
 
 ## Artifact-size baseline
 
-Zig 0.16.0 `ReleaseSmall` produced this CWE-081 baseline:
+Zig 0.16.0 `ReleaseSmall` produced this v0.1.0 baseline:
 
 | Target | Static | Shared | Import library | Combined |
 | --- | ---: | ---: | ---: | ---: |
-| `x86_64-linux-gnu` | 397,064 B | 327,360 B | — | 724,424 B |
-| `aarch64-linux-gnu` | 390,264 B | 307,096 B | — | 697,360 B |
-| `x86_64-macos` | 374,924 B | 293,029 B | — | 667,953 B |
-| `aarch64-macos` | 436,172 B | 326,784 B | — | 762,956 B |
-| `x86_64-windows-gnu` | 650,308 B | 603,648 B | 3,346 B | 1,257,302 B |
-| `aarch64-windows-gnu` | 622,280 B | 541,184 B | 3,346 B | 1,166,810 B |
+| `x86_64-linux-gnu` | 433,744 B | 357,800 B | — | 791,544 B |
+| `aarch64-linux-gnu` | 430,056 B | 332,272 B | — | 762,328 B |
+| `x86_64-macos` | 412,668 B | 317,621 B | — | 730,289 B |
+| `aarch64-macos` | 481,140 B | 346,176 B | — | 827,316 B |
+| `x86_64-windows-gnu` | 691,084 B | 634,880 B | 3,346 B | 1,329,310 B |
+| `aarch64-windows-gnu` | 659,106 B | 566,272 B | 3,346 B | 1,228,724 B |
 
 This is a tracking baseline rather than a release-size budget. The generated
 `artifact-sizes.json` remains authoritative for each build.

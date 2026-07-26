@@ -60,7 +60,7 @@ failures to execute the request safely.
 
 ## v1 scope
 
-The v1 runtime executes canonical recommendation requests for the currently
-registered double-progression methodology. Canonical evaluation dispatch and
-additional compiled methodologies can be added without changing buffer
-ownership or the ABI entry-point shapes.
+The v1 runtime executes canonical recommendation requests for double
+progression and RPE top-set/backoff. Canonical evaluation dispatch remains an
+internal npm/WASM operation and can be added to the public C surface only with
+an explicitly versioned ABI decision.

@@ -5,6 +5,7 @@ const double_progression = @import("double_progression.zig");
 const engine = @import("engine.zig");
 const methodology = @import("methodology.zig");
 const primitives = @import("primitives.zig");
+const rpe_top_set_backoff = @import("rpe_top_set_backoff.zig");
 const training = @import("training.zig");
 
 pub const abi_version: u32 = 1;
@@ -152,6 +153,18 @@ fn execute(
 
     var arena = std.heap.ArenaAllocator.init(runtime.allocator());
     defer arena.deinit();
+    if (std.mem.eql(
+        u8,
+        document.value.methodology.id,
+        rpe_top_set_backoff.methodology_id,
+    )) {
+        return executeRpeRecommendation(
+            runtime,
+            arena.allocator(),
+            document.value,
+            out,
+        );
+    }
     const request = try translateRequest(arena.allocator(), document.value);
     var engine_output: engine.Output = .{};
     const result = try engine.recommendSession(request, &engine_output);
@@ -166,6 +179,210 @@ fn execute(
         .len = encoded.len,
         .capacity = bytes.len,
     };
+}
+
+const RpeWireResult = struct {
+    ok: bool = true,
+    recommendation: canonical.SessionRecommendation,
+    explanations: []const canonical.Explanation,
+    warnings: []const canonical.ValidationIssue,
+    issues: []const canonical.ValidationIssue = &.{},
+    metadata: canonical.ResultMetadata,
+};
+
+fn executeRpeRecommendation(
+    runtime: *Runtime,
+    allocator: std.mem.Allocator,
+    source: canonical.RecommendationRequest,
+    out: *Buffer,
+) ExecuteError!void {
+    if (source.methodology.configVersion != rpe_top_set_backoff.config_version) {
+        return error.UnsupportedVersion;
+    }
+    _ = try resolvedVersion(source.methodology.versionRequirement);
+    if (source.catalog.len != 1) return error.InvalidRequest;
+    const config = std.json.parseFromValueLeaky(
+        rpe_top_set_backoff.Config,
+        allocator,
+        source.methodology.config,
+        .{ .ignore_unknown_fields = false },
+    ) catch return error.InvalidRequest;
+    const state = try translateRpeState(allocator, source.methodologyState);
+    const catalog = try translateCatalog(allocator, source.catalog);
+    const history = try translateHistory(allocator, source.history);
+    const exercise = catalog.exercises[0];
+    const available = try translateIds(
+        allocator,
+        source.session.availableEquipmentIds,
+    );
+    for (exercise.equipment_ids) |required| {
+        for (available) |candidate| {
+            if (required.eql(candidate)) break;
+        } else return error.InvalidRequest;
+    }
+    const top = rpe_top_set_backoff.recommendTopSet(
+        config,
+        state,
+        history,
+        exercise.id,
+    ) catch return error.InvalidRequest;
+    const backoff = rpe_top_set_backoff.recommendBackoffs(
+        config,
+        top,
+    ) catch return error.InvalidRequest;
+
+    const set_count: usize = @as(usize, backoff.set_count) + 1;
+    const sets = allocator.alloc(canonical.SetRecommendation, set_count) catch
+        return error.OutOfMemory;
+    const metrics = allocator.alloc(canonical.Metric, 3 + backoff.set_count * 2) catch
+        return error.OutOfMemory;
+    const top_refs = try allocator.alloc([]const u8, 2);
+    top_refs[0] = "explanation-1";
+    top_refs[1] = "explanation-2";
+    const backoff_refs = try allocator.alloc([]const u8, 1);
+    backoff_refs[0] = "explanation-3";
+    metrics[0] = .{ .code = "load", .value = try boundaryMeasurement(allocator, top.load) };
+    metrics[1] = .{
+        .code = "repetitions",
+        .value = .{ .amount = try std.fmt.allocPrint(allocator, "{d}", .{top.repetitions}), .unit = "count" },
+    };
+    metrics[2] = .{
+        .code = "rpe",
+        .value = .{ .amount = try formatDecimal(allocator, top.target_rpe), .unit = "rpe" },
+    };
+    sets[0] = .{
+        .kind = "top",
+        .targetMetrics = metrics[0..3],
+        .explanationRefs = top_refs,
+    };
+    var metric_index: usize = 3;
+    for (1..set_count) |set_index| {
+        metrics[metric_index] = .{
+            .code = "load",
+            .value = try boundaryMeasurement(allocator, backoff.load),
+        };
+        metrics[metric_index + 1] = .{
+            .code = "repetitions",
+            .value = .{
+                .amount = try std.fmt.allocPrint(allocator, "{d}", .{backoff.repetitions}),
+                .unit = "count",
+            },
+        };
+        sets[set_index] = .{
+            .kind = "backoff",
+            .targetMetrics = metrics[metric_index .. metric_index + 2],
+            .explanationRefs = backoff_refs,
+        };
+        metric_index += 2;
+    }
+    const selection_refs = [_][]const u8{ "explanation-1", "explanation-2", "explanation-3" };
+    const exercises = [_]canonical.ExerciseRecommendation{.{
+        .exerciseId = exercise.id.bytes,
+        .sets = sets,
+        .explanationRefs = &selection_refs,
+    }};
+    const explanations = [_]canonical.Explanation{
+        .{
+            .id = "explanation-1",
+            .code = "exercise.selected.available_equipment",
+            .category = "selection",
+            .summary = "Available equipment supported the exercise selection.",
+            .subject = .{ .exerciseId = exercise.id.bytes },
+            .severity = .info,
+        },
+        .{
+            .id = "explanation-2",
+            .code = top.explanation.code,
+            .category = "load",
+            .summary = top.explanation.summary,
+            .subject = .{ .exerciseId = exercise.id.bytes },
+            .ruleId = top.explanation.rule_id,
+            .severity = .info,
+        },
+        .{
+            .id = "explanation-3",
+            .code = backoff.explanation.code,
+            .category = "load",
+            .summary = backoff.explanation.summary,
+            .subject = .{ .exerciseId = exercise.id.bytes },
+            .ruleId = backoff.explanation.rule_id,
+            .severity = .info,
+        },
+    };
+    const warnings: []const canonical.ValidationIssue = if (top.warning) |warning|
+        try allocator.dupe(canonical.ValidationIssue, &.{warning})
+    else
+        &.{};
+    const canonical_storage = try allocator.alloc(u8, max_result_bytes);
+    const canonical_input = canonical_json.encode(source, canonical_storage) catch
+        return error.OutputLimitReached;
+    var input_fingerprint: [64]u8 = undefined;
+    var result_fingerprint: [64]u8 = undefined;
+    fingerprintBytes("caudex:recommendation-request:v1\x00", canonical_input, &input_fingerprint);
+    var result_hash = std.crypto.hash.sha2.Sha256.init(.{});
+    result_hash.update("caudex:recommendation-result:v1\x00");
+    result_hash.update(&input_fingerprint);
+    result_hash.update(exercise.id.bytes);
+    result_hash.update(top.explanation.code);
+    result_hash.update(backoff.explanation.code);
+    finishHex(&result_hash, &result_fingerprint);
+    const wire = RpeWireResult{
+        .recommendation = .{ .exercises = &exercises },
+        .explanations = &explanations,
+        .warnings = warnings,
+        .metadata = .{
+            .engineVersion = engine.engine_version,
+            .schemaVersion = engine.schema_version,
+            .methodology = .{
+                .id = rpe_top_set_backoff.methodology_id,
+                .version = "0.1.0",
+                .configVersion = rpe_top_set_backoff.config_version,
+            },
+            .inputFingerprint = &input_fingerprint,
+            .resultFingerprint = &result_fingerprint,
+        },
+    };
+    const bytes = runtime.allocator().alloc(u8, max_result_bytes) catch
+        return error.OutOfMemory;
+    errdefer runtime.allocator().free(bytes);
+    const encoded = canonical_json.encode(wire, bytes) catch
+        return error.OutputLimitReached;
+    out.* = .{ .data = bytes.ptr, .len = encoded.len, .capacity = bytes.len };
+}
+
+fn boundaryMeasurement(
+    allocator: std.mem.Allocator,
+    measurement: primitives.Measurement,
+) ExecuteError!canonical.Measurement {
+    return .{
+        .amount = try formatDecimal(allocator, measurement.value),
+        .unit = measurement.unit.code(),
+    };
+}
+
+fn formatDecimal(
+    allocator: std.mem.Allocator,
+    decimal: primitives.Decimal,
+) ExecuteError![]const u8 {
+    const storage = try allocator.alloc(u8, 64);
+    return decimal.format(storage) catch return error.OutputLimitReached;
+}
+
+fn translateRpeState(
+    allocator: std.mem.Allocator,
+    source: ?canonical.MethodologyState,
+) ExecuteError!?rpe_top_set_backoff.State {
+    const state = source orelse return null;
+    if (state.schemaVersion != rpe_top_set_backoff.state_schema_version) {
+        return error.UnsupportedVersion;
+    }
+    const data = std.json.parseFromValueLeaky(
+        rpe_top_set_backoff.StateData,
+        allocator,
+        state.data,
+        .{ .ignore_unknown_fields = false },
+    ) catch return error.InvalidRequest;
+    return .{ .schemaVersion = state.schemaVersion, .data = data };
 }
 
 const EvaluationWireResult = struct {

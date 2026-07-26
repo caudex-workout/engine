@@ -278,7 +278,7 @@ test "request and result fixtures round trip deterministically" {
 
 test "evaluation result round trips" {
     const input =
-        \\{"ok":true,"evaluation":{"outcome":"held","exercises":[]},"explanations":[],"warnings":[],"issues":[],"metadata":{"engineVersion":"0.1.0-dev","schemaVersion":1,"methodology":{"id":"caudex.rpe-top-set-backoff","version":"0.1.0","configVersion":1},"inputFingerprint":"input","resultFingerprint":"result"}}
+        \\{"ok":true,"evaluation":{"outcome":"held","exercises":[]},"explanations":[],"warnings":[],"issues":[],"metadata":{"engineVersion":"0.1.0","schemaVersion":1,"methodology":{"id":"caudex.rpe-top-set-backoff","version":"0.1.0","configVersion":1},"inputFingerprint":"input","resultFingerprint":"result"}}
     ;
     const parsed = try decodeEvaluationResult(std.testing.allocator, input, .{});
     defer parsed.deinit();

@@ -163,10 +163,10 @@ elements["run-request"].click();
 const switched = JSON.parse(elements.output.textContent);
 const editedRequest = JSON.parse(elements["request-editor"].value);
 if (
-  document.body.dataset.status !== "rejected" ||
+  document.body.dataset.status !== "passed" ||
   editedRequest.methodology.id !== "caudex.rpe-top-set-backoff" ||
   switched.metadata?.methodology?.id !== "caudex.rpe-top-set-backoff" ||
-  switched.issues?.[0]?.code !== "methodology.unsupported"
+  switched.recommendation?.exercises?.[0]?.sets?.[0]?.kind !== "top"
 ) {
   throw new Error("methodology selector did not execute the RPE request: " +
     JSON.stringify({
@@ -190,7 +190,7 @@ console.log(JSON.stringify({
   },
   playground: {
     selectedMethodology: editedRequest.methodology.id,
-    selectedResultCode: switched.issues[0].code,
+    selectedResultCode: switched.explanations[1].code,
     explanationCount: elements.explanations.children.length,
     copied: true,
     downloaded,
@@ -235,7 +235,8 @@ function assertPlaygroundResult(result) {
       "exercise.selected.available_equipment" ||
     result.playground?.selectedMethodology !==
       "caudex.rpe-top-set-backoff" ||
-    result.playground?.selectedResultCode !== "methodology.unsupported" ||
+    result.playground?.selectedResultCode !==
+      "load.selected.initial_estimated_one_rep_max" ||
     result.playground?.copied !== true ||
     result.playground?.downloaded !==
       "caudex-rpe-top-set-backoff-request.json"

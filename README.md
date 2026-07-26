@@ -1,5 +1,7 @@
 # Caudex Workout Engine
 
+Current release: **0.1.0**
+
 ## npm quickstart
 
 Install the package into a Node.js 22 or newer project:
@@ -77,6 +79,9 @@ Native C consumers can use the prebuilt static or shared libraries documented
 in the [C release matrix](docs/release/c.md). Every target bundle includes the
 public header, license notices, build metadata, SHA-256 checksums, and measured
 artifact sizes.
+
+Release compatibility, migration rules, and completed security/license reviews
+are indexed in the [v0.1.0 release record](docs/release/v0.1.0.md).
 
 See the [quickstart and concepts guide](docs/quickstart-and-concepts.md) for the
 request/result model, explanation references, data ownership, deterministic

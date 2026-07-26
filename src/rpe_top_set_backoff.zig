@@ -1021,6 +1021,11 @@ fn validConfig() Config {
     };
 }
 
+fn expectDecimal(expected: []const u8, actual: primitives.Decimal) !void {
+    var storage: [64]u8 = undefined;
+    try std.testing.expectEqualStrings(expected, try actual.format(&storage));
+}
+
 test "valid RPE config and state collect no issues" {
     const config = validConfig();
     const states = [_]ExerciseState{.{
@@ -1060,12 +1065,12 @@ const TestTopSetHistory = struct {
     workout: [1]training.CompletedWorkout,
 
     fn init(
+        result: *TestTopSetHistory,
         exertion_code: []const u8,
         exertion: primitives.Decimal,
         load_unit: primitives.Unit,
         include_second_exertion: bool,
-    ) !TestTopSetHistory {
-        var result: TestTopSetHistory = undefined;
+    ) !void {
         result.metrics = .{
             testMetric("load", .{ .mantissa = 185, .scale = 0 }, load_unit),
             testMetric("repetitions", .{ .mantissa = 5, .scale = 0 }, .count),
@@ -1087,7 +1092,6 @@ const TestTopSetHistory = struct {
             .completed_at = try .parse("2026-07-25T15:00:00Z"),
             .exercises = &result.exercise,
         }};
-        return result;
     }
 
     fn history(self: *const TestTopSetHistory) training.HistorySnapshot {
@@ -1107,7 +1111,8 @@ fn testMetric(
 }
 
 test "top-set recommendation prefers compatible history evidence" {
-    var history = try TestTopSetHistory.init(
+    var history: TestTopSetHistory = undefined;
+    try history.init(
         "rpe",
         .{ .mantissa = 85, .scale = 1 },
         .lb,
@@ -1121,11 +1126,8 @@ test "top-set recommendation prefers compatible history evidence" {
     );
 
     try std.testing.expectEqual(EstimateSource.history, result.estimate_source);
-    try std.testing.expectEqualStrings(
-        "225.083",
-        result.estimated_one_rep_max.value.format().slice(),
-    );
-    try std.testing.expectEqualStrings("182.500", result.load.value.format().slice());
+    try expectDecimal("225.083", result.estimated_one_rep_max.value);
+    try expectDecimal("182.500", result.load.value);
     try std.testing.expectEqualStrings(
         "load.selected.history_estimated_one_rep_max",
         result.explanation.code,
@@ -1134,13 +1136,15 @@ test "top-set recommendation prefers compatible history evidence" {
 }
 
 test "RIR evidence is equivalent to its RPE conversion" {
-    var rpe_history = try TestTopSetHistory.init(
+    var rpe_history: TestTopSetHistory = undefined;
+    try rpe_history.init(
         "rpe",
         .{ .mantissa = 85, .scale = 1 },
         .lb,
         false,
     );
-    var rir_history = try TestTopSetHistory.init(
+    var rir_history: TestTopSetHistory = undefined;
+    try rir_history.init(
         "rir",
         .{ .mantissa = 15, .scale = 1 },
         .lb,
@@ -1172,13 +1176,13 @@ test "top-set recommendation falls back to state then initial config" {
     const from_initial = try recommendTopSet(validConfig(), null, .{}, exercise_id);
 
     try std.testing.expectEqual(EstimateSource.state, from_state.estimate_source);
-    try std.testing.expectEqualStrings("195.000", from_state.load.value.format().slice());
+    try expectDecimal("195.000", from_state.load.value);
     try std.testing.expect(from_state.warning != null);
     try std.testing.expectEqual(
         EstimateSource.initial_config,
         from_initial.estimate_source,
     );
-    try std.testing.expectEqualStrings("182.500", from_initial.load.value.format().slice());
+    try expectDecimal("182.500", from_initial.load.value);
     try std.testing.expectEqualStrings(
         "history.insufficient_evidence",
         from_initial.warning.?.code,
@@ -1186,13 +1190,15 @@ test "top-set recommendation falls back to state then initial config" {
 }
 
 test "top-set recommendation rejects conflicting exertion and units" {
-    var conflicting = try TestTopSetHistory.init(
+    var conflicting: TestTopSetHistory = undefined;
+    try conflicting.init(
         "rpe",
         .{ .mantissa = 8, .scale = 0 },
         .lb,
         true,
     );
-    var kilograms = try TestTopSetHistory.init(
+    var kilograms: TestTopSetHistory = undefined;
+    try kilograms.init(
         "rpe",
         .{ .mantissa = 8, .scale = 0 },
         .kg,
@@ -1220,13 +1226,14 @@ test "top-set load rounding obeys every configured mode" {
     const nearest = try roundLoad(load, .{ .mode = .nearest, .quantum = quantum });
     const up = try roundLoad(load, .{ .mode = .up, .quantum = quantum });
 
-    try std.testing.expectEqualStrings("180.000", down.value.format().slice());
-    try std.testing.expectEqualStrings("180.000", nearest.value.format().slice());
-    try std.testing.expectEqualStrings("185.000", up.value.format().slice());
+    try expectDecimal("180.000", down.value);
+    try expectDecimal("180.000", nearest.value);
+    try expectDecimal("185.000", up.value);
 }
 
 test "backoffs derive from the configured top-set or estimate base" {
-    var history = try TestTopSetHistory.init(
+    var history: TestTopSetHistory = undefined;
+    try history.init(
         "rpe",
         .{ .mantissa = 85, .scale = 1 },
         .lb,
@@ -1243,20 +1250,14 @@ test "backoffs derive from the configured top-set or estimate base" {
     config.backoff.calculation = .percentage_of_estimated_one_rep_max;
     const from_estimate = try recommendBackoffs(config, top_set);
 
-    try std.testing.expectEqualStrings(
-        "165.000",
-        from_top_set.load.value.format().slice(),
-    );
+    try expectDecimal("165.000", from_top_set.load.value);
     try std.testing.expectEqual(@as(u16, 8), from_top_set.repetitions);
     try std.testing.expectEqual(@as(u16, 3), from_top_set.set_count);
     try std.testing.expectEqualStrings(
         "backoff.selected.percentage_of_top_set",
         from_top_set.explanation.code,
     );
-    try std.testing.expectEqualStrings(
-        "202.500",
-        from_estimate.load.value.format().slice(),
-    );
+    try expectDecimal("202.500", from_estimate.load.value);
     try std.testing.expectEqualStrings(
         "backoff.selected.percentage_of_estimated_one_rep_max",
         from_estimate.explanation.code,
@@ -1264,7 +1265,8 @@ test "backoffs derive from the configured top-set or estimate base" {
 }
 
 test "evaluation separates observed estimate from overshoot policy" {
-    var history = try TestTopSetHistory.init(
+    var history: TestTopSetHistory = undefined;
+    try history.init(
         "rpe",
         .{ .mantissa = 9, .scale = 0 },
         .lb,
@@ -1290,13 +1292,13 @@ test "evaluation separates observed estimate from overshoot policy" {
         AdjustmentOutcome.decreased,
         evaluation.exercises[0].outcome,
     );
-    try std.testing.expectEqualStrings(
+    try expectDecimal(
         "222.000",
-        evaluation.exercises[0].observed_estimated_one_rep_max.value.format().slice(),
+        evaluation.exercises[0].observed_estimated_one_rep_max.value,
     );
-    try std.testing.expectEqualStrings(
+    try expectDecimal(
         "216.450",
-        evaluation.exercises[0].proposed_estimated_one_rep_max.value.format().slice(),
+        evaluation.exercises[0].proposed_estimated_one_rep_max.value,
     );
     try std.testing.expectEqualStrings(
         "estimate.observed.completed_top_set",
@@ -1313,13 +1315,15 @@ test "evaluation separates observed estimate from overshoot policy" {
 }
 
 test "evaluation increases on undershoot and holds inside inclusive tolerance" {
-    var undershoot = try TestTopSetHistory.init(
+    var undershoot: TestTopSetHistory = undefined;
+    try undershoot.init(
         "rir",
         .{ .mantissa = 3, .scale = 0 },
         .lb,
         false,
     );
-    var within_tolerance = try TestTopSetHistory.init(
+    var within_tolerance: TestTopSetHistory = undefined;
+    try within_tolerance.init(
         "rpe",
         .{ .mantissa = 85, .scale = 1 },
         .lb,
@@ -1366,7 +1370,8 @@ test "evaluation increases on undershoot and holds inside inclusive tolerance" {
 }
 
 test "evaluation preserves unrelated state and is deterministic" {
-    var history = try TestTopSetHistory.init(
+    var history: TestTopSetHistory = undefined;
+    try history.init(
         "rpe",
         .{ .mantissa = 9, .scale = 0 },
         .lb,
