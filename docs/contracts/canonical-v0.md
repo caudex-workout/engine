@@ -224,6 +224,43 @@ codes and parameters are the compatibility surface. Their namespaces,
 compatibility, path, severity, and localization rules are defined in
 [`issues-and-explanations.md`](issues-and-explanations.md).
 
+## JSON processing rules and limits
+
+The Zig canonical JSON API decodes recommendation requests, evaluation
+requests, recommendation results, and evaluation results into allocator-owned
+documents. Callers must release each successfully decoded document. Encoding
+writes to caller-owned storage and reports an output-limit error rather than
+allocating implicitly.
+
+Protocol schema version `1` is the only accepted root request version and
+result metadata schema version. Unknown and duplicate fields in typed canonical
+objects are rejected. Methodology config/state and explicitly open extension
+values remain methodology- or host-owned JSON and are not treated as canonical
+struct fields.
+
+Default decode limits are:
+
+- 1 MiB input
+- 32 object/array nesting levels
+- 4,096 structural collection entries across the document
+- 64 KiB for an individual string or number token
+
+Hosts may select stricter or larger explicit limits. Invalid UTF-8, malformed
+JSON, exceeded limits, and unsupported versions are distinct failures.
+
+Measurements and canonical weights use canonical base-10 decimal strings.
+Known decimal configuration fields such as target RPE, percentage, tolerance,
+and estimate adjustment percentage are validated the same way. JSON numbers,
+leading-zero forms, explicit plus signs, and values beyond supported decimal
+precision or range are rejected at these decimal boundaries.
+
+Encoding follows canonical struct declaration order, omits null optional
+fields, preserves array order, and emits compact JSON. Re-encoding the same
+typed value is byte deterministic. Maps inside explicitly open JSON values
+retain their supplied order; callers requiring a cross-producer fingerprint
+must use the protocol fingerprint rules rather than assuming arbitrary map
+insertion order is canonical.
+
 ## Deliberate exclusions
 
 The contract contains no user account, authorization, database key, repository,
