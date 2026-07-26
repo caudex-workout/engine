@@ -124,6 +124,18 @@ fn validateDoubleProgressionConfig(
     try double_progression_contract.validateConfig(config.*, issues);
 }
 
+fn validateDoubleProgressionState(
+    config_view: methodology.ConfigView,
+    state_view: methodology.StateView,
+    issues: *diagnostics.IssueWriter,
+) diagnostics.IssueWriter.AppendError!void {
+    const config: *const DoubleProgressionConfig =
+        @ptrCast(@alignCast(config_view.context));
+    const state: *const double_progression_contract.State =
+        @ptrCast(@alignCast(state_view.context));
+    try double_progression_contract.validateState(config.*, state.*, issues);
+}
+
 fn recommendDoubleProgression(
     view: methodology.RecommendationView,
     scratch: *methodology.Scratch,
@@ -250,8 +262,10 @@ const double_progression = methodology.Methodology{
         .id = .{ .bytes = "caudex.double-progression" },
         .version = .{ .major = 0, .minor = 1, .patch = 0 },
         .config_version = 1,
+        .state_schema_version = 1,
     },
     .validate_config = validateDoubleProgressionConfig,
+    .validate_state = validateDoubleProgressionState,
     .recommend_session = recommendDoubleProgression,
     .evaluate_performance = evaluateDoubleProgression,
 };
@@ -277,9 +291,9 @@ pub fn recommendSession(
         &issues,
     ) catch return error.OutputLimitReached;
     if (request.methodology_state) |state| {
-        double_progression_contract.validateState(
-            request.config,
-            state,
+        implementation.validate_state(
+            .{ .context = &request.config },
+            .{ .context = &state },
             &issues,
         ) catch return error.OutputLimitReached;
     }

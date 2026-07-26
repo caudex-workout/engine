@@ -4,7 +4,7 @@ const caudex = @import("caudex");
 test "public root exports are intentional" {
     const declarations = std.meta.declarations(caudex);
 
-    try std.testing.expectEqual(@as(usize, 12), declarations.len);
+    try std.testing.expectEqual(@as(usize, 13), declarations.len);
     try std.testing.expectEqualStrings("canonical", declarations[0].name);
     try std.testing.expectEqualStrings("diagnostics", declarations[1].name);
     try std.testing.expectEqualStrings("double_progression", declarations[2].name);
@@ -12,11 +12,12 @@ test "public root exports are intentional" {
     try std.testing.expectEqualStrings("engine", declarations[4].name);
     try std.testing.expectEqualStrings("filtering", declarations[5].name);
     try std.testing.expectEqualStrings("history", declarations[6].name);
-    try std.testing.expectEqualStrings("methodology", declarations[7].name);
-    try std.testing.expectEqualStrings("ordering", declarations[8].name);
-    try std.testing.expectEqualStrings("primitives", declarations[9].name);
-    try std.testing.expectEqualStrings("rpe_top_set_backoff", declarations[10].name);
-    try std.testing.expectEqualStrings("training", declarations[11].name);
+    try std.testing.expectEqualStrings("load_math", declarations[7].name);
+    try std.testing.expectEqualStrings("methodology", declarations[8].name);
+    try std.testing.expectEqualStrings("ordering", declarations[9].name);
+    try std.testing.expectEqualStrings("primitives", declarations[10].name);
+    try std.testing.expectEqualStrings("rpe_top_set_backoff", declarations[11].name);
+    try std.testing.expectEqualStrings("training", declarations[12].name);
 }
 
 test "core source has no forbidden effect or dependency imports" {
@@ -29,6 +30,7 @@ test "core source has no forbidden effect or dependency imports" {
         @embedFile("src/engine.zig"),
         @embedFile("src/filtering.zig"),
         @embedFile("src/history.zig"),
+        @embedFile("src/load_math.zig"),
         @embedFile("src/methodology.zig"),
         @embedFile("src/ordering.zig"),
         @embedFile("src/primitives.zig"),

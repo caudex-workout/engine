@@ -2,6 +2,7 @@ const std = @import("std");
 const canonical = @import("canonical.zig");
 const diagnostics = @import("diagnostics.zig");
 const history_helpers = @import("history.zig");
+const load_math = @import("load_math.zig");
 const primitives = @import("primitives.zig");
 const training = @import("training.zig");
 
@@ -25,16 +26,8 @@ pub const Backoff = struct {
     setCount: u16,
 };
 
-pub const RoundingMode = enum {
-    nearest,
-    up,
-    down,
-};
-
-pub const Rounding = struct {
-    mode: RoundingMode,
-    quantum: canonical.Measurement,
-};
+pub const RoundingMode = load_math.RoundingMode;
+pub const Rounding = load_math.Rounding;
 
 pub const OvershootAction = enum {
     hold,
@@ -609,30 +602,7 @@ fn roundLoad(
     load: primitives.Measurement,
     rounding: Rounding,
 ) RecommendationError!primitives.Measurement {
-    const quantum = parseBoundaryMeasurement(rounding.quantum) catch
-        return error.InvalidConfig;
-    if (load.unit != quantum.unit) return error.IncompatibleUnit;
-    const scale = @max(load.value.scale, quantum.value.scale);
-    const load_value = try checkedScaledMantissa(load.value, scale);
-    const quantum_value = try checkedScaledMantissa(quantum.value, scale);
-    if (load_value < 0 or quantum_value <= 0) return error.InvalidConfig;
-    var quotient = @divFloor(load_value, quantum_value);
-    const remainder = @mod(load_value, quantum_value);
-    switch (rounding.mode) {
-        .down => {},
-        .up => if (remainder != 0) {
-            quotient += 1;
-        },
-        .nearest => if (remainder * 2 >= quantum_value) {
-            quotient += 1;
-        },
-    }
-    const rounded, const overflow = @mulWithOverflow(quotient, quantum_value);
-    if (overflow != 0 or rounded > std.math.maxInt(i64)) return error.Overflow;
-    return .{
-        .value = .{ .mantissa = @intCast(rounded), .scale = scale },
-        .unit = load.unit,
-    };
+    return load_math.roundLoad(load, rounding);
 }
 
 fn percentageOf(
@@ -756,10 +726,7 @@ fn integerRepetitions(metrics: []const training.Metric) RecommendationError!u16 
 }
 
 fn parseBoundaryMeasurement(measurement: canonical.Measurement) !primitives.Measurement {
-    return .{
-        .value = try primitives.Decimal.parse(measurement.amount),
-        .unit = try primitives.Unit.parse(measurement.unit),
-    };
+    return load_math.parseMeasurement(measurement);
 }
 
 fn decimalBetween(value: primitives.Decimal, min: i64, max: i64) bool {

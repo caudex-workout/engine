@@ -7,6 +7,7 @@ pub const duration = @import("duration.zig");
 pub const engine = @import("engine.zig");
 pub const filtering = @import("filtering.zig");
 pub const history = @import("history.zig");
+pub const load_math = @import("load_math.zig");
 pub const methodology = @import("methodology.zig");
 pub const ordering = @import("ordering.zig");
 pub const primitives = @import("primitives.zig");

@@ -21,10 +21,16 @@ pub const Metadata = struct {
     id: Id,
     version: Version,
     config_version: u32,
+    state_schema_version: u32,
 };
 
 /// An implementation-owned configuration view.
 pub const ConfigView = struct {
+    context: *const anyopaque,
+};
+
+/// An implementation-owned methodology-state view.
+pub const StateView = struct {
     context: *const anyopaque,
 };
 
@@ -63,6 +69,12 @@ pub const ValidateConfigFn = *const fn (
     issues: *diagnostics.IssueWriter,
 ) diagnostics.IssueWriter.AppendError!void;
 
+pub const ValidateStateFn = *const fn (
+    config: ConfigView,
+    state: StateView,
+    issues: *diagnostics.IssueWriter,
+) diagnostics.IssueWriter.AppendError!void;
+
 pub const RecommendSessionFn = *const fn (
     request: RecommendationView,
     scratch: *Scratch,
@@ -79,6 +91,7 @@ pub const EvaluatePerformanceFn = *const fn (
 pub const Methodology = struct {
     metadata: Metadata,
     validate_config: ValidateConfigFn,
+    validate_state: ValidateStateFn,
     recommend_session: RecommendSessionFn,
     evaluate_performance: EvaluatePerformanceFn,
 };
@@ -152,6 +165,23 @@ fn validateTestConfig(
     }
 }
 
+fn validateTestState(
+    config_view: ConfigView,
+    state_view: StateView,
+    issues: *diagnostics.IssueWriter,
+) diagnostics.IssueWriter.AppendError!void {
+    const config: *const TestConfig = @ptrCast(@alignCast(config_view.context));
+    const state: *const TestConfig = @ptrCast(@alignCast(state_view.context));
+    if (config.valid and !state.valid) {
+        try issues.append(.{
+            .code = "methodology.state_invalid",
+            .path = "/methodologyState/data",
+            .message = "The methodology state is invalid.",
+            .severity = .@"error",
+        });
+    }
+}
+
 fn recommendTestSession(
     request: RecommendationView,
     scratch: *Scratch,
@@ -180,8 +210,10 @@ fn testMethodology(id: []const u8, version: Version) Methodology {
             .id = .{ .bytes = id },
             .version = version,
             .config_version = 1,
+            .state_schema_version = 1,
         },
         .validate_config = validateTestConfig,
+        .validate_state = validateTestState,
         .recommend_session = recommendTestSession,
         .evaluate_performance = evaluateTestPerformance,
     };
@@ -235,13 +267,22 @@ test "methodology callbacks are explicit and callable" {
         .{ .major = 1, .minor = 0, .patch = 0 },
     );
     const invalid_config = TestConfig{ .valid = false };
-    var issue_storage: [1]@import("canonical.zig").ValidationIssue = undefined;
+    var issue_storage: [2]@import("canonical.zig").ValidationIssue = undefined;
     var issues: diagnostics.IssueWriter = .init(&issue_storage);
     try implementation.validate_config(
         .{ .context = &invalid_config },
         &issues,
     );
     try std.testing.expectEqual(@as(usize, 1), issues.items().len);
+
+    const valid_config = TestConfig{ .valid = true };
+    const invalid_state = TestConfig{ .valid = false };
+    try implementation.validate_state(
+        .{ .context = &valid_config },
+        .{ .context = &invalid_state },
+        &issues,
+    );
+    try std.testing.expectEqual(@as(usize, 2), issues.items().len);
 
     var request_context: u8 = 0;
     var scratch_bytes: [16]u8 = undefined;
