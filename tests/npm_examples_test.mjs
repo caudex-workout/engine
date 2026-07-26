@@ -98,19 +98,104 @@ try {
 
   await writeFile(
     join(project, "browser-node-smoke.mjs"),
-    `const output = { textContent: "" };
+    `class Element {
+  constructor(tagName = "div") {
+    this.tagName = tagName;
+    this.textContent = "";
+    this.value = "";
+    this.className = "";
+    this.children = [];
+    this.listeners = {};
+    this.dataset = {};
+  }
+  addEventListener(type, listener) { this.listeners[type] = listener; }
+  append(...children) { this.children.push(...children); }
+  replaceChildren(...children) { this.children = children; }
+  click() { this.listeners.click?.(); this.clicked = true; }
+}
+const ids = [
+  "request-editor", "methodology", "run-request", "copy-fixture",
+  "download-fixture", "action-status", "result-status", "result-summary",
+  "explanations", "explanation-count", "output",
+];
+const elements = Object.fromEntries(ids.map((id) => [id, new Element()]));
+elements.methodology.value = "double-progression";
+let clipboardText = "";
+let downloaded = "";
 globalThis.document = {
-  body: { dataset: { status: "running" } },
+  body: { dataset: { status: "loading" } },
   querySelector(selector) {
-    if (selector !== "#output") throw new Error("unexpected selector");
-    return output;
+    const element = elements[selector.slice(1)];
+    if (!element) throw new Error("unexpected selector: " + selector);
+    return element;
+  },
+  createElement(tagName) {
+    const element = new Element(tagName);
+    if (tagName === "a") {
+      element.click = () => { downloaded = element.download; };
+    }
+    return element;
   },
 };
+Object.defineProperty(globalThis, "navigator", {
+  value: {
+    clipboard: { async writeText(value) { clipboardText = value; } },
+  },
+  configurable: true,
+});
+URL.createObjectURL = () => "blob:fixture";
+URL.revokeObjectURL = () => {};
 await import("./browser/dist/app.js");
 if (document.body.dataset.status !== "passed") {
-  throw new Error(output.textContent);
+  throw new Error(elements.output.textContent);
 }
-console.log(output.textContent);
+const initial = JSON.parse(elements.output.textContent);
+if (
+  initial.recommendation?.exercises?.[0]?.exerciseId !==
+    "incline-dumbbell-press" ||
+  elements.explanations.children.length === 0
+) {
+  throw new Error("playground did not render its recommendation and explanations");
+}
+elements.methodology.value = "rpe-top-set-backoff";
+elements.methodology.listeners.change();
+elements["run-request"].click();
+const switched = JSON.parse(elements.output.textContent);
+const editedRequest = JSON.parse(elements["request-editor"].value);
+if (
+  document.body.dataset.status !== "rejected" ||
+  editedRequest.methodology.id !== "caudex.rpe-top-set-backoff" ||
+  switched.metadata?.methodology?.id !== "caudex.rpe-top-set-backoff" ||
+  switched.issues?.[0]?.code !== "methodology.unsupported"
+) {
+  throw new Error("methodology selector did not execute the RPE request: " +
+    JSON.stringify({
+      status: document.body.dataset.status,
+      request: editedRequest.methodology,
+      result: switched,
+    }));
+}
+await elements["copy-fixture"].listeners.click();
+elements["download-fixture"].click();
+if (
+  clipboardText !== elements["request-editor"].value ||
+  downloaded !== "caudex-rpe-top-set-backoff-request.json"
+) {
+  throw new Error("fixture copy/download controls failed");
+}
+console.log(JSON.stringify({
+  recommendation: {
+    exerciseId: initial.recommendation.exercises[0].exerciseId,
+    explanationCode: initial.explanations[0].code,
+  },
+  playground: {
+    selectedMethodology: editedRequest.methodology.id,
+    selectedResultCode: switched.issues[0].code,
+    explanationCount: elements.explanations.children.length,
+    copied: true,
+    downloaded,
+  },
+}));
 `,
   );
   const browserResult = run(
@@ -119,7 +204,7 @@ console.log(output.textContent);
     project,
     true,
   );
-  assertExampleResult(JSON.parse(browserResult.stdout), "browser");
+  assertPlaygroundResult(JSON.parse(browserResult.stdout));
 
   console.log("caudex packed Node and browser examples passed");
   if (keep) console.log(`CAUDEX_BROWSER_EXAMPLE=${browser}`);
@@ -138,6 +223,25 @@ function assertExampleResult(result, environment) {
   ) {
     throw new Error(
       `${environment} example returned unexpected output: ` +
+        JSON.stringify(result),
+    );
+  }
+}
+
+function assertPlaygroundResult(result) {
+  if (
+    result.recommendation?.exerciseId !== "incline-dumbbell-press" ||
+    result.recommendation?.explanationCode !==
+      "exercise.selected.available_equipment" ||
+    result.playground?.selectedMethodology !==
+      "caudex.rpe-top-set-backoff" ||
+    result.playground?.selectedResultCode !== "methodology.unsupported" ||
+    result.playground?.copied !== true ||
+    result.playground?.downloaded !==
+      "caudex-rpe-top-set-backoff-request.json"
+  ) {
+    throw new Error(
+      "browser playground returned unexpected output: " +
         JSON.stringify(result),
     );
   }

@@ -3,12 +3,58 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Caudex browser example</title>
+    <meta name="description" content="Explore deterministic Caudex workout recommendations in your browser.">
+    <title>Caudex browser playground</title>
+    <link rel="stylesheet" href="./styles.css">
   </head>
-  <body data-status="running">
-    <h1>Caudex recommendation and evaluation</h1>
-    <pre id="output">Loading Caudex…</pre>
+  <body data-status="loading">
+    <header class="site-header">
+      <a class="brand" href="./"><span class="brand-mark">C</span><span>Caudex <small>Workout Engine</small></span></a>
+      <span class="local-badge">Local · no backend</span>
+    </header>
+    <main>
+      <section class="hero">
+        <p class="eyebrow">Interactive example</p>
+        <h1>Inspect the decision,<br><em>not just the workout.</em></h1>
+        <p class="lede">Edit a complete request snapshot, switch programming methodologies, and inspect the deterministic recommendation and its evidence.</p>
+      </section>
+      <section class="workspace" aria-label="Recommendation playground">
+        <div class="panel input-panel">
+          <div class="panel-heading">
+            <div><span class="step">01</span><h2>Request snapshot</h2></div>
+            <label><span>Methodology</span><select id="methodology">
+              <option value="double-progression">Double progression</option>
+              <option value="rpe-top-set-backoff">RPE top-set / backoff</option>
+            </select></label>
+          </div>
+          <label class="editor-label" for="request-editor">Canonical recommendation request</label>
+          <textarea id="request-editor" spellcheck="false" aria-describedby="editor-hint"></textarea>
+          <div class="editor-footer">
+            <span id="editor-hint">JSON · schema v1</span>
+            <div class="actions">
+              <button id="copy-fixture" class="secondary" type="button">Copy JSON</button>
+              <button id="download-fixture" class="secondary" type="button">Download</button>
+              <button id="run-request" class="primary" type="button">Run recommendation <span>→</span></button>
+            </div>
+          </div>
+          <p id="action-status" class="action-status" role="status" aria-live="polite"></p>
+        </div>
+        <div class="panel result-panel">
+          <div class="panel-heading">
+            <div><span class="step">02</span><h2>Engine result</h2></div>
+            <span id="result-status" class="result-status">Waiting</span>
+          </div>
+          <div id="result-summary" class="result-summary"><p>Loading the WebAssembly engine…</p></div>
+          <div class="explanation-heading">
+            <div><span class="step">03</span><h2>Explanation trace</h2></div>
+            <span id="explanation-count" class="count">0 records</span>
+          </div>
+          <ol id="explanations" class="explanations"></ol>
+          <details class="raw-result"><summary>Raw result JSON</summary><pre id="output"></pre></details>
+        </div>
+      </section>
+    </main>
+    <footer><span>Runs entirely in this browser</span><span>Deterministic · Stateless · Explainable</span></footer>
     <script type="module" src="./dist/app.js"></script>
   </body>
 </html>
-
