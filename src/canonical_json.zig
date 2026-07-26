@@ -295,7 +295,10 @@ test "canonical result fixture has stable encoded bytes" {
     defer parsed.deinit();
     var storage: [4096]u8 = undefined;
     const encoded = try encode(parsed.value, &storage);
-    try std.testing.expectEqualStrings(fixture, encoded);
+    try std.testing.expectEqualStrings(
+        std.mem.trimEnd(u8, fixture, "\r\n"),
+        encoded,
+    );
 }
 
 test "invalid UTF-8 malformed JSON and unknown fields fail safely" {

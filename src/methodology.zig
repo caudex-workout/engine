@@ -115,10 +115,10 @@ pub const Registry = struct {
 
     /// Creates a static registry and fails compilation when IDs are duplicated.
     pub fn initComptime(comptime methodologies: []const Methodology) Registry {
-        for (methodologies, 0..) |candidate, candidate_index| {
-            for (methodologies[0..candidate_index]) |prior| {
-                if (candidate.metadata.id.eql(prior.metadata.id)) {
-                    @compileError("duplicate methodology ID: " ++ candidate.metadata.id.bytes);
+        inline for (methodologies, 0..) |candidate, candidate_index| {
+            inline for (methodologies[0..candidate_index]) |prior| {
+                if (comptime candidate.metadata.id.eql(prior.metadata.id)) {
+                    @compileError("duplicate methodology ID");
                 }
             }
         }

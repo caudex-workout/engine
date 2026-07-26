@@ -16,6 +16,17 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(library);
 
+    const c_library = b.addLibrary(.{
+        .name = "caudex_c",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/c_api.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    c_library.installHeader(b.path("include/caudex.h"), "caudex.h");
+    b.installArtifact(c_library);
+
     const library_tests = b.addTest(.{
         .root_module = module,
     });
@@ -51,6 +62,41 @@ pub fn build(b: *std.Build) void {
     });
     const run_architecture_tests = b.addRunArtifact(architecture_tests);
 
+    const c_api_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("c_api_test.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    const run_c_api_tests = b.addRunArtifact(c_api_tests);
+
+    const c_header_test = b.addObject(.{
+        .name = "caudex_c_header_test",
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    c_header_test.root_module.addIncludePath(b.path("include"));
+    c_header_test.root_module.addCSourceFile(.{
+        .file = b.path("tests/c_header_smoke.c"),
+        .flags = &.{ "-std=c11", "-Werror" },
+    });
+
+    const cpp_header_test = b.addObject(.{
+        .name = "caudex_cpp_header_test",
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    cpp_header_test.root_module.addIncludePath(b.path("include"));
+    cpp_header_test.root_module.addCSourceFile(.{
+        .file = b.path("tests/cpp_header_smoke.cpp"),
+        .flags = &.{ "-std=c++17", "-Werror" },
+    });
+
     const wasm_target = b.resolveTargetQuery(.{
         .cpu_arch = .wasm32,
         .os_tag = .freestanding,
@@ -74,5 +120,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_library_tests.step);
     test_step.dependOn(&run_contract_tests.step);
     test_step.dependOn(&run_architecture_tests.step);
+    test_step.dependOn(&run_c_api_tests.step);
+    test_step.dependOn(&c_header_test.step);
+    test_step.dependOn(&cpp_header_test.step);
     test_step.dependOn(&wasm_library.step);
 }
