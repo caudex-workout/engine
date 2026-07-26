@@ -160,6 +160,22 @@ pub fn build(b: *std.Build) void {
     );
     wasm_step.dependOn(&wasm_conformance.step);
 
+    const typescript_loader_test = b.addSystemCommand(&.{
+        "node",
+        "--experimental-strip-types",
+        "--disable-warning=ExperimentalWarning",
+        "tests/typescript_loader_test.ts",
+    });
+    typescript_loader_test.addArtifactArg(wasm_runtime);
+    typescript_loader_test.addFileArg(
+        b.path("fixtures/requests/recommendation.json"),
+    );
+    const typescript_step = b.step(
+        "test-typescript",
+        "Run the TypeScript WebAssembly loader and facade tests",
+    );
+    typescript_step.dependOn(&typescript_loader_test.step);
+
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&run_library_tests.step);
     test_step.dependOn(&run_contract_tests.step);
@@ -170,4 +186,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_c_conformance.step);
     test_step.dependOn(&wasm_library.step);
     test_step.dependOn(&wasm_conformance.step);
+    test_step.dependOn(&typescript_loader_test.step);
 }
