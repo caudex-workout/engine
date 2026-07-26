@@ -1,5 +1,5 @@
 const std = @import("std");
-const persistence = @import("persistence");
+const persistence = @import("caudex_persistence");
 const sqlite = @import("sqlite");
 const c = @cImport({
     @cInclude("sqlite3.h");

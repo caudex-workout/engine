@@ -62,7 +62,7 @@ pub fn build(b: *std.Build) void {
     });
     const run_architecture_tests = b.addRunArtifact(architecture_tests);
 
-    const persistence_module = b.createModule(.{
+    const persistence_module = b.addModule("caudex_persistence", .{
         .root_source_file = b.path("adapters/persistence.zig"),
         .target = target,
         .optimize = optimize,
@@ -76,7 +76,10 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "persistence", .module = persistence_module },
+                .{
+                    .name = "caudex_persistence",
+                    .module = persistence_module,
+                },
             },
         }),
     });
@@ -92,7 +95,10 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
         .imports = &.{
-            .{ .name = "persistence", .module = persistence_module },
+            .{
+                .name = "caudex_persistence",
+                .module = persistence_module,
+            },
         },
     });
     const persistence_contract_kit_tests = b.addTest(.{
@@ -101,8 +107,14 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "persistence", .module = persistence_module },
-                .{ .name = "persistence_testing", .module = persistence_testing_module },
+                .{
+                    .name = "caudex_persistence",
+                    .module = persistence_module,
+                },
+                .{
+                    .name = "caudex_persistence_testing",
+                    .module = persistence_testing_module,
+                },
             },
         }),
     });
@@ -314,7 +326,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{
             .{ .name = "caudex", .module = module },
-            .{ .name = "persistence", .module = persistence_module },
+            .{
+                .name = "caudex_persistence",
+                .module = persistence_module,
+            },
         },
     });
     sqlite_module.link_libc = true;
@@ -325,7 +340,10 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "persistence", .module = persistence_module },
+                .{
+                    .name = "caudex_persistence",
+                    .module = persistence_module,
+                },
                 .{ .name = "sqlite", .module = sqlite_module },
             },
         }),

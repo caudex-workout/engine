@@ -1,3 +1,10 @@
+//! Database-independent capability contracts for optional Caudex persistence
+//! adapters.
+//!
+//! Import this public package as `@import("caudex_persistence")`. The package
+//! depends only on the public `caudex` package; it performs no I/O and provides
+//! no database implementation.
+
 const std = @import("std");
 const caudex = @import("caudex");
 

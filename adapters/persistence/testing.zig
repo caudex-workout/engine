@@ -1,5 +1,5 @@
 const std = @import("std");
-const persistence = @import("persistence");
+const persistence = @import("caudex_persistence");
 
 pub const canonical = persistence.canonical;
 

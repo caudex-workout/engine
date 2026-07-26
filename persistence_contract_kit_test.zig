@@ -1,6 +1,6 @@
 const std = @import("std");
-const persistence = @import("persistence");
-const testing = @import("persistence_testing");
+const persistence = @import("caudex_persistence");
+const testing = @import("caudex_persistence_testing");
 
 const exercises = [_]persistence.canonical.Exercise{
     .{ .id = "incline-dumbbell-press" },

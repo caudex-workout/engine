@@ -69,11 +69,13 @@ release, the same flow is exercised from the locally packed artifact.
 ## Zig package
 
 Direct Zig consumers can add a tagged source archive with `zig fetch --save`
-and import the public module as `@import("caudex")`. The
+and import `@import("caudex")` plus the optional database-independent
+`@import("caudex_persistence")` contract. The
 [Zig package guide](docs/zig-package.md) documents dependency wiring, public
-modules, the Zig 0.16.x support policy, and the checked-in custom-methodology
-consumer. `zig build test-zig-package` verifies that example from a clean copy
-containing only the source package's declared paths.
+modules, persistence ownership/error/compatibility semantics, the Zig 0.16.x
+support policy, and the checked-in consumer. `zig build test-zig-package`
+verifies both named imports from a clean copy containing only the source
+package's declared paths.
 
 Native C consumers can use the prebuilt static or shared libraries documented
 in the [C release matrix](docs/release/c.md). Every target bundle includes the

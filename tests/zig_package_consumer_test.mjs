@@ -16,6 +16,7 @@ try {
     .map((match) => match[1]);
   if (
     !paths.includes("src") ||
+    !paths.includes("adapters/persistence.zig") ||
     !paths.includes("include") ||
     !paths.includes("examples/zig") ||
     !paths.includes("LICENSE") ||
@@ -38,6 +39,9 @@ try {
   );
   if (!result.stderr.includes("vendor.simple-progression registered")) {
     throw new Error(`unexpected Zig consumer output: ${result.stderr}`);
+  }
+  if (!result.stderr.includes("persistence contract v1 imported")) {
+    throw new Error(`persistence package was not imported: ${result.stderr}`);
   }
   console.log("caudex clean Zig package consumer passed");
 } finally {

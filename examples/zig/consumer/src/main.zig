@@ -1,5 +1,6 @@
 const std = @import("std");
 const caudex = @import("caudex");
+const caudex_persistence = @import("caudex_persistence");
 
 const Config = struct {
     working_sets: u8,
@@ -71,6 +72,11 @@ const simple_methodology = caudex.methodology.Methodology{
 };
 
 pub fn main() !void {
+    if (caudex_persistence.contract_version != 1)
+        return error.UnsupportedPersistenceContract;
+    if (caudex_persistence.canonical != caudex.canonical)
+        return error.PersistenceUsesDifferentCanonicalContract;
+
     const registry = caudex.methodology.Registry.initComptime(
         &.{simple_methodology},
     );
@@ -99,7 +105,10 @@ pub fn main() !void {
     if (output.recommendations != 1) return error.UnexpectedOutput;
 
     std.debug.print(
-        "{s} registered through @import(\"caudex\")\n",
-        .{implementation.metadata.id.bytes},
+        "{s} registered through @import(\"caudex\"); persistence contract v{d} imported through @import(\"caudex_persistence\")\n",
+        .{
+            implementation.metadata.id.bytes,
+            caudex_persistence.contract_version,
+        },
     );
 }

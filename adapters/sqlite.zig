@@ -1,6 +1,6 @@
 const std = @import("std");
 const caudex = @import("caudex");
-const persistence = @import("persistence");
+const persistence = @import("caudex_persistence");
 const c = @cImport({
     @cInclude("sqlite3.h");
 });

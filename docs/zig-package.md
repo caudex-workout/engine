@@ -37,19 +37,25 @@ const executable = b.addExecutable(.{
                 .name = "caudex",
                 .module = caudex_dependency.module("caudex"),
             },
+            .{
+                .name = "caudex_persistence",
+                .module = caudex_dependency.module("caudex_persistence"),
+            },
         },
     }),
 });
 ```
 
-Application code then imports only the public module:
+Application code imports the public modules it needs:
 
 ```zig
 const caudex = @import("caudex");
+const caudex_persistence = @import("caudex_persistence");
 ```
 
 The complete [`examples/zig/consumer`](../examples/zig/consumer) package
-registers a host-defined methodology without importing private source files.
+registers a host-defined methodology and inspects the persistence contract
+without importing repository-relative source files.
 
 ## Public module map
 
@@ -66,19 +72,55 @@ registers a host-defined methodology without importing private source files.
 Public declarations reachable from `@import("caudex")` are the supported Zig
 surface. Files elsewhere in `src` must not be imported by path.
 
-## Persistence package status
+## Persistence contract
 
-The v0.1 tagged Zig source package exports only the `caudex` module. The
-repository's Zig persistence contracts and SQLite implementation are currently
-build-local adapter modules: they are not included in `build.zig.zon`'s package
-paths and are not supported through repository-relative imports.
+`caudex_persistence` is the public, database-independent contract for optional
+Zig persistence adapters. It depends only on the public `caudex` module and
+re-exports that module's canonical types as `caudex_persistence.canonical`.
+Importing it does not link SQLite, expose migrations, or add persistence to the
+engine.
 
-[ADR-0004](adr/ADR-0004-first-party-zig-reference-client.md) and the
-[reference-client implementation plan](implementation-plan.md) require named,
-clean-consumer-tested public Zig persistence and SQLite package roots before
-`caudex-cli` may depend on them. Until that work is complete, external Zig hosts
-should treat `adapters/` as implementation source rather than a published
-package contract.
+The contract has these ownership and allocation rules:
+
+- Inputs, contexts, and all slices nested in input values are borrowed for the
+  duration of the capability call. An adapter that retains an input must copy
+  it into adapter-owned storage.
+- `CatalogSource.load`, `HistorySource.load`, `MethodologyStateStore.load`, and
+  `MethodologyStateStore.compareAndSet` return values whose returned slices and
+  nested values live in the allocator supplied to that call. The caller owns
+  those allocations and must release them according to its allocator strategy.
+- Write-only capabilities receive borrowed values and do not transfer
+  ownership. Their implementations copy any data retained after the call.
+- Capability implementations may allocate only through an explicit allocator
+  parameter or their documented adapter-owned storage. The contract does not
+  hide a process-global allocator.
+
+Errors distinguish execution from concurrency:
+
+- `AdapterError` reports adapter availability, invalid stored data, unsupported
+  versions, or an operation failure.
+- `CapabilityError` adds explicit allocator failure.
+- `StateStoreError` adds `error.Conflict` for a compare-and-set revision
+  mismatch. A conflict is an adapter/application outcome, not a core
+  validation or methodology issue.
+
+`contract_version` versions this Zig capability surface independently of the
+engine, canonical schema, methodology state schema, and database schema.
+Adapters must reject unsupported stored versions rather than reinterpret them.
+Additive source-compatible changes may retain the contract version; a breaking
+capability or semantic change increments it and requires adapter and host
+migration guidance. Normal Zig semantic-version compatibility and the exact
+Zig 0.16.x support policy also apply.
+
+The reusable implementation in `adapters/persistence/testing.zig` is registered
+only as the build-local `caudex_persistence_testing` module for repository
+contract tests. It is not a public module and is excluded from the published
+source-package paths. External adapters may implement the public capabilities
+but must not depend on that test utility.
+
+The SQLite implementation is still private and build-local. A later issue will
+publish it separately as `caudex_sqlite`; consumers must not import
+`adapters/sqlite.zig` or migrations by repository-relative path.
 
 ## Zig version policy
 
