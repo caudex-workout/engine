@@ -124,7 +124,7 @@ pub fn build(b: *std.Build) void {
         .os_tag = .freestanding,
     });
     const wasm_library = b.addLibrary(.{
-        .name = "caudex",
+        .name = "caudex_core",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/root.zig"),
             .target = wasm_target,
@@ -138,6 +138,28 @@ pub fn build(b: *std.Build) void {
     );
     check_wasm_step.dependOn(&wasm_library.step);
 
+    const wasm_runtime = b.addExecutable(.{
+        .name = "caudex",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/wasm_api.zig"),
+            .target = wasm_target,
+            .optimize = .ReleaseSmall,
+        }),
+    });
+    wasm_runtime.entry = .disabled;
+    wasm_runtime.rdynamic = true;
+    wasm_runtime.export_memory = true;
+    b.installArtifact(wasm_runtime);
+
+    const wasm_conformance = b.addSystemCommand(&.{ "node", "tests/wasm_conformance.mjs" });
+    wasm_conformance.addArtifactArg(wasm_runtime);
+    wasm_conformance.addFileArg(b.path("fixtures/requests/recommendation.json"));
+    const wasm_step = b.step(
+        "wasm",
+        "Build and test the freestanding release WebAssembly runtime",
+    );
+    wasm_step.dependOn(&wasm_conformance.step);
+
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&run_library_tests.step);
     test_step.dependOn(&run_contract_tests.step);
@@ -147,4 +169,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&cpp_header_test.step);
     test_step.dependOn(&run_c_conformance.step);
     test_step.dependOn(&wasm_library.step);
+    test_step.dependOn(&wasm_conformance.step);
 }
