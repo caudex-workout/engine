@@ -249,6 +249,7 @@ pub const Recommendation = struct {
     working_sets: u16,
     decision: RecommendationDecision,
     explanation: DecisionExplanation,
+    session_explanation: ?DecisionExplanation = null,
     warning: ?canonical.ValidationIssue = null,
 };
 
@@ -257,6 +258,10 @@ pub const RecommendationError = error{
     InvalidHistory,
     IncompatibleUnit,
     Overflow,
+};
+
+pub const RecommendationConstraints = struct {
+    max_working_sets: ?u16 = null,
 };
 
 pub const ExerciseEvaluation = struct {
@@ -418,6 +423,48 @@ fn findStateIndex(states: []const ExerciseState, exercise_id: primitives.Id) ?us
 /// This function proposes no next state and performs no evaluation-side
 /// persistence; those concerns remain in CWE-032.
 pub fn recommendExercise(
+    config: Config,
+    state: ?State,
+    history: training.HistorySnapshot,
+    exercise_id: primitives.Id,
+) RecommendationError!Recommendation {
+    return recommendExerciseWithConstraints(
+        config,
+        state,
+        history,
+        exercise_id,
+        .{},
+    );
+}
+
+pub fn recommendExerciseWithConstraints(
+    config: Config,
+    state: ?State,
+    history: training.HistorySnapshot,
+    exercise_id: primitives.Id,
+    constraints: RecommendationConstraints,
+) RecommendationError!Recommendation {
+    var recommendation = try recommendExerciseUnconstrained(
+        config,
+        state,
+        history,
+        exercise_id,
+    );
+    if (constraints.max_working_sets) |limit| {
+        if (limit == 0) return error.InvalidConfig;
+        if (limit < recommendation.working_sets) {
+            recommendation.working_sets = limit;
+            recommendation.session_explanation = .{
+                .code = "sets.reduced.available_time",
+                .summary = "The explicit session limit reduced prescribed working sets.",
+                .rule_id = "double-progression.short-session-set-cap",
+            };
+        }
+    }
+    return recommendation;
+}
+
+fn recommendExerciseUnconstrained(
     config: Config,
     state: ?State,
     history: training.HistorySnapshot,

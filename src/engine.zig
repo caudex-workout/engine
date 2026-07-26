@@ -24,6 +24,7 @@ pub const RecommendationRequest = struct {
     catalog: training.ExerciseCatalog,
     history: training.HistorySnapshot = .{},
     available_equipment_ids: []const primitives.Id,
+    max_working_sets: ?u16 = null,
 };
 
 pub const EvaluationRequest = struct {
@@ -62,7 +63,7 @@ pub const Output = struct {
     metrics: [128]canonical.Metric = undefined,
     sets: [64]canonical.SetRecommendation = undefined,
     exercises: [1]canonical.ExerciseRecommendation = undefined,
-    explanations: [2]canonical.Explanation = undefined,
+    explanations: [3]canonical.Explanation = undefined,
     warnings: [1]canonical.ValidationIssue = undefined,
     input_fingerprint: [64]u8 = undefined,
     result_fingerprint: [64]u8 = undefined,
@@ -109,6 +110,11 @@ const available_equipment_evidence = [_]canonical.EvidenceRef{
     .{ .path = "/session/availableEquipmentIds" },
 };
 const set_explanation_refs = [_][]const u8{ "explanation-1", "explanation-2" };
+const reduced_set_explanation_refs = [_][]const u8{
+    "explanation-1",
+    "explanation-2",
+    "explanation-3",
+};
 
 fn validateDoubleProgressionConfig(
     view: methodology.ConfigView,
@@ -129,12 +135,17 @@ fn recommendDoubleProgression(
     const destination: *MethodologyOutput =
         @ptrCast(@alignCast(writer.context));
     const exercise = &request.catalog.exercises[0];
-    const prescription = double_progression_contract.recommendExercise(
+    const prescription = double_progression_contract.recommendExerciseWithConstraints(
         request.config,
         request.methodology_state,
         request.history,
         exercise.id,
+        .{ .max_working_sets = request.max_working_sets },
     ) catch return error.InvalidInput;
+    const explanation_refs = if (prescription.session_explanation != null)
+        &reduced_set_explanation_refs
+    else
+        &set_explanation_refs;
 
     destination.output.rep_amount_len = (std.fmt.bufPrint(
         &destination.output.rep_amount,
@@ -164,13 +175,13 @@ fn recommendDoubleProgression(
         destination.output.sets[set_index] = .{
             .kind = "working",
             .targetMetrics = destination.output.metrics[metric_index .. metric_index + 2],
-            .explanationRefs = &set_explanation_refs,
+            .explanationRefs = explanation_refs,
         };
     }
     destination.output.exercises[0] = .{
         .exerciseId = exercise.id.bytes,
         .sets = destination.output.sets[0..destination.output.set_len],
-        .explanationRefs = &set_explanation_refs,
+        .explanationRefs = explanation_refs,
     };
     destination.output.explanations[0] = .{
         .id = "explanation-1",
@@ -193,6 +204,19 @@ fn recommendDoubleProgression(
         .severity = .info,
     };
     destination.output.explanation_len = 2;
+    if (prescription.session_explanation) |session_explanation| {
+        destination.output.explanations[2] = .{
+            .id = "explanation-3",
+            .code = session_explanation.code,
+            .category = "session",
+            .summary = session_explanation.summary,
+            .subject = .{ .exerciseId = exercise.id.bytes },
+            .evidence = &.{.{ .path = "/session/maxSets" }},
+            .ruleId = session_explanation.rule_id,
+            .severity = .warning,
+        };
+        destination.output.explanation_len = 3;
+    }
     if (prescription.warning) |warning| {
         destination.output.warnings[0] = warning;
         destination.output.warning_len = 1;
@@ -386,6 +410,8 @@ fn fingerprintRequest(request: RecommendationRequest, out: *[64]u8) void {
         hash.update(equipment.bytes);
         hash.update("\x00");
     }
+    updatePresence(&hash, request.max_working_sets != null);
+    if (request.max_working_sets) |limit| updateU64(&hash, limit);
     finishHex(&hash, out);
 }
 

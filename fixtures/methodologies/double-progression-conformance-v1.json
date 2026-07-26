@@ -1,0 +1,143 @@
+{
+  "config": {
+    "repRange": { "min": 8, "max": 12 },
+    "workingSets": 3,
+    "advancementCriteria": {
+      "minimumSuccessfulSets": 3,
+      "minimumRepetitions": 12
+    },
+    "initialLoad": { "amount": "45", "unit": "lb" },
+    "loadIncrement": { "amount": "5", "unit": "lb" },
+    "failurePolicy": {
+      "onPartial": "hold",
+      "onFailure": "regress",
+      "regressionAmount": { "amount": "5", "unit": "lb" }
+    },
+    "rounding": {
+      "mode": "nearest",
+      "quantum": { "amount": "2.5", "unit": "lb" }
+    },
+    "exerciseOverrides": [
+      {
+        "exerciseId": "barbell-squat",
+        "repRange": { "min": 5, "max": 8 },
+        "advancementCriteria": {
+          "minimumSuccessfulSets": 3,
+          "minimumRepetitions": 8
+        },
+        "initialLoad": { "amount": "135", "unit": "lb" },
+        "loadIncrement": { "amount": "10", "unit": "lb" },
+        "rounding": {
+          "mode": "nearest",
+          "quantum": { "amount": "5", "unit": "lb" }
+        }
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "first exposure",
+      "exerciseId": "bench-press",
+      "sets": [],
+      "expected": {
+        "decision": "initial",
+        "load": "45.0",
+        "repetitions": 8,
+        "workingSets": 3,
+        "explanationCode": "double_progression.prescribed.initial",
+        "warningCode": "history.insufficient_evidence"
+      }
+    },
+    {
+      "name": "bottom of rep range",
+      "exerciseId": "bench-press",
+      "state": { "exerciseId": "bench-press", "load": { "amount": "45", "unit": "lb" }, "targetRepetitions": 8 },
+      "sets": [
+        { "status": "completed", "load": { "amount": "45", "unit": "lb" }, "repetitions": 8, "targetRepetitions": 8 },
+        { "status": "completed", "load": { "amount": "45", "unit": "lb" }, "repetitions": 8, "targetRepetitions": 8 },
+        { "status": "completed", "load": { "amount": "45", "unit": "lb" }, "repetitions": 8, "targetRepetitions": 8 }
+      ],
+      "expected": { "decision": "repetitions_advanced", "load": "45", "repetitions": 9, "workingSets": 3, "explanationCode": "repetitions.increased.completed_target" }
+    },
+    {
+      "name": "top of rep range",
+      "exerciseId": "bench-press",
+      "state": { "exerciseId": "bench-press", "load": { "amount": "45", "unit": "lb" }, "targetRepetitions": 12 },
+      "sets": [],
+      "expected": { "decision": "state_without_history", "load": "45.0", "repetitions": 12, "workingSets": 3, "explanationCode": "double_progression.prescribed.state_without_history", "warningCode": "history.insufficient_evidence" }
+    },
+    {
+      "name": "advance load",
+      "exerciseId": "bench-press",
+      "state": { "exerciseId": "bench-press", "load": { "amount": "45", "unit": "lb" }, "targetRepetitions": 12 },
+      "sets": [
+        { "status": "completed", "load": { "amount": "45", "unit": "lb" }, "repetitions": 12, "targetRepetitions": 12 },
+        { "status": "completed", "load": { "amount": "45", "unit": "lb" }, "repetitions": 12, "targetRepetitions": 12 },
+        { "status": "completed", "load": { "amount": "45", "unit": "lb" }, "repetitions": 12, "targetRepetitions": 12 }
+      ],
+      "expected": { "decision": "load_advanced", "load": "50.0", "repetitions": 8, "workingSets": 3, "explanationCode": "load.increased.rep_range_completed" }
+    },
+    {
+      "name": "hold load",
+      "exerciseId": "bench-press",
+      "state": { "exerciseId": "bench-press", "load": { "amount": "45", "unit": "lb" }, "targetRepetitions": 10 },
+      "sets": [
+        { "status": "partial", "load": { "amount": "45", "unit": "lb" }, "repetitions": 9, "targetRepetitions": 10 }
+      ],
+      "expected": { "decision": "partial_held", "load": "45", "repetitions": 10, "workingSets": 3, "explanationCode": "load.held.partial_completion" }
+    },
+    {
+      "name": "regress",
+      "exerciseId": "bench-press",
+      "state": { "exerciseId": "bench-press", "load": { "amount": "45", "unit": "lb" }, "targetRepetitions": 10 },
+      "sets": [
+        { "status": "failed", "load": { "amount": "45", "unit": "lb" }, "repetitions": 6, "targetRepetitions": 10 }
+      ],
+      "expected": { "decision": "failure_regressed", "load": "40.0", "repetitions": 8, "workingSets": 3, "explanationCode": "load.regressed.failed_completion" }
+    },
+    {
+      "name": "missed set",
+      "exerciseId": "bench-press",
+      "state": { "exerciseId": "bench-press", "load": { "amount": "45", "unit": "lb" }, "targetRepetitions": 10 },
+      "sets": [
+        { "status": "skipped", "load": { "amount": "45", "unit": "lb" }, "repetitions": 0, "targetRepetitions": 10 }
+      ],
+      "expected": { "decision": "failure_regressed", "load": "40.0", "repetitions": 8, "workingSets": 3, "explanationCode": "load.regressed.failed_completion" }
+    },
+    {
+      "name": "changed unit",
+      "exerciseId": "bench-press",
+      "state": { "exerciseId": "bench-press", "load": { "amount": "45", "unit": "lb" }, "targetRepetitions": 10 },
+      "sets": [
+        { "status": "completed", "load": { "amount": "20", "unit": "kg" }, "repetitions": 10, "targetRepetitions": 10 }
+      ],
+      "expected": { "error": "incompatible_unit" }
+    },
+    {
+      "name": "short session",
+      "exerciseId": "bench-press",
+      "sets": [],
+      "maxWorkingSets": 1,
+      "expected": {
+        "decision": "initial",
+        "load": "45.0",
+        "repetitions": 8,
+        "workingSets": 1,
+        "explanationCode": "double_progression.prescribed.initial",
+        "sessionExplanationCode": "sets.reduced.available_time",
+        "warningCode": "history.insufficient_evidence"
+      }
+    },
+    {
+      "name": "exercise override",
+      "exerciseId": "barbell-squat",
+      "state": { "exerciseId": "barbell-squat", "load": { "amount": "135", "unit": "lb" }, "targetRepetitions": 8 },
+      "sets": [
+        { "status": "completed", "load": { "amount": "135", "unit": "lb" }, "repetitions": 8, "targetRepetitions": 8 },
+        { "status": "completed", "load": { "amount": "135", "unit": "lb" }, "repetitions": 8, "targetRepetitions": 8 },
+        { "status": "completed", "load": { "amount": "135", "unit": "lb" }, "repetitions": 8, "targetRepetitions": 8 }
+      ],
+      "expected": { "decision": "load_advanced", "load": "145", "repetitions": 5, "workingSets": 3, "explanationCode": "load.increased.rep_range_completed" }
+    }
+  ]
+}

@@ -65,6 +65,9 @@ The authoritative schema is
   repetitions to the range minimum, and applies configured rounding.
 - Rounding is applied to initial, advanced, and regressed loads. Held loads are
   preserved exactly.
+- An explicit positive session working-set cap may reduce `workingSets`. The
+  recommendation returns `sets.reduced.available_time`; the methodology never
+  silently applies a cap.
 - Completed set load units must match state/config units. Unit mismatches are
   rejected rather than converted implicitly.
 - Each decision returns a stable explanation code and methodology rule ID.
@@ -83,3 +86,12 @@ rounding rules as recommendation to a host-supplied completed workout.
   may discard the proposal without any persistence or other side effect.
 - Re-evaluating identical config, state, and completed performance returns the
   same outcomes and state JSON.
+
+## Conformance suite
+
+The checked-in
+[`double-progression-conformance-v1.json`](../../fixtures/methodologies/double-progression-conformance-v1.json)
+fixture covers first exposure, bottom and top of the rep range, load
+advancement, load hold, regression, a missed set, changed units, a short
+session, and an exercise override. Contract tests decode and execute every case
+through the public methodology API.
