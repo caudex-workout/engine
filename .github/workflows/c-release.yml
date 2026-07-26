@@ -1,0 +1,71 @@
+name: C release artifacts
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: c-release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  native-link:
+    name: Native links (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Build and test native static/shared artifacts
+        run: zig build test-c-release
+
+  matrix:
+    name: Complete target matrix
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Build complete matrix
+        run: zig build package-c
+
+      - name: Upload matrix
+        uses: actions/upload-artifact@v7
+        with:
+          name: caudex-c-${{ github.sha }}
+          path: zig-out/c-release
+          if-no-files-found: error
+          retention-days: 14

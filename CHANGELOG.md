@@ -12,3 +12,5 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Initial stateless Zig workout engine, C ABI, and npm/WebAssembly package.
 - Direct Zig source package, public module guide, and custom-methodology
   consumer.
+- Native C static/shared release matrix with checksums, build metadata, size
+  reports, and artifact-first link tests.

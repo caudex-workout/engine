@@ -18,7 +18,8 @@ try {
     !paths.includes("src") ||
     !paths.includes("include") ||
     !paths.includes("examples/zig") ||
-    !paths.includes("LICENSE")
+    !paths.includes("LICENSE") ||
+    !paths.includes("NOTICE")
   ) {
     throw new Error("Zig package paths omit required source or release files");
   }

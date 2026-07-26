@@ -11,6 +11,7 @@
         "include",
         "examples/zig",
         "LICENSE",
+        "NOTICE",
         "README.md",
         "CHANGELOG.md",
         "docs/zig-package.md",

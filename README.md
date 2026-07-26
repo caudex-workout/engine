@@ -73,6 +73,11 @@ modules, the Zig 0.16.x support policy, and the checked-in custom-methodology
 consumer. `zig build test-zig-package` verifies that example from a clean copy
 containing only the source package's declared paths.
 
+Native C consumers can use the prebuilt static or shared libraries documented
+in the [C release matrix](docs/release/c.md). Every target bundle includes the
+public header, license notices, build metadata, SHA-256 checksums, and measured
+artifact sizes.
+
 See the [quickstart and concepts guide](docs/quickstart-and-concepts.md) for the
 request/result model, explanation references, data ownership, deterministic
 inputs, and error handling. No database, account, or runtime network request is

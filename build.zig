@@ -301,6 +301,30 @@ pub fn build(b: *std.Build) void {
     );
     zig_package_step.dependOn(&zig_package_consumer_test.step);
 
+    const c_release_package = b.addSystemCommand(&.{
+        "node",
+        "tools/release/build-c-artifacts.mjs",
+        "zig-out/c-release",
+    });
+    const c_release_package_step = b.step(
+        "package-c",
+        "Build the complete native C release matrix",
+    );
+    c_release_package_step.dependOn(&c_release_package.step);
+
+    const c_release_test = b.addSystemCommand(&.{
+        "node",
+        "tools/release/build-c-artifacts.mjs",
+        "zig-out/c-release-host",
+        "--host-only",
+        "--test",
+    });
+    const c_release_test_step = b.step(
+        "test-c-release",
+        "Build and link-test host C release artifacts",
+    );
+    c_release_test_step.dependOn(&c_release_test.step);
+
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&run_library_tests.step);
     test_step.dependOn(&run_contract_tests.step);
@@ -322,4 +346,5 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&testing_utilities_test.step);
     test_step.dependOn(&npm_examples_test.step);
     test_step.dependOn(&zig_package_consumer_test.step);
+    test_step.dependOn(&c_release_test.step);
 }
