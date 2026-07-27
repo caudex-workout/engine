@@ -20,7 +20,7 @@ start=(
 )
 
 expected_applied='{"schemaVersion":1,"kind":"caudex.workout.start","data":{"commandId":"command-integration-start","disposition":"applied","workoutId":"workout-integration","hostScopeKey":"integration","revision":1,"status":"active","startedAt":"2026-07-26T12:00:00Z"}}'
-expected_show='{"schemaVersion":1,"kind":"caudex.workout.show","data":{"workoutId":"workout-integration","hostScopeKey":"integration","revision":1,"status":"active","startedAt":"2026-07-26T12:00:00Z"}}'
+expected_show='{"schemaVersion":1,"kind":"caudex.workout.show","data":{"workoutId":"workout-integration","hostScopeKey":"integration","revision":1,"status":"active","startedAt":"2026-07-26T12:00:00Z","exercises":[]}}'
 expected_replayed='{"schemaVersion":1,"kind":"caudex.workout.start","data":{"commandId":"command-integration-start","disposition":"replayed","workoutId":"workout-integration","hostScopeKey":"integration","revision":1,"status":"active","startedAt":"2026-07-26T12:00:00Z"}}'
 
 actual_applied=$("$cli" "${common[@]}" "${start[@]}")

@@ -6,7 +6,7 @@ const sqlite = @import("caudex_sqlite");
 const tracking = @import("caudex_tracking");
 const errors = @import("errors.zig");
 const output = @import("output.zig");
-const resolution = @import("resolution.zig");
+const use_cases = @import("use_cases.zig");
 
 const version = "0.1.0";
 
@@ -16,6 +16,7 @@ const help_text =
     \\Usage:
     \\  caudex [--database PATH] [--format human|json] [--color auto|always|never] database info
     \\  caudex [global options] workout start [start options]
+    \\  caudex [global options] workout add-exercise EXERCISE [options]
     \\  caudex [global options] workout show [--workout ID]
     \\  caudex --help
     \\  caudex version
@@ -49,6 +50,16 @@ const StartOptions = struct {
     workout_id: ?[]const u8 = null,
     started_at: ?[]const u8 = null,
     occurred_at: ?[]const u8 = null,
+};
+
+const AddExerciseOptions = struct {
+    reference: []const u8,
+    workout_id: ?[]const u8 = null,
+    command_id: ?[]const u8 = null,
+    membership_id: ?[]const u8 = null,
+    occurred_at: ?[]const u8 = null,
+    before: ?[]const u8 = null,
+    after: ?[]const u8 = null,
 };
 
 const PathEnvironment = struct {
@@ -161,6 +172,20 @@ fn run(
     }
     if (remaining.len >= 2 and
         std.mem.eql(u8, remaining[0], "workout") and
+        std.mem.eql(u8, remaining[1], "add-exercise"))
+    {
+        return try addExercise(
+            io,
+            allocator,
+            adapter,
+            global,
+            remaining[2..],
+            settings,
+            stdout,
+        );
+    }
+    if (remaining.len >= 2 and
+        std.mem.eql(u8, remaining[0], "workout") and
         std.mem.eql(u8, remaining[1], "start"))
     {
         return try startWorkout(
@@ -187,6 +212,93 @@ fn run(
         );
     }
     return error.InvalidArguments;
+}
+
+fn addExercise(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    adapter: *sqlite.Adapter,
+    global: GlobalOptions,
+    args: []const []const u8,
+    settings: output.Settings,
+    stdout: *std.Io.Writer,
+) !?errors.Failure {
+    const options = try parseAddExerciseOptions(args);
+    const scope = try trackingScope(global);
+    const explicit_id: ?tracking.Id = if (options.workout_id) |id|
+        try tracking.Id.parse(id)
+    else
+        null;
+    const workout = switch (try use_cases.resolveWorkout(
+        adapter,
+        allocator,
+        scope,
+        explicit_id,
+    )) {
+        .found => |found| found,
+        .not_found => return errors.workoutNotFound(),
+        .ambiguous => |workouts| {
+            const ids = try workoutIds(allocator, workouts);
+            return errors.ambiguousWorkout(ids);
+        },
+    };
+    const occurred_at = options.occurred_at orelse
+        try currentTimestamp(io, allocator);
+    const exercise = switch (try use_cases.resolveExercise(
+        adapter,
+        allocator,
+        scope.host_scope_key.bytes,
+        occurred_at,
+        options.reference,
+    )) {
+        .found => |found| found,
+        .not_found => return errors.exerciseNotFound(),
+        .ambiguous => |exercises| {
+            const ids = try allocator.alloc([]const u8, exercises.len);
+            for (exercises, 0..) |candidate, index| ids[index] = candidate.id;
+            return errors.ambiguousExercise(ids);
+        },
+    };
+    const command_id = options.command_id orelse
+        try generateId(io, allocator, "command");
+    const membership_id = options.membership_id orelse
+        try generateId(io, allocator, "membership");
+    const anchor: tracking.ExerciseAnchor = if (options.before) |id|
+        .{ .before = try tracking.Id.parse(id) }
+    else if (options.after) |id|
+        .{ .after = try tracking.Id.parse(id) }
+    else
+        .end;
+    const result = try adapter.addExercise(allocator, .{
+        .metadata = .{
+            .command_id = try tracking.Id.parse(command_id),
+            .occurred_at = try tracking.Timestamp.parse(occurred_at),
+        },
+        .scope = scope,
+        .workout_id = workout.id,
+        .expected_revision = workout.revision,
+        .membership_id = try tracking.Id.parse(membership_id),
+        .exercise_id = try tracking.Id.parse(exercise.id),
+        .anchor = anchor,
+    });
+    switch (result) {
+        .accepted => |accepted| {
+            try writeWorkoutState(
+                allocator,
+                stdout,
+                settings,
+                "caudex.workout.exercise_added",
+                accepted.command_id.bytes,
+                @tagName(accepted.disposition),
+                accepted.workout,
+            );
+            return null;
+        },
+        .rejected => |rejected| {
+            if (rejected.issues.len == 0) return error.InvalidTrackingResult;
+            return errors.fromTrackingIssue(rejected.issues[0]);
+        },
+    }
 }
 
 fn parseGlobalOptions(args: []const []const u8) !GlobalOptions {
@@ -313,35 +425,17 @@ fn showWorkout(
         try tracking.Id.parse(args[1])
     else
         null;
-    const explicit_result: ?tracking.ReadWorkoutResult = if (explicit_id) |id|
-        try adapter.readWorkout(allocator, .{
-            .scope = scope,
-            .workout_id = id,
-        })
-    else
-        null;
-    const active: tracking.ActiveWorkoutSelection = if (explicit_id == null)
-        try adapter.listActiveWorkouts(allocator, .{
-            .scope = scope,
-            .max_results = 32,
-        })
-    else
-        .none;
-    switch (resolution.resolveActiveWorkout(explicit_id, explicit_result, active)) {
+    switch (try use_cases.resolveWorkout(adapter, allocator, scope, explicit_id)) {
         .found => |workout| {
-            try output.writeWorkout(stdout, settings, .{
-                .document_kind = "caudex.workout.show",
-                .workout_id = workout.id.bytes,
-                .host_scope_key = workout.scope.host_scope_key.bytes,
-                .athlete_id = if (workout.scope.athlete_id) |id| id.bytes else null,
-                .revision = workout.revision,
-                .status = @tagName(workout.status),
-                .started_at = workout.started_at.bytes,
-                .completed_at = if (workout.completed_at) |timestamp|
-                    timestamp.bytes
-                else
-                    null,
-            });
+            try writeWorkoutState(
+                allocator,
+                stdout,
+                settings,
+                "caudex.workout.show",
+                null,
+                null,
+                workout,
+            );
             return null;
         },
         .not_found => return errors.workoutNotFound(),
@@ -351,6 +445,94 @@ fn showWorkout(
             return errors.ambiguousWorkout(ids);
         },
     }
+}
+
+fn writeWorkoutState(
+    allocator: std.mem.Allocator,
+    stdout: *std.Io.Writer,
+    settings: output.Settings,
+    document_kind: []const u8,
+    command_id: ?[]const u8,
+    disposition: ?[]const u8,
+    workout: tracking.Workout,
+) !void {
+    const exercises = try allocator.alloc(
+        output.WorkoutExerciseInfo,
+        workout.exercises.len,
+    );
+    for (workout.exercises, 0..) |exercise, index| {
+        exercises[index] = .{
+            .membershipId = exercise.id.bytes,
+            .exerciseId = exercise.exercise_id.bytes,
+            .setCount = exercise.sets.len,
+        };
+    }
+    try output.writeWorkout(stdout, settings, .{
+        .document_kind = document_kind,
+        .command_id = command_id,
+        .disposition = disposition,
+        .workout_id = workout.id.bytes,
+        .host_scope_key = workout.scope.host_scope_key.bytes,
+        .athlete_id = if (workout.scope.athlete_id) |id| id.bytes else null,
+        .revision = workout.revision,
+        .status = @tagName(workout.status),
+        .started_at = workout.started_at.bytes,
+        .completed_at = if (workout.completed_at) |timestamp|
+            timestamp.bytes
+        else
+            null,
+        .exercises = exercises,
+    });
+}
+
+fn workoutIds(
+    allocator: std.mem.Allocator,
+    workouts: []const tracking.Workout,
+) ![]const []const u8 {
+    const ids = try allocator.alloc([]const u8, workouts.len);
+    for (workouts, 0..) |workout, index| ids[index] = workout.id.bytes;
+    return ids;
+}
+
+fn trackingScope(global: GlobalOptions) !tracking.Scope {
+    return .{
+        .host_scope_key = try tracking.Id.parse(global.scope),
+        .athlete_id = if (global.athlete) |athlete|
+            try tracking.Id.parse(athlete)
+        else
+            null,
+    };
+}
+
+fn parseAddExerciseOptions(args: []const []const u8) !AddExerciseOptions {
+    if (args.len == 0 or args[0].len == 0 or
+        std.mem.startsWith(u8, args[0], "--"))
+        return error.InvalidArguments;
+    var options = AddExerciseOptions{ .reference = args[0] };
+    var index: usize = 1;
+    while (index < args.len) : (index += 1) {
+        const target: *?[]const u8 = if (std.mem.eql(u8, args[index], "--workout"))
+            &options.workout_id
+        else if (std.mem.eql(u8, args[index], "--command-id"))
+            &options.command_id
+        else if (std.mem.eql(u8, args[index], "--membership-id"))
+            &options.membership_id
+        else if (std.mem.eql(u8, args[index], "--occurred-at"))
+            &options.occurred_at
+        else if (std.mem.eql(u8, args[index], "--before"))
+            &options.before
+        else if (std.mem.eql(u8, args[index], "--after"))
+            &options.after
+        else
+            return error.InvalidArguments;
+        index += 1;
+        if (index >= args.len or args[index].len == 0 or target.* != null)
+            return error.InvalidArguments;
+        target.* = args[index];
+    }
+    if (options.before != null and options.after != null)
+        return error.InvalidArguments;
+    return options;
 }
 
 fn parseStartOptions(args: []const []const u8) !StartOptions {
@@ -597,7 +779,7 @@ test "client source imports only approved public packages" {
                 std.mem.eql(u8, name, "caudex_tracking") or
                 std.mem.eql(u8, name, "errors.zig") or
                 std.mem.eql(u8, name, "output.zig") or
-                std.mem.eql(u8, name, "resolution.zig"),
+                std.mem.eql(u8, name, "use_cases.zig"),
         );
 
         import_count += 1;

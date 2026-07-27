@@ -41,6 +41,13 @@ pub const WorkoutInfo = struct {
     status: []const u8,
     started_at: []const u8,
     completed_at: ?[]const u8,
+    exercises: ?[]const WorkoutExerciseInfo = null,
+};
+
+pub const WorkoutExerciseInfo = struct {
+    membershipId: []const u8,
+    exerciseId: []const u8,
+    setCount: usize,
 };
 
 pub fn requestedFormat(args: []const []const u8) Format {
@@ -89,6 +96,23 @@ pub fn writeWorkout(
                 "Status: {s}\nRevision: {d}\nStarted at: {s}\n",
                 .{ info.status, info.revision, info.started_at },
             );
+            if (info.exercises) |exercises| {
+                if (exercises.len == 0) {
+                    try writer.writeAll("Exercises: none\n");
+                } else {
+                    try writer.writeAll("Exercises:\n");
+                    for (exercises) |exercise| {
+                        try writer.print(
+                            "  {s}  membership={s}  sets={d}\n",
+                            .{
+                                exercise.exerciseId,
+                                exercise.membershipId,
+                                exercise.setCount,
+                            },
+                        );
+                    }
+                }
+            }
         },
         .json => {
             try std.json.Stringify.value(.{
@@ -104,6 +128,7 @@ pub fn writeWorkout(
                     .status = info.status,
                     .startedAt = info.started_at,
                     .completedAt = info.completed_at,
+                    .exercises = info.exercises,
                 },
             }, .{ .emit_null_optional_fields = false }, writer);
             try writer.writeByte('\n');

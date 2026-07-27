@@ -19,7 +19,7 @@ test "$zero_error" = '{"schemaVersion":1,"kind":"caudex.error","error":{"code":"
   --started-at 2026-07-26T12:00:00Z \
   --occurred-at 2026-07-26T12:00:00Z >/dev/null
 one=$("$cli" "${common[@]}" workout show)
-test "$one" = '{"schemaVersion":1,"kind":"caudex.workout.show","data":{"workoutId":"workout-one","hostScopeKey":"resolution","revision":1,"status":"active","startedAt":"2026-07-26T12:00:00Z"}}'
+test "$one" = '{"schemaVersion":1,"kind":"caudex.workout.show","data":{"workoutId":"workout-one","hostScopeKey":"resolution","revision":1,"status":"active","startedAt":"2026-07-26T12:00:00Z","exercises":[]}}'
 
 "$cli" "${common[@]}" workout start \
   --command-id command-two --workout workout-two \

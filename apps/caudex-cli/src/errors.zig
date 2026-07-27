@@ -38,6 +38,25 @@ pub fn ambiguousWorkout(candidate_ids: []const []const u8) Failure {
     };
 }
 
+pub fn exerciseNotFound() Failure {
+    return .{
+        .exit_class = .not_found,
+        .code = "client.exercise_not_found",
+        .category = "not_found",
+        .message = "No exercise matched the reference.",
+    };
+}
+
+pub fn ambiguousExercise(candidate_ids: []const []const u8) Failure {
+    return .{
+        .exit_class = .ambiguity,
+        .code = "client.exercise_ambiguous",
+        .category = "ambiguity",
+        .message = "Multiple exercises matched; pass an exact exercise ID.",
+        .candidate_ids = candidate_ids,
+    };
+}
+
 pub fn fromTrackingIssue(issue: anytype) Failure {
     return .{
         .exit_class = switch (issue.category) {
