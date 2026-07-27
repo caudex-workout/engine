@@ -117,6 +117,14 @@ pub const Adapter = opaque {
         return readTrackedWorkout(self, allocator, query);
     }
 
+    pub fn listActiveWorkouts(
+        self: *Adapter,
+        allocator: std.mem.Allocator,
+        query: tracking.ListActiveWorkoutsQuery,
+    ) TrackingError!tracking.ActiveWorkoutSelection {
+        return listTrackedActiveWorkouts(self, allocator, query);
+    }
+
     pub fn addExercise(
         self: *Adapter,
         allocator: std.mem.Allocator,
@@ -422,6 +430,49 @@ fn readTrackedWorkout(
         .severity = .@"error",
         .message = "No workout matched the requested scope and ID.",
     } };
+}
+
+fn listTrackedActiveWorkouts(
+    self: *Adapter,
+    allocator: std.mem.Allocator,
+    query: tracking.ListActiveWorkoutsQuery,
+) TrackingError!tracking.ActiveWorkoutSelection {
+    var statement = try self.prepare(
+        \\SELECT workout_id FROM tracking_workouts
+        \\WHERE host_scope_key = ?1 AND athlete_id = ?2 AND status = 'active'
+        \\ORDER BY workout_id
+    );
+    defer statement.finalize();
+    try statement.bindText(1, query.scope.host_scope_key.bytes);
+    try statement.bindText(2, athleteKey(query.scope));
+    var matches: std.ArrayList(tracking.Workout) = .empty;
+    errdefer matches.deinit(allocator);
+    var total: usize = 0;
+    var first: ?tracking.Workout = null;
+    while (try statement.row()) {
+        total += 1;
+        const workout_id = tracking.Id{
+            .bytes = try dupeColumn(allocator, statement.raw, 0),
+        };
+        const workout = (try loadTrackedWorkout(
+            self,
+            allocator,
+            query.scope,
+            workout_id,
+        )) orelse return error.InvalidData;
+        if (first == null) first = workout;
+        if (matches.items.len < query.max_results)
+            try matches.append(allocator, workout);
+    }
+    if (total == 0) {
+        matches.deinit(allocator);
+        return .none;
+    }
+    if (total == 1) {
+        matches.deinit(allocator);
+        return .{ .one = first.? };
+    }
+    return .{ .ambiguous = try matches.toOwnedSlice(allocator) };
 }
 
 const ExerciseChange = union(enum) {

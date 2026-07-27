@@ -117,7 +117,11 @@ pub fn writeFailure(
     failure: errors.Failure,
 ) !void {
     switch (format) {
-        .human => try writer.print("error: {s}\n", .{failure.message}),
+        .human => {
+            try writer.print("error: {s}\n", .{failure.message});
+            for (failure.candidate_ids) |id|
+                try writer.print("candidate: {s}\n", .{id});
+        },
         .json => {
             try std.json.Stringify.value(.{
                 .schemaVersion = 1,
@@ -126,8 +130,12 @@ pub fn writeFailure(
                     .code = failure.code,
                     .category = failure.category,
                     .message = failure.message,
+                    .details = if (failure.candidate_ids.len == 0)
+                        null
+                    else
+                        .{ .candidateIds = failure.candidate_ids },
                 },
-            }, .{}, writer);
+            }, .{ .emit_null_optional_fields = false }, writer);
             try writer.writeByte('\n');
         },
     }

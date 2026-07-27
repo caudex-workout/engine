@@ -16,7 +16,27 @@ pub const Failure = struct {
     code: []const u8,
     category: []const u8,
     message: []const u8,
+    candidate_ids: []const []const u8 = &.{},
 };
+
+pub fn workoutNotFound() Failure {
+    return .{
+        .exit_class = .not_found,
+        .code = "tracking.workout_not_found",
+        .category = "not_found",
+        .message = "No active workout matched; pass --workout with a stable ID.",
+    };
+}
+
+pub fn ambiguousWorkout(candidate_ids: []const []const u8) Failure {
+    return .{
+        .exit_class = .ambiguity,
+        .code = "client.active_workout_ambiguous",
+        .category = "ambiguity",
+        .message = "Multiple active workouts matched; pass --workout with one candidate ID.",
+        .candidate_ids = candidate_ids,
+    };
+}
 
 pub fn fromTrackingIssue(issue: anytype) Failure {
     return .{

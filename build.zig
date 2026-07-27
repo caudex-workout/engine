@@ -462,7 +462,7 @@ pub fn build(b: *std.Build) void {
         \\Usage:
         \\  caudex [--database PATH] [--format human|json] [--color auto|always|never] database info
         \\  caudex [global options] workout start [start options]
-        \\  caudex [global options] workout show --workout ID
+        \\  caudex [global options] workout show [--workout ID]
         \\  caudex --help
         \\  caudex version
         \\
@@ -564,6 +564,12 @@ pub fn build(b: *std.Build) void {
         "tests/cli_workout_start_test.sh",
     });
     cli_workout_start_test.addArtifactArg(cli);
+
+    const cli_workout_resolution_test = b.addSystemCommand(&.{
+        "bash",
+        "tests/cli_workout_resolution_test.sh",
+    });
+    cli_workout_resolution_test.addArtifactArg(cli);
 
     const architecture_probe_files = b.addWriteFiles();
     const private_import_probe = architecture_probe_files.add("caudex_private_import.zig",
@@ -758,6 +764,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&cli_invalid_json.step);
     test_step.dependOn(&cli_after_broken_pipe.step);
     test_step.dependOn(&cli_workout_start_test.step);
+    test_step.dependOn(&cli_workout_resolution_test.step);
     test_step.dependOn(&private_import_check.step);
     test_step.dependOn(&npm_clean_smoke.step);
     test_step.dependOn(&npm_release_test.step);

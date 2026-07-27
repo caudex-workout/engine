@@ -6,6 +6,7 @@ const sqlite = @import("caudex_sqlite");
 const tracking = @import("caudex_tracking");
 const errors = @import("errors.zig");
 const output = @import("output.zig");
+const resolution = @import("resolution.zig");
 
 const version = "0.1.0";
 
@@ -15,7 +16,7 @@ const help_text =
     \\Usage:
     \\  caudex [--database PATH] [--format human|json] [--color auto|always|never] database info
     \\  caudex [global options] workout start [start options]
-    \\  caudex [global options] workout show --workout ID
+    \\  caudex [global options] workout show [--workout ID]
     \\  caudex --help
     \\  caudex version
     \\
@@ -298,7 +299,8 @@ fn showWorkout(
     settings: output.Settings,
     stdout: *std.Io.Writer,
 ) !?errors.Failure {
-    if (args.len != 2 or !std.mem.eql(u8, args[0], "--workout"))
+    if (args.len != 0 and
+        (args.len != 2 or !std.mem.eql(u8, args[0], "--workout")))
         return error.InvalidArguments;
     const scope = tracking.Scope{
         .host_scope_key = try tracking.Id.parse(global.scope),
@@ -307,11 +309,25 @@ fn showWorkout(
         else
             null,
     };
-    const result = try adapter.readWorkout(allocator, .{
-        .scope = scope,
-        .workout_id = try tracking.Id.parse(args[1]),
-    });
-    switch (result) {
+    const explicit_id: ?tracking.Id = if (args.len == 2)
+        try tracking.Id.parse(args[1])
+    else
+        null;
+    const explicit_result: ?tracking.ReadWorkoutResult = if (explicit_id) |id|
+        try adapter.readWorkout(allocator, .{
+            .scope = scope,
+            .workout_id = id,
+        })
+    else
+        null;
+    const active: tracking.ActiveWorkoutSelection = if (explicit_id == null)
+        try adapter.listActiveWorkouts(allocator, .{
+            .scope = scope,
+            .max_results = 32,
+        })
+    else
+        .none;
+    switch (resolution.resolveActiveWorkout(explicit_id, explicit_result, active)) {
         .found => |workout| {
             try output.writeWorkout(stdout, settings, .{
                 .document_kind = "caudex.workout.show",
@@ -328,7 +344,12 @@ fn showWorkout(
             });
             return null;
         },
-        .not_found => |issue| return errors.fromTrackingIssue(issue),
+        .not_found => return errors.workoutNotFound(),
+        .ambiguous => |workouts| {
+            const ids = try allocator.alloc([]const u8, workouts.len);
+            for (workouts, 0..) |workout, index| ids[index] = workout.id.bytes;
+            return errors.ambiguousWorkout(ids);
+        },
     }
 }
 
@@ -575,14 +596,15 @@ test "client source imports only approved public packages" {
                 std.mem.eql(u8, name, "caudex_sqlite") or
                 std.mem.eql(u8, name, "caudex_tracking") or
                 std.mem.eql(u8, name, "errors.zig") or
-                std.mem.eql(u8, name, "output.zig"),
+                std.mem.eql(u8, name, "output.zig") or
+                std.mem.eql(u8, name, "resolution.zig"),
         );
 
         import_count += 1;
         remainder = tail[name_end + 1 ..];
     }
 
-    try std.testing.expectEqual(@as(usize, 8), import_count);
+    try std.testing.expectEqual(@as(usize, 9), import_count);
 }
 
 test "client sources contain no SQL or private path imports" {
