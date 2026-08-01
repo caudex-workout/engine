@@ -464,6 +464,9 @@ pub fn build(b: *std.Build) void {
         \\  caudex [global options] workout start [start options]
         \\  caudex [global options] workout add-exercise EXERCISE [options]
         \\  caudex [global options] workout show [--workout ID]
+        \\  caudex [global options] set log [--workout ID] [--exercise ID] [--set ID] [METRICS...]
+        \\  caudex [global options] set skip [--workout ID] [--exercise ID] [--set ID]
+        \\  caudex [global options] set reopen [--workout ID] [--exercise ID] --set ID
         \\  caudex --help
         \\  caudex version
         \\
@@ -473,6 +476,11 @@ pub fn build(b: *std.Build) void {
         \\Global options:
         \\  --scope ID        Host scope (default: local)
         \\  --athlete ID      Optional athlete within the host scope
+        \\  --quiet           Suppress successful command output
+        \\
+        \\Set log metrics:
+        \\  --reps N  --load N UNIT  --rir N  --rpe N  --duration N UNIT
+        \\  Shorthand examples: 70kg 8r @2rir
         \\
         \\Workout start options:
         \\  --command-id ID   Idempotency key (generated when omitted)
@@ -594,6 +602,13 @@ pub fn build(b: *std.Build) void {
     cli_add_exercise_test.addArtifactArg(cli);
     cli_add_exercise_test.addArtifactArg(cli_catalog_seed);
 
+    const cli_set_commands_test = b.addSystemCommand(&.{
+        "bash",
+        "tests/cli_set_commands_test.sh",
+    });
+    cli_set_commands_test.addArtifactArg(cli);
+    cli_set_commands_test.addArtifactArg(cli_catalog_seed);
+
     const architecture_probe_files = b.addWriteFiles();
     const private_import_probe = architecture_probe_files.add("caudex_private_import.zig",
         \\const private = @import("caudex_private_root");
@@ -620,6 +635,7 @@ pub fn build(b: *std.Build) void {
     cli_test_step.dependOn(&cli_invalid_json.step);
     cli_test_step.dependOn(&cli_after_broken_pipe.step);
     cli_test_step.dependOn(&cli_workout_start_test.step);
+    cli_test_step.dependOn(&cli_set_commands_test.step);
     cli_test_step.dependOn(&private_import_check.step);
 
     const npm_package_test = b.addSystemCommand(&.{
@@ -789,6 +805,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&cli_workout_start_test.step);
     test_step.dependOn(&cli_workout_resolution_test.step);
     test_step.dependOn(&cli_add_exercise_test.step);
+    test_step.dependOn(&cli_set_commands_test.step);
     test_step.dependOn(&private_import_check.step);
     test_step.dependOn(&npm_clean_smoke.step);
     test_step.dependOn(&npm_release_test.step);

@@ -9,6 +9,7 @@ pub const Settings = struct {
     color: Color = .auto,
     is_terminal: bool = false,
     no_color: bool = false,
+    quiet: bool = false,
 
     pub fn useColor(self: Settings) bool {
         if (self.format == .json or self.no_color) return false;
@@ -86,6 +87,7 @@ pub fn writeWorkout(
     settings: Settings,
     info: WorkoutInfo,
 ) !void {
+    if (settings.quiet) return;
     switch (settings.format) {
         .human => {
             if (info.disposition) |disposition|

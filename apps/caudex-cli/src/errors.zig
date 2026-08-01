@@ -47,6 +47,14 @@ pub fn exerciseNotFound() Failure {
     };
 }
 
+pub fn membershipNotFound() Failure {
+    return .{ .exit_class = .not_found, .code = "tracking.membership_not_found", .category = "not_found", .message = "No unique workout exercise matched; pass --exercise with a membership or exercise ID." };
+}
+
+pub fn setNotFound() Failure {
+    return .{ .exit_class = .not_found, .code = "tracking.set_not_found", .category = "not_found", .message = "No unique eligible set matched; pass --set with a stable ID." };
+}
+
 pub fn ambiguousExercise(candidate_ids: []const []const u8) Failure {
     return .{
         .exit_class = .ambiguity,

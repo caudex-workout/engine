@@ -18,6 +18,9 @@ const help_text =
     \\  caudex [global options] workout start [start options]
     \\  caudex [global options] workout add-exercise EXERCISE [options]
     \\  caudex [global options] workout show [--workout ID]
+    \\  caudex [global options] set log [--workout ID] [--exercise ID] [--set ID] [METRICS...]
+    \\  caudex [global options] set skip [--workout ID] [--exercise ID] [--set ID]
+    \\  caudex [global options] set reopen [--workout ID] [--exercise ID] --set ID
     \\  caudex --help
     \\  caudex version
     \\
@@ -27,6 +30,11 @@ const help_text =
     \\Global options:
     \\  --scope ID        Host scope (default: local)
     \\  --athlete ID      Optional athlete within the host scope
+    \\  --quiet           Suppress successful command output
+    \\
+    \\Set log metrics:
+    \\  --reps N  --load N UNIT  --rir N  --rpe N  --duration N UNIT
+    \\  Shorthand examples: 70kg 8r @2rir
     \\
     \\Workout start options:
     \\  --command-id ID   Idempotency key (generated when omitted)
@@ -43,6 +51,7 @@ const GlobalOptions = struct {
     scope: []const u8 = "local",
     athlete: ?[]const u8 = null,
     command_index: usize = 1,
+    quiet: bool = false,
 };
 
 const StartOptions = struct {
@@ -60,6 +69,16 @@ const AddExerciseOptions = struct {
     occurred_at: ?[]const u8 = null,
     before: ?[]const u8 = null,
     after: ?[]const u8 = null,
+};
+
+const SetOptions = struct {
+    workout_id: ?[]const u8 = null,
+    exercise_id: ?[]const u8 = null,
+    set_id: ?[]const u8 = null,
+    command_id: ?[]const u8 = null,
+    occurred_at: ?[]const u8 = null,
+    metrics: [5]tracking.Metric = undefined,
+    metric_count: usize = 0,
 };
 
 const PathEnvironment = struct {
@@ -152,6 +171,7 @@ fn run(
         .color = global.color,
         .is_terminal = is_terminal,
         .no_color = no_color,
+        .quiet = global.quiet,
     };
     const remaining = args[global.command_index..];
     if (remaining.len == 2 and
@@ -169,6 +189,16 @@ fn run(
             .compatibility = @tagName(metadata.compatibility),
         });
         return null;
+    }
+    if (remaining.len >= 2 and
+        std.mem.eql(u8, remaining[0], "set"))
+    {
+        if (std.mem.eql(u8, remaining[1], "log"))
+            return try changeSet(io, allocator, adapter, global, remaining[2..], settings, stdout, .log);
+        if (std.mem.eql(u8, remaining[1], "skip"))
+            return try changeSet(io, allocator, adapter, global, remaining[2..], settings, stdout, .skip);
+        if (std.mem.eql(u8, remaining[1], "reopen"))
+            return try changeSet(io, allocator, adapter, global, remaining[2..], settings, stdout, .reopen);
     }
     if (remaining.len >= 2 and
         std.mem.eql(u8, remaining[0], "workout") and
@@ -337,6 +367,8 @@ fn parseGlobalOptions(args: []const []const u8) !GlobalOptions {
                 .never
             else
                 return error.InvalidArguments;
+        } else if (std.mem.eql(u8, args[index], "--quiet")) {
+            options.quiet = true;
         } else {
             return error.InvalidArguments;
         }
@@ -344,6 +376,198 @@ fn parseGlobalOptions(args: []const []const u8) !GlobalOptions {
     }
     options.command_index = index;
     return options;
+}
+
+const SetAction = enum { log, skip, reopen };
+
+fn changeSet(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    adapter: *sqlite.Adapter,
+    global: GlobalOptions,
+    args: []const []const u8,
+    settings: output.Settings,
+    stdout: *std.Io.Writer,
+    action: SetAction,
+) !?errors.Failure {
+    var options = try parseSetOptions(args, action);
+    const scope = try trackingScope(global);
+    var workout = switch (try use_cases.resolveWorkout(adapter, allocator, scope, if (options.workout_id) |id| try tracking.Id.parse(id) else null)) {
+        .found => |value| value,
+        .not_found => return errors.workoutNotFound(),
+        .ambiguous => |values| return errors.ambiguousWorkout(try workoutIds(allocator, values)),
+    };
+    const membership = resolveMembership(workout, options.exercise_id) orelse
+        return errors.membershipNotFound();
+    const occurred_at = options.occurred_at orelse try currentTimestamp(io, allocator);
+    var set_id = options.set_id;
+    if (action == .log and (set_id == null or !hasSet(membership.sets, set_id.?))) {
+        const generated = set_id orelse try generateId(io, allocator, "set");
+        const add_result = try adapter.addSet(allocator, .{
+            .metadata = .{ .command_id = try tracking.Id.parse(try generateId(io, allocator, "command")), .occurred_at = try tracking.Timestamp.parse(occurred_at) },
+            .scope = scope,
+            .workout_id = workout.id,
+            .expected_revision = workout.revision,
+            .membership_id = membership.id,
+            .set_id = try tracking.Id.parse(generated),
+            .kind = try tracking.Id.parse("working"),
+            .anchor = .end,
+        });
+        workout = switch (add_result) {
+            .accepted => |accepted| accepted.workout,
+            .rejected => |rejected| return errors.fromTrackingIssue(rejected.issues[0]),
+        };
+        set_id = generated;
+    }
+    const selected_set = set_id orelse inferSet(membership.sets, action) orelse
+        return errors.setNotFound();
+    const command_id = options.command_id orelse try generateId(io, allocator, "command");
+    const metadata: tracking.CommandMetadata = .{
+        .command_id = try tracking.Id.parse(command_id),
+        .occurred_at = try tracking.Timestamp.parse(occurred_at),
+    };
+    const result = switch (action) {
+        .log => try adapter.logSet(allocator, .{
+            .metadata = metadata,
+            .scope = scope,
+            .workout_id = workout.id,
+            .expected_revision = workout.revision,
+            .membership_id = membership.id,
+            .set_id = try tracking.Id.parse(selected_set),
+            .actual_metrics = options.metrics[0..options.metric_count],
+            .completed_at = metadata.occurred_at,
+        }),
+        .skip => try adapter.skipSet(allocator, .{
+            .metadata = metadata,
+            .scope = scope,
+            .workout_id = workout.id,
+            .expected_revision = workout.revision,
+            .membership_id = membership.id,
+            .set_id = try tracking.Id.parse(selected_set),
+            .skipped_at = metadata.occurred_at,
+        }),
+        .reopen => try adapter.reopenSet(allocator, .{
+            .metadata = metadata,
+            .scope = scope,
+            .workout_id = workout.id,
+            .expected_revision = workout.revision,
+            .membership_id = membership.id,
+            .set_id = try tracking.Id.parse(selected_set),
+        }),
+    };
+    switch (result) {
+        .accepted => |accepted| {
+            try writeWorkoutState(allocator, stdout, settings, switch (action) {
+                .log => "caudex.set.logged",
+                .skip => "caudex.set.skipped",
+                .reopen => "caudex.set.reopened",
+            }, accepted.command_id.bytes, @tagName(accepted.disposition), accepted.workout);
+            return null;
+        },
+        .rejected => |rejected| return errors.fromTrackingIssue(rejected.issues[0]),
+    }
+}
+
+fn hasSet(sets: []const tracking.TrackedSet, id: []const u8) bool {
+    for (sets) |set| if (std.mem.eql(u8, set.id.bytes, id)) return true;
+    return false;
+}
+
+fn resolveMembership(workout: tracking.Workout, reference: ?[]const u8) ?tracking.ExerciseMembership {
+    if (reference) |value| {
+        var match: ?tracking.ExerciseMembership = null;
+        for (workout.exercises) |membership| {
+            if (std.mem.eql(u8, membership.id.bytes, value)) return membership;
+            if (std.mem.eql(u8, membership.exercise_id.bytes, value)) {
+                if (match != null) return null;
+                match = membership;
+            }
+        }
+        return match;
+    }
+    return if (workout.exercises.len == 1) workout.exercises[0] else null;
+}
+
+fn inferSet(sets: []const tracking.TrackedSet, action: SetAction) ?[]const u8 {
+    var found: ?[]const u8 = null;
+    for (sets) |set| {
+        const eligible = switch (action) {
+            .log, .skip => set.status == .open,
+            .reopen => set.status != .open,
+        };
+        if (eligible) {
+            if (found != null) return null;
+            found = set.id.bytes;
+        }
+    }
+    return found;
+}
+
+fn parseSetOptions(args: []const []const u8, action: SetAction) !SetOptions {
+    var options = SetOptions{};
+    var index: usize = 0;
+    while (index < args.len) : (index += 1) {
+        const token = args[index];
+        if (std.mem.startsWith(u8, token, "--")) {
+            if (std.mem.eql(u8, token, "--workout") or std.mem.eql(u8, token, "--exercise") or
+                std.mem.eql(u8, token, "--set") or std.mem.eql(u8, token, "--command-id") or
+                std.mem.eql(u8, token, "--occurred-at"))
+            {
+                const target: *?[]const u8 = if (std.mem.eql(u8, token, "--workout")) &options.workout_id else if (std.mem.eql(u8, token, "--exercise")) &options.exercise_id else if (std.mem.eql(u8, token, "--set")) &options.set_id else if (std.mem.eql(u8, token, "--command-id")) &options.command_id else &options.occurred_at;
+                index += 1;
+                if (index >= args.len or target.* != null or args[index].len == 0) return error.InvalidArguments;
+                target.* = args[index];
+                continue;
+            }
+            if (action != .log) return error.InvalidArguments;
+            const code: []const u8 = if (std.mem.eql(u8, token, "--reps")) tracking.metric_codes.repetitions else if (std.mem.eql(u8, token, "--rir")) tracking.metric_codes.rir else if (std.mem.eql(u8, token, "--rpe")) tracking.metric_codes.rpe else if (std.mem.eql(u8, token, "--load")) tracking.metric_codes.load else if (std.mem.eql(u8, token, "--duration")) tracking.metric_codes.duration else return error.InvalidArguments;
+            index += 1;
+            if (index >= args.len) return error.InvalidArguments;
+            const value = try tracking.Decimal.parse(args[index]);
+            const unit = if (std.mem.eql(u8, code, tracking.metric_codes.repetitions)) .count else if (std.mem.eql(u8, code, tracking.metric_codes.rir)) .rir else if (std.mem.eql(u8, code, tracking.metric_codes.rpe)) .rpe else blk: {
+                index += 1;
+                if (index >= args.len) return error.InvalidArguments;
+                break :blk try caudex.primitives.Unit.parse(args[index]);
+            };
+            try appendMetric(&options, code, value, unit);
+        } else {
+            if (action != .log) return error.InvalidArguments;
+            const parsed = try parseMetricShorthand(token);
+            try appendMetric(&options, parsed.code, parsed.value, parsed.unit);
+        }
+    }
+    if (action == .log and options.metric_count == 0) return error.InvalidArguments;
+    if (action == .reopen and options.set_id == null) return error.InvalidArguments;
+    return options;
+}
+
+const ParsedMetric = struct { code: []const u8, value: tracking.Decimal, unit: caudex.primitives.Unit };
+
+fn parseMetricShorthand(token: []const u8) !ParsedMetric {
+    var text = token;
+    if (text.len > 0 and text[0] == '@') text = text[1..];
+    const suffixes = [_]struct { suffix: []const u8, code: []const u8, unit: caudex.primitives.Unit }{
+        .{ .suffix = "rir", .code = tracking.metric_codes.rir, .unit = .rir },
+        .{ .suffix = "rpe", .code = tracking.metric_codes.rpe, .unit = .rpe },
+        .{ .suffix = "kg", .code = tracking.metric_codes.load, .unit = .kg },
+        .{ .suffix = "lb", .code = tracking.metric_codes.load, .unit = .lb },
+        .{ .suffix = "min", .code = tracking.metric_codes.duration, .unit = .min },
+        .{ .suffix = "s", .code = tracking.metric_codes.duration, .unit = .s },
+        .{ .suffix = "r", .code = tracking.metric_codes.repetitions, .unit = .count },
+    };
+    for (suffixes) |entry| if (std.mem.endsWith(u8, text, entry.suffix)) {
+        const number = text[0 .. text.len - entry.suffix.len];
+        return .{ .code = entry.code, .value = try tracking.Decimal.parse(number), .unit = entry.unit };
+    };
+    return error.InvalidArguments;
+}
+
+fn appendMetric(options: *SetOptions, code: []const u8, value: tracking.Decimal, unit: caudex.primitives.Unit) !void {
+    for (options.metrics[0..options.metric_count]) |metric|
+        if (std.mem.eql(u8, metric.code.bytes, code)) return error.InvalidArguments;
+    if (options.metric_count == options.metrics.len) return error.InvalidArguments;
+    options.metrics[options.metric_count] = .{ .code = try tracking.Id.parse(code), .value = .{ .value = value, .unit = unit } };
+    options.metric_count += 1;
 }
 
 fn startWorkout(
@@ -755,6 +979,29 @@ test "memory database resolves without directory creation" {
     defer adapter.close();
     const metadata = try adapter.metadata();
     try std.testing.expectEqual(sqlite.DatabaseKind.memory, metadata.database_kind);
+}
+
+test "set metric parser accepts exact long and shorthand forms" {
+    const long = try parseSetOptions(&.{
+        "--reps",     "8",  "--load", "70.5", "kg", "--rir", "2",
+        "--duration", "45", "s",
+    }, .log);
+    try std.testing.expectEqual(@as(usize, 4), long.metric_count);
+    try std.testing.expectEqual(@as(i64, 705), long.metrics[1].value.value.mantissa);
+    try std.testing.expectEqual(@as(u8, 1), long.metrics[1].value.value.scale);
+    try std.testing.expectEqual(caudex.primitives.Unit.kg, long.metrics[1].value.unit);
+
+    const shorthand = try parseSetOptions(&.{ "70kg", "8r", "@2rir" }, .log);
+    try std.testing.expectEqual(@as(usize, 3), shorthand.metric_count);
+    try std.testing.expectEqualStrings("load", shorthand.metrics[0].code.bytes);
+    try std.testing.expectEqualStrings("repetitions", shorthand.metrics[1].code.bytes);
+}
+
+test "set metric parser rejects invalid ambiguous and conflicting input" {
+    try std.testing.expectError(error.InvalidArguments, parseSetOptions(&.{"70"}, .log));
+    try std.testing.expectError(error.InvalidArguments, parseSetOptions(&.{ "8r", "--reps", "8" }, .log));
+    try std.testing.expectError(error.UnknownUnit, parseSetOptions(&.{ "--load", "70", "stone" }, .log));
+    try std.testing.expectError(error.InvalidArguments, parseSetOptions(&.{ "--reps", "8" }, .skip));
 }
 
 test "client source imports only approved public packages" {
