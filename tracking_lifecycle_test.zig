@@ -120,6 +120,45 @@ test "short completion and cancellation are distinct terminal states" {
     try expectRejectedCode(rejected, tracking.issue_codes.workout_not_active);
 }
 
+test "catalog management validates revisions and reversible availability" {
+    const catalog_scope: tracking.Id = .{ .bytes = "catalog-scope" };
+    const exercise = tracking.canonical.Exercise{ .id = "bench", .name = "Bench Press", .aliases = &.{"press"} };
+    var issues: [1]tracking.Issue = undefined;
+    const created = try tracking.applyCatalogCommand(.{}, .{ .create = .{
+        .metadata = .{ .command_id = .{ .bytes = "create-bench" }, .occurred_at = command.started_at },
+        .host_scope_key = catalog_scope,
+        .exercise = exercise,
+    } }, &issues);
+    try std.testing.expectEqual(@as(u64, 1), created.accepted.exercise.revision);
+    var duplicate = exercise;
+    duplicate.aliases = &.{ "press", "press" };
+    try expectCatalogRejected(try tracking.applyCatalogCommand(.{}, .{ .create = .{
+        .metadata = .{ .command_id = .{ .bytes = "invalid" }, .occurred_at = command.started_at },
+        .host_scope_key = catalog_scope,
+        .exercise = duplicate,
+    } }, &issues), tracking.issue_codes.catalog_invalid_exercise);
+    const archived = try tracking.applyCatalogCommand(.{ .exercises = &.{created.accepted.exercise} }, .{ .archive = .{
+        .metadata = .{ .command_id = .{ .bytes = "archive" }, .occurred_at = command.started_at },
+        .host_scope_key = catalog_scope,
+        .exercise_id = .{ .bytes = "bench" },
+        .expected_revision = 1,
+    } }, &issues);
+    try std.testing.expectEqual(tracking.ExerciseAvailability.archived, archived.accepted.exercise.availability);
+    try expectCatalogRejected(try tracking.applyCatalogCommand(.{ .exercises = &.{archived.accepted.exercise} }, .{ .restore = .{
+        .metadata = .{ .command_id = .{ .bytes = "stale" }, .occurred_at = command.started_at },
+        .host_scope_key = catalog_scope,
+        .exercise_id = .{ .bytes = "bench" },
+        .expected_revision = 1,
+    } }, &issues), tracking.issue_codes.catalog_revision_conflict);
+    const restored = try tracking.applyCatalogCommand(.{ .exercises = &.{archived.accepted.exercise} }, .{ .restore = .{
+        .metadata = .{ .command_id = .{ .bytes = "restore" }, .occurred_at = command.started_at },
+        .host_scope_key = catalog_scope,
+        .exercise_id = .{ .bytes = "bench" },
+        .expected_revision = 2,
+    } }, &issues);
+    try std.testing.expectEqual(tracking.ExerciseAvailability.active, restored.accepted.exercise.availability);
+}
+
 test "read finds exact scope and reports structured not found" {
     var issues: [1]tracking.Issue = undefined;
     const workout = (try tracking.startWorkout(.{}, command, &issues)).accepted.workout;
@@ -496,5 +535,12 @@ fn expectRejectedCode(result: tracking.CommandResult, code: []const u8) !void {
             try std.testing.expectEqual(@as(usize, 1), rejected.issues.len);
             try std.testing.expectEqualStrings(code, rejected.issues[0].code);
         },
+    }
+}
+
+fn expectCatalogRejected(result: tracking.CatalogCommandResult, code: []const u8) !void {
+    switch (result) {
+        .accepted => return error.UnexpectedAcceptance,
+        .rejected => |rejected| try std.testing.expectEqualStrings(code, rejected.issues[0].code),
     }
 }

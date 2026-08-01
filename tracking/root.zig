@@ -7,13 +7,14 @@
 const std = @import("std");
 const caudex = @import("caudex");
 
-pub const contract_version: u32 = 4;
+pub const contract_version: u32 = 5;
 
 pub const Id = caudex.primitives.Id;
 pub const Timestamp = caudex.primitives.Timestamp;
 pub const Metric = caudex.training.Metric;
 pub const Measurement = caudex.primitives.Measurement;
 pub const Decimal = caudex.primitives.Decimal;
+pub const canonical = caudex.canonical;
 
 pub const metric_codes = struct {
     pub const repetitions = "repetitions";
@@ -254,6 +255,86 @@ pub const Issue = struct {
     related_ids: []const Id = &.{},
 };
 
+pub const ManagedExercise = struct {
+    host_scope_key: Id,
+    exercise: caudex.canonical.Exercise,
+    revision: u64,
+    availability: ExerciseAvailability,
+    updated_at: Timestamp,
+};
+
+pub const CatalogSnapshot = struct {
+    exercises: []const ManagedExercise = &.{},
+};
+
+pub const CreateExerciseCommand = struct {
+    metadata: CommandMetadata,
+    host_scope_key: Id,
+    exercise: caudex.canonical.Exercise,
+};
+
+pub const EditExerciseCommand = struct {
+    metadata: CommandMetadata,
+    host_scope_key: Id,
+    exercise: caudex.canonical.Exercise,
+    expected_revision: u64,
+};
+
+pub const ChangeExerciseAvailabilityCommand = struct {
+    metadata: CommandMetadata,
+    host_scope_key: Id,
+    exercise_id: Id,
+    expected_revision: u64,
+};
+
+pub const CatalogCommand = union(enum) {
+    create: CreateExerciseCommand,
+    edit: EditExerciseCommand,
+    archive: ChangeExerciseAvailabilityCommand,
+    restore: ChangeExerciseAvailabilityCommand,
+};
+
+pub const AcceptedCatalogCommand = struct {
+    command_id: Id,
+    disposition: CommandDisposition,
+    exercise: ManagedExercise,
+};
+
+pub const CatalogCommandResult = union(enum) {
+    accepted: AcceptedCatalogCommand,
+    rejected: RejectedCommand,
+};
+
+pub const ReadExerciseQuery = struct {
+    host_scope_key: Id,
+    exercise_id: Id,
+};
+
+pub const ReadExerciseResult = union(enum) {
+    found: ManagedExercise,
+    not_found: Issue,
+};
+
+pub const SearchExercisesQuery = struct {
+    host_scope_key: Id,
+    text: []const u8,
+    max_results: u16,
+    include_archived: bool = false,
+};
+
+pub const ListExercisesQuery = struct {
+    host_scope_key: Id,
+    max_results: u16,
+    include_archived: bool = false,
+};
+
+pub const SearchExercisesResult = union(enum) {
+    found: []const ManagedExercise,
+    rejected: Issue,
+};
+
+pub const ListExercisesResult = SearchExercisesResult;
+
 pub const issue_codes = struct {
     pub const invalid_identifier = "tracking.invalid_identifier";
     pub const invalid_timestamp = "tracking.invalid_timestamp";
@@ -274,6 +355,12 @@ pub const issue_codes = struct {
     pub const invalid_set_anchor = "tracking.invalid_set_anchor";
     pub const invalid_set_transition = "tracking.invalid_set_transition";
     pub const invalid_metric = "tracking.invalid_metric";
+    pub const catalog_exercise_exists = "catalog.exercise_exists";
+    pub const catalog_exercise_not_found = "catalog.exercise_not_found";
+    pub const catalog_revision_conflict = "catalog.revision_conflict";
+    pub const catalog_invalid_exercise = "catalog.invalid_exercise";
+    pub const catalog_invalid_transition = "catalog.invalid_transition";
+    pub const catalog_invalid_query = "catalog.invalid_query";
 };
 
 pub const CommandDisposition = enum {
@@ -527,6 +614,125 @@ fn workoutIsShort(workout: Workout) bool {
         for (exercise.sets) |set| if (set.status == .open) return true;
     }
     return false;
+}
+
+/// Applies one exercise-catalog transition without allocation or persistence.
+pub fn applyCatalogCommand(
+    snapshot: CatalogSnapshot,
+    command: CatalogCommand,
+    issue_storage: []Issue,
+) DecisionError!CatalogCommandResult {
+    const metadata, const host_scope_key = switch (command) {
+        inline else => |value| .{ value.metadata, value.host_scope_key },
+    };
+    if (!validId(metadata.command_id) or !validId(host_scope_key))
+        return catalogReject(metadata.command_id, issue_storage, invalidIdIssue());
+    if (!validTimestamp(metadata.occurred_at))
+        return catalogReject(metadata.command_id, issue_storage, .{
+            .code = issue_codes.invalid_timestamp,
+            .category = .validation,
+            .severity = .@"error",
+            .message = "A catalog command timestamp is invalid.",
+        });
+    switch (command) {
+        .create => |create| {
+            if (!validCanonicalExercise(create.exercise))
+                return catalogReject(metadata.command_id, issue_storage, invalidCatalogExerciseIssue());
+            if (findManagedExercise(snapshot, host_scope_key, create.exercise.id) != null)
+                return catalogReject(metadata.command_id, issue_storage, .{
+                    .code = issue_codes.catalog_exercise_exists,
+                    .category = .conflict,
+                    .severity = .@"error",
+                    .message = "The exercise ID already exists in this scope.",
+                });
+            return .{ .accepted = .{
+                .command_id = metadata.command_id,
+                .disposition = .applied,
+                .exercise = .{ .host_scope_key = host_scope_key, .exercise = create.exercise, .revision = 1, .availability = .active, .updated_at = metadata.occurred_at },
+            } };
+        },
+        .edit => |edit| return changeManagedExercise(snapshot, metadata, host_scope_key, edit.exercise.id, edit.expected_revision, .edit, edit.exercise, issue_storage),
+        .archive => |change| return changeManagedExercise(snapshot, metadata, host_scope_key, change.exercise_id.bytes, change.expected_revision, .archive, null, issue_storage),
+        .restore => |change| return changeManagedExercise(snapshot, metadata, host_scope_key, change.exercise_id.bytes, change.expected_revision, .restore, null, issue_storage),
+    }
+}
+
+const CatalogChange = enum { edit, archive, restore };
+
+fn changeManagedExercise(snapshot: CatalogSnapshot, metadata: CommandMetadata, scope: Id, exercise_id: []const u8, expected_revision: u64, change: CatalogChange, replacement: ?caudex.canonical.Exercise, issues: []Issue) DecisionError!CatalogCommandResult {
+    if (Id.parse(exercise_id) catch null == null or (replacement != null and !validCanonicalExercise(replacement.?)))
+        return catalogReject(metadata.command_id, issues, invalidCatalogExerciseIssue());
+    const current = findManagedExercise(snapshot, scope, exercise_id) orelse
+        return catalogReject(metadata.command_id, issues, .{ .code = issue_codes.catalog_exercise_not_found, .category = .not_found, .severity = .@"error", .message = "The exercise does not exist in this scope." });
+    if (current.revision != expected_revision)
+        return catalogReject(metadata.command_id, issues, .{ .code = issue_codes.catalog_revision_conflict, .category = .conflict, .severity = .@"error", .message = "The expected exercise revision does not match." });
+    const availability: ExerciseAvailability = switch (change) {
+        .edit => current.availability,
+        .archive => if (current.availability == .active) .archived else return catalogReject(metadata.command_id, issues, catalogTransitionIssue()),
+        .restore => if (current.availability == .archived) .active else return catalogReject(metadata.command_id, issues, catalogTransitionIssue()),
+    };
+    return .{ .accepted = .{
+        .command_id = metadata.command_id,
+        .disposition = .applied,
+        .exercise = .{
+            .host_scope_key = current.host_scope_key,
+            .exercise = replacement orelse current.exercise,
+            .revision = std.math.add(u64, current.revision, 1) catch return error.RevisionOverflow,
+            .availability = availability,
+            .updated_at = metadata.occurred_at,
+        },
+    } };
+}
+
+pub fn readManagedExercise(snapshot: CatalogSnapshot, query: ReadExerciseQuery) ReadExerciseResult {
+    if (findManagedExercise(snapshot, query.host_scope_key, query.exercise_id.bytes)) |exercise| return .{ .found = exercise };
+    return .{ .not_found = .{ .code = issue_codes.catalog_exercise_not_found, .category = .not_found, .severity = .@"error", .message = "The exercise does not exist in this scope." } };
+}
+
+fn findManagedExercise(snapshot: CatalogSnapshot, scope: Id, exercise_id: []const u8) ?ManagedExercise {
+    for (snapshot.exercises) |exercise| if (exercise.host_scope_key.eql(scope) and std.mem.eql(u8, exercise.exercise.id, exercise_id)) return exercise;
+    return null;
+}
+
+fn validCanonicalExercise(exercise: caudex.canonical.Exercise) bool {
+    if (Id.parse(exercise.id) catch null == null) return false;
+    if (exercise.name) |name| if (!validCatalogText(name)) return false;
+    for (exercise.equipmentIds, 0..) |value, index| if (!validUniqueId(exercise.equipmentIds, value, index)) return false;
+    for (exercise.movementTags, 0..) |value, index| if (!validUniqueId(exercise.movementTags, value, index)) return false;
+    for (exercise.aliases, 0..) |value, index| {
+        if (!validCatalogText(value)) return false;
+        for (exercise.aliases[0..index]) |prior| if (std.mem.eql(u8, prior, value)) return false;
+    }
+    for (exercise.muscleContributions, 0..) |contribution, index| {
+        if (Id.parse(contribution.muscleId) catch null == null) return false;
+        for (exercise.muscleContributions[0..index]) |prior| if (std.mem.eql(u8, prior.muscleId, contribution.muscleId)) return false;
+        if (contribution.weight) |weight| _ = Decimal.parse(weight) catch return false;
+    }
+    return true;
+}
+
+fn validUniqueId(values: []const []const u8, value: []const u8, index: usize) bool {
+    if (Id.parse(value) catch null == null) return false;
+    for (values[0..index]) |prior| if (std.mem.eql(u8, prior, value)) return false;
+    return true;
+}
+
+fn validCatalogText(value: []const u8) bool {
+    return value.len > 0 and value.len <= 200 and std.unicode.utf8ValidateSlice(value);
+}
+
+fn catalogReject(command_id: Id, storage: []Issue, issue: Issue) DecisionError!CatalogCommandResult {
+    if (storage.len == 0) return error.IssueBufferTooSmall;
+    storage[0] = issue;
+    return .{ .rejected = .{ .command_id = command_id, .issues = storage[0..1] } };
+}
+
+fn invalidCatalogExerciseIssue() Issue {
+    return .{ .code = issue_codes.catalog_invalid_exercise, .category = .validation, .severity = .@"error", .message = "The exercise contains invalid or duplicate engine fields." };
+}
+
+fn catalogTransitionIssue() Issue {
+    return .{ .code = issue_codes.catalog_invalid_transition, .category = .conflict, .severity = .@"error", .message = "The exercise is already in the requested availability state." };
 }
 
 /// Proposes adding one catalog exercise at a semantic anchor.

@@ -159,7 +159,7 @@ test "newer schema is rejected distinctly" {
         database,
         "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY)",
     );
-    try execRaw(database, "INSERT INTO schema_migrations (version) VALUES (6)");
+    try execRaw(database, "INSERT INTO schema_migrations (version) VALUES (7)");
 
     try std.testing.expectError(
         error.UnsupportedSchema,
@@ -187,12 +187,24 @@ test "schema version one migrates forward to current metadata" {
             database,
             "INSERT INTO schema_migrations (version) VALUES (1)",
         );
+        try execRaw(
+            database,
+            "INSERT INTO catalog (host_scope_key, exercise_id, payload) VALUES ('legacy', 'bench', '{\"id\":\"bench\",\"name\":\"Bench Press\",\"aliases\":[\"press\"]}')",
+        );
     }
 
     const migrated = try sqlite.open(database_path, .{});
     defer migrated.close();
     const metadata = try migrated.metadata();
     try std.testing.expectEqual(sqlite.schema_version, metadata.schema_version);
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const search = try migrated.searchExercises(arena.allocator(), .{
+        .host_scope_key = .{ .bytes = "legacy" },
+        .text = "pre",
+        .max_results = 10,
+    });
+    try std.testing.expectEqual(@as(usize, 1), search.found.len);
 }
 
 test "corrupt database is rejected distinctly" {

@@ -411,6 +411,68 @@ test "workout finish and cancel persist atomically and replay idempotently" {
     try std.testing.expect(active == .none);
 }
 
+test "managed catalog is revisioned searchable idempotent and snapshot compatible" {
+    const database = try sqlite.openInMemory(.{});
+    defer database.close();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const catalog_scope: tracking.Id = .{ .bytes = "managed-catalog" };
+    const create: tracking.CreateExerciseCommand = .{
+        .metadata = metadata("create-bench"),
+        .host_scope_key = catalog_scope,
+        .exercise = .{ .id = "bench", .name = "Bench Press", .aliases = &.{"press"}, .equipmentIds = &.{"barbell"} },
+    };
+    const created = try database.createExercise(allocator, create);
+    try std.testing.expectEqual(@as(u64, 1), created.accepted.exercise.revision);
+    const replayed = try database.createExercise(allocator, create);
+    try std.testing.expectEqual(tracking.CommandDisposition.replayed, replayed.accepted.disposition);
+    var conflict = create;
+    conflict.exercise.name = "Changed";
+    try expectCatalogRejected(try database.createExercise(allocator, conflict), tracking.issue_codes.command_payload_conflict);
+    const search = try database.searchExercises(allocator, .{ .host_scope_key = catalog_scope, .text = "pre", .max_results = 10 });
+    try std.testing.expectEqual(@as(usize, 1), search.found.len);
+    const listed = try database.listExercises(allocator, .{ .host_scope_key = catalog_scope, .max_results = 10 });
+    try std.testing.expectEqual(@as(usize, 1), listed.found.len);
+    var edited_exercise = create.exercise;
+    edited_exercise.name = "Competition Bench Press";
+    try expectCatalogRejected(try database.editExercise(allocator, .{
+        .metadata = metadata("stale-edit"),
+        .host_scope_key = catalog_scope,
+        .exercise = edited_exercise,
+        .expected_revision = 0,
+    }), tracking.issue_codes.catalog_revision_conflict);
+    const edited = try database.editExercise(allocator, .{
+        .metadata = metadata("edit-bench"),
+        .host_scope_key = catalog_scope,
+        .exercise = edited_exercise,
+        .expected_revision = 1,
+    });
+    try std.testing.expectEqual(@as(u64, 2), edited.accepted.exercise.revision);
+    const archived = try database.archiveExercise(allocator, .{
+        .metadata = metadata("archive-bench"),
+        .host_scope_key = catalog_scope,
+        .exercise_id = .{ .bytes = "bench" },
+        .expected_revision = 2,
+    });
+    try std.testing.expectEqual(tracking.ExerciseAvailability.archived, archived.accepted.exercise.availability);
+    const active_snapshot = try database.catalogSource().load(allocator, .{ .host_scope_key = catalog_scope.bytes, .as_of = "2026-07-26T12:10:00Z" });
+    try std.testing.expectEqual(@as(usize, 0), active_snapshot.len);
+    const hidden = try database.searchExercises(allocator, .{ .host_scope_key = catalog_scope, .text = "bench", .max_results = 10 });
+    try std.testing.expectEqual(@as(usize, 0), hidden.found.len);
+    const archived_hidden = try database.listExercises(allocator, .{ .host_scope_key = catalog_scope, .max_results = 10 });
+    try std.testing.expectEqual(@as(usize, 0), archived_hidden.found.len);
+    const including_archived = try database.searchExercises(allocator, .{ .host_scope_key = catalog_scope, .text = "bench", .max_results = 10, .include_archived = true });
+    try std.testing.expectEqual(@as(usize, 1), including_archived.found.len);
+    const restored = try database.restoreExercise(allocator, .{
+        .metadata = metadata("restore-bench"),
+        .host_scope_key = catalog_scope,
+        .exercise_id = .{ .bytes = "bench" },
+        .expected_revision = 3,
+    });
+    try std.testing.expectEqual(tracking.ExerciseAvailability.active, restored.accepted.exercise.availability);
+}
+
 fn metadata(command_id: []const u8) tracking.CommandMetadata {
     return .{
         .command_id = .{ .bytes = command_id },
@@ -446,6 +508,13 @@ fn expectRejected(result: tracking.CommandResult, code: []const u8) !void {
             try std.testing.expectEqual(@as(usize, 1), rejected.issues.len);
             try std.testing.expectEqualStrings(code, rejected.issues[0].code);
         },
+    }
+}
+
+fn expectCatalogRejected(result: tracking.CatalogCommandResult, code: []const u8) !void {
+    switch (result) {
+        .accepted => return error.UnexpectedAcceptance,
+        .rejected => |rejected| try std.testing.expectEqualStrings(code, rejected.issues[0].code),
     }
 }
 

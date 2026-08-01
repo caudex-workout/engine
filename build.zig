@@ -502,8 +502,8 @@ pub fn build(b: *std.Build) void {
         \\Database: :memory:
         \\Kind: memory
         \\Adapter version: 0.1.0
-        \\Schema version: 5
-        \\Supported schema: 1-5
+        \\Schema version: 6
+        \\Supported schema: 1-6
         \\Compatibility: current
         \\
     );
@@ -520,8 +520,8 @@ pub fn build(b: *std.Build) void {
     cli_database_json.expectStdOutEqual(
         "{\"schemaVersion\":1,\"kind\":\"caudex.database.info\",\"data\":{" ++
             "\"databasePath\":\":memory:\",\"databaseKind\":\"memory\"," ++
-            "\"adapterVersion\":\"0.1.0\",\"databaseSchemaVersion\":5," ++
-            "\"minimumSchemaVersion\":1,\"latestSchemaVersion\":5," ++
+            "\"adapterVersion\":\"0.1.0\",\"databaseSchemaVersion\":6," ++
+            "\"minimumSchemaVersion\":1,\"latestSchemaVersion\":6," ++
             "\"compatibility\":\"current\"}}\n",
     );
 
@@ -566,8 +566,8 @@ pub fn build(b: *std.Build) void {
         "{\"schemaVersion\":1,\"kind\":\"caudex.database.info\",\"data\":{" ++
             "\"databasePath\":\".zig-cache/cwe112-broken-pipe.sqlite\"," ++
             "\"databaseKind\":\"file\",\"adapterVersion\":\"0.1.0\"," ++
-            "\"databaseSchemaVersion\":5,\"minimumSchemaVersion\":1," ++
-            "\"latestSchemaVersion\":5,\"compatibility\":\"current\"}}\n",
+            "\"databaseSchemaVersion\":6,\"minimumSchemaVersion\":1," ++
+            "\"latestSchemaVersion\":6,\"compatibility\":\"current\"}}\n",
     );
 
     const cli_workout_start_test = b.addSystemCommand(&.{

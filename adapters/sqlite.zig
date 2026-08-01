@@ -12,7 +12,7 @@ const c = @cImport({
 });
 
 pub const adapter_version = "0.1.0";
-pub const schema_version: u32 = 5;
+pub const schema_version: u32 = 6;
 pub const minimum_schema_version: u32 = 1;
 
 pub const Options = struct {
@@ -133,6 +133,34 @@ pub const Adapter = opaque {
         return listTrackedActiveWorkouts(self, allocator, query);
     }
 
+    pub fn createExercise(self: *Adapter, allocator: std.mem.Allocator, command: tracking.CreateExerciseCommand) TrackingError!tracking.CatalogCommandResult {
+        return changeManagedCatalog(self, allocator, .{ .create = command });
+    }
+
+    pub fn editExercise(self: *Adapter, allocator: std.mem.Allocator, command: tracking.EditExerciseCommand) TrackingError!tracking.CatalogCommandResult {
+        return changeManagedCatalog(self, allocator, .{ .edit = command });
+    }
+
+    pub fn archiveExercise(self: *Adapter, allocator: std.mem.Allocator, command: tracking.ChangeExerciseAvailabilityCommand) TrackingError!tracking.CatalogCommandResult {
+        return changeManagedCatalog(self, allocator, .{ .archive = command });
+    }
+
+    pub fn restoreExercise(self: *Adapter, allocator: std.mem.Allocator, command: tracking.ChangeExerciseAvailabilityCommand) TrackingError!tracking.CatalogCommandResult {
+        return changeManagedCatalog(self, allocator, .{ .restore = command });
+    }
+
+    pub fn readManagedExercise(self: *Adapter, allocator: std.mem.Allocator, query: tracking.ReadExerciseQuery) TrackingError!tracking.ReadExerciseResult {
+        return readManagedCatalogExercise(self, allocator, query);
+    }
+
+    pub fn searchExercises(self: *Adapter, allocator: std.mem.Allocator, query: tracking.SearchExercisesQuery) TrackingError!tracking.SearchExercisesResult {
+        return searchManagedCatalog(self, allocator, query);
+    }
+
+    pub fn listExercises(self: *Adapter, allocator: std.mem.Allocator, query: tracking.ListExercisesQuery) TrackingError!tracking.ListExercisesResult {
+        return listManagedCatalog(self, allocator, query);
+    }
+
     pub fn addExercise(
         self: *Adapter,
         allocator: std.mem.Allocator,
@@ -189,18 +217,20 @@ pub const Adapter = opaque {
         errdefer self.execute("ROLLBACK") catch {};
 
         var archive_statement = try self.prepare(
-            "UPDATE catalog SET archived = 1 WHERE host_scope_key = ?1",
+            "UPDATE catalog SET archived = 1, revision = revision + 1, updated_at = ?2 WHERE host_scope_key = ?1 AND archived = 0",
         );
         defer archive_statement.finalize();
         try archive_statement.bindText(1, scope.host_scope_key);
+        try archive_statement.bindText(2, scope.as_of);
         try archive_statement.done();
 
         var insert_statement = try self.prepare(
-            \\INSERT INTO catalog (host_scope_key, exercise_id, payload, archived)
-            \\VALUES (?1, ?2, ?3, 0)
+            \\INSERT INTO catalog (host_scope_key, exercise_id, payload, archived, revision, updated_at)
+            \\VALUES (?1, ?2, ?3, 0, 1, ?4)
             \\ON CONFLICT (host_scope_key, exercise_id) DO UPDATE SET
             \\  payload = excluded.payload,
-            \\  archived = 0
+            \\  archived = 0, revision = catalog.revision + 1,
+            \\  updated_at = excluded.updated_at
         );
         defer insert_statement.finalize();
         for (exercises) |exercise| {
@@ -209,10 +239,177 @@ pub const Adapter = opaque {
             try insert_statement.bindText(1, scope.host_scope_key);
             try insert_statement.bindText(2, exercise.id);
             try insert_statement.bindText(3, payload);
+            try insert_statement.bindText(4, scope.as_of);
             try insert_statement.done();
             try insert_statement.reset();
+            try self.replaceCatalogSearchTerms(scope.host_scope_key, exercise);
         }
         try self.execute("COMMIT");
+    }
+
+    fn changeManagedCatalog(self: *Adapter, allocator: std.mem.Allocator, command: tracking.CatalogCommand) TrackingError!tracking.CatalogCommandResult {
+        const payload = try encodeAlloc(allocator, command);
+        defer allocator.free(payload);
+        const command_metadata, const scope, const exercise_id = switch (command) {
+            .create => |value| .{ value.metadata, value.host_scope_key, value.exercise.id },
+            .edit => |value| .{ value.metadata, value.host_scope_key, value.exercise.id },
+            .archive, .restore => |value| .{ value.metadata, value.host_scope_key, value.exercise_id.bytes },
+        };
+        try self.execute("BEGIN IMMEDIATE");
+        errdefer self.execute("ROLLBACK") catch {};
+        if (try self.loadCatalogReceipt(allocator, scope, command_metadata.command_id)) |prior| {
+            defer allocator.free(prior);
+            if (!std.mem.eql(u8, prior, payload)) {
+                const rejected = try ownCatalogRejected(allocator, command_metadata.command_id, .{ .code = tracking.issue_codes.command_payload_conflict, .category = .conflict, .severity = .@"error", .message = "The command ID was already used with another payload." });
+                try self.execute("ROLLBACK");
+                return rejected;
+            }
+            const current = (try self.loadManagedExercise(allocator, scope, exercise_id)) orelse return error.InvalidData;
+            const accepted = tracking.AcceptedCatalogCommand{ .command_id = try ownId(allocator, command_metadata.command_id), .disposition = .replayed, .exercise = current };
+            try self.execute("COMMIT");
+            return .{ .accepted = accepted };
+        }
+        const current = try self.loadManagedExercise(allocator, scope, exercise_id);
+        var issues: [1]tracking.Issue = undefined;
+        const decided = tracking.applyCatalogCommand(.{ .exercises = if (current) |value| &.{value} else &.{} }, command, &issues) catch return error.InvalidData;
+        const accepted = switch (decided) {
+            .accepted => |value| value,
+            .rejected => |rejected| {
+                const owned = try ownCatalogRejected(allocator, rejected.command_id, rejected.issues[0]);
+                try self.execute("ROLLBACK");
+                return owned;
+            },
+        };
+        try self.persistManagedExercise(allocator, accepted.exercise);
+        try self.insertCatalogReceipt(scope, command_metadata.command_id, exercise_id, payload);
+        try self.execute("COMMIT");
+        return .{ .accepted = try ownAcceptedCatalog(allocator, accepted) };
+    }
+
+    fn loadManagedExercise(self: *Adapter, allocator: std.mem.Allocator, scope: tracking.Id, exercise_id: []const u8) TrackingError!?tracking.ManagedExercise {
+        var statement = try self.prepare(
+            \\SELECT payload, revision, archived, updated_at FROM catalog
+            \\WHERE host_scope_key = ?1 AND exercise_id = ?2
+        );
+        defer statement.finalize();
+        try statement.bindText(1, scope.bytes);
+        try statement.bindText(2, exercise_id);
+        if (!try statement.row()) return null;
+        const revision = c.sqlite3_column_int64(statement.raw, 1);
+        const archived = c.sqlite3_column_int(statement.raw, 2);
+        if (revision <= 0 or (archived != 0 and archived != 1)) return error.InvalidData;
+        return .{
+            .host_scope_key = try ownId(allocator, scope),
+            .exercise = try parseColumn(persistence.canonical.Exercise, allocator, statement.raw, 0),
+            .revision = @intCast(revision),
+            .availability = if (archived == 0) .active else .archived,
+            .updated_at = .{ .bytes = try dupeColumn(allocator, statement.raw, 3) },
+        };
+    }
+
+    fn persistManagedExercise(self: *Adapter, allocator: std.mem.Allocator, managed: tracking.ManagedExercise) TrackingError!void {
+        const payload = try encodeAlloc(allocator, managed.exercise);
+        defer allocator.free(payload);
+        var statement = try self.prepare(
+            \\INSERT INTO catalog (host_scope_key, exercise_id, payload, archived, revision, updated_at)
+            \\VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            \\ON CONFLICT (host_scope_key, exercise_id) DO UPDATE SET
+            \\ payload = excluded.payload, archived = excluded.archived,
+            \\ revision = excluded.revision, updated_at = excluded.updated_at
+        );
+        defer statement.finalize();
+        try statement.bindText(1, managed.host_scope_key.bytes);
+        try statement.bindText(2, managed.exercise.id);
+        try statement.bindText(3, payload);
+        try statement.bindInt(4, @intFromBool(managed.availability == .archived));
+        try statement.bindInt(5, managed.revision);
+        try statement.bindText(6, managed.updated_at.bytes);
+        try statement.done();
+        try self.replaceCatalogSearchTerms(managed.host_scope_key.bytes, managed.exercise);
+    }
+
+    fn replaceCatalogSearchTerms(self: *Adapter, scope: []const u8, exercise: persistence.canonical.Exercise) TrackingError!void {
+        var delete = try self.prepare("DELETE FROM catalog_search_terms WHERE host_scope_key = ?1 AND exercise_id = ?2");
+        defer delete.finalize();
+        try delete.bindText(1, scope);
+        try delete.bindText(2, exercise.id);
+        try delete.done();
+        var insert = try self.prepare("INSERT OR IGNORE INTO catalog_search_terms (host_scope_key, exercise_id, term) VALUES (?1, ?2, lower(?3))");
+        defer insert.finalize();
+        try insertSearchTerm(insert, scope, exercise.id, exercise.id);
+        if (exercise.name) |name| try insertSearchTerm(insert, scope, exercise.id, name);
+        for (exercise.aliases) |alias| try insertSearchTerm(insert, scope, exercise.id, alias);
+    }
+
+    fn loadCatalogReceipt(self: *Adapter, allocator: std.mem.Allocator, scope: tracking.Id, command_id: tracking.Id) TrackingError!?[]const u8 {
+        var statement = try self.prepare("SELECT payload_json FROM catalog_command_receipts WHERE host_scope_key = ?1 AND command_id = ?2");
+        defer statement.finalize();
+        try statement.bindText(1, scope.bytes);
+        try statement.bindText(2, command_id.bytes);
+        if (!try statement.row()) return null;
+        return try dupeColumn(allocator, statement.raw, 0);
+    }
+
+    fn insertCatalogReceipt(self: *Adapter, scope: tracking.Id, command_id: tracking.Id, exercise_id: []const u8, payload: []const u8) TrackingError!void {
+        var statement = try self.prepare("INSERT INTO catalog_command_receipts (host_scope_key, command_id, exercise_id, payload_json) VALUES (?1, ?2, ?3, ?4)");
+        defer statement.finalize();
+        try statement.bindText(1, scope.bytes);
+        try statement.bindText(2, command_id.bytes);
+        try statement.bindText(3, exercise_id);
+        try statement.bindText(4, payload);
+        try statement.done();
+    }
+
+    fn readManagedCatalogExercise(self: *Adapter, allocator: std.mem.Allocator, query: tracking.ReadExerciseQuery) TrackingError!tracking.ReadExerciseResult {
+        if (try self.loadManagedExercise(allocator, query.host_scope_key, query.exercise_id.bytes)) |value| return .{ .found = value };
+        return .{ .not_found = .{ .code = tracking.issue_codes.catalog_exercise_not_found, .category = .not_found, .severity = .@"error", .message = "The exercise does not exist in this scope." } };
+    }
+
+    fn searchManagedCatalog(self: *Adapter, allocator: std.mem.Allocator, query: tracking.SearchExercisesQuery) TrackingError!tracking.SearchExercisesResult {
+        if (query.text.len == 0 or query.text.len > 200 or !std.unicode.utf8ValidateSlice(query.text) or query.max_results == 0 or query.max_results > 100)
+            return .{ .rejected = .{ .code = tracking.issue_codes.catalog_invalid_query, .category = .validation, .severity = .@"error", .message = "Catalog search requires non-empty text and a limit from 1 to 100." } };
+        var statement = try self.prepare(
+            \\SELECT DISTINCT c.exercise_id FROM catalog_search_terms AS s
+            \\JOIN catalog AS c ON c.host_scope_key = s.host_scope_key AND c.exercise_id = s.exercise_id
+            \\WHERE s.host_scope_key = ?1 AND s.term >= lower(?2)
+            \\ AND s.term < lower(?2) || X'f48fbfbf' AND (?3 = 1 OR c.archived = 0)
+            \\ORDER BY c.exercise_id LIMIT ?4
+        );
+        defer statement.finalize();
+        try statement.bindText(1, query.host_scope_key.bytes);
+        try statement.bindText(2, query.text);
+        try statement.bindInt(3, @intFromBool(query.include_archived));
+        try statement.bindInt(4, query.max_results);
+        var values: std.ArrayList(tracking.ManagedExercise) = .empty;
+        errdefer values.deinit(allocator);
+        while (try statement.row()) {
+            const id = try dupeColumn(allocator, statement.raw, 0);
+            defer allocator.free(id);
+            try values.append(allocator, (try self.loadManagedExercise(allocator, query.host_scope_key, id)).?);
+        }
+        return .{ .found = try values.toOwnedSlice(allocator) };
+    }
+
+    fn listManagedCatalog(self: *Adapter, allocator: std.mem.Allocator, query: tracking.ListExercisesQuery) TrackingError!tracking.ListExercisesResult {
+        if (query.max_results == 0 or query.max_results > 100)
+            return .{ .rejected = .{ .code = tracking.issue_codes.catalog_invalid_query, .category = .validation, .severity = .@"error", .message = "Catalog listing requires a limit from 1 to 100." } };
+        var statement = try self.prepare(
+            \\SELECT exercise_id FROM catalog
+            \\WHERE host_scope_key = ?1 AND (?2 = 1 OR archived = 0)
+            \\ORDER BY exercise_id LIMIT ?3
+        );
+        defer statement.finalize();
+        try statement.bindText(1, query.host_scope_key.bytes);
+        try statement.bindInt(2, @intFromBool(query.include_archived));
+        try statement.bindInt(3, query.max_results);
+        var values: std.ArrayList(tracking.ManagedExercise) = .empty;
+        errdefer values.deinit(allocator);
+        while (try statement.row()) {
+            const id = try dupeColumn(allocator, statement.raw, 0);
+            defer allocator.free(id);
+            try values.append(allocator, (try self.loadManagedExercise(allocator, query.host_scope_key, id)).?);
+        }
+        return .{ .found = try values.toOwnedSlice(allocator) };
     }
 
     pub fn appendCompletedWorkout(
@@ -272,6 +469,10 @@ pub const Adapter = opaque {
         if (current < 5) try self.applyMigration(
             5,
             @embedFile("sqlite/migrations/005_tracking_workout_end.sql"),
+        );
+        if (current < 6) try self.applyMigration(
+            6,
+            @embedFile("sqlite/migrations/006_catalog_management.sql"),
         );
     }
 
@@ -351,6 +552,37 @@ pub fn open(path: [:0]const u8, options: Options) OpenError!*Adapter {
         c.SQLITE_OK) return error.OpenFailed;
     adapter.migrate() catch |err| return mapMigrationError(err);
     return adapter;
+}
+
+fn insertSearchTerm(statement: Statement, scope: []const u8, exercise_id: []const u8, term: []const u8) TrackingError!void {
+    try statement.bindText(1, scope);
+    try statement.bindText(2, exercise_id);
+    try statement.bindText(3, term);
+    try statement.done();
+    try statement.reset();
+}
+
+fn ownAcceptedCatalog(allocator: std.mem.Allocator, accepted: tracking.AcceptedCatalogCommand) TrackingError!tracking.AcceptedCatalogCommand {
+    const payload = try encodeAlloc(allocator, accepted.exercise.exercise);
+    defer allocator.free(payload);
+    const exercise = std.json.parseFromSliceLeaky(persistence.canonical.Exercise, allocator, payload, .{ .allocate = .alloc_always }) catch return error.InvalidData;
+    return .{
+        .command_id = try ownId(allocator, accepted.command_id),
+        .disposition = accepted.disposition,
+        .exercise = .{
+            .host_scope_key = try ownId(allocator, accepted.exercise.host_scope_key),
+            .exercise = exercise,
+            .revision = accepted.exercise.revision,
+            .availability = accepted.exercise.availability,
+            .updated_at = .{ .bytes = try allocator.dupe(u8, accepted.exercise.updated_at.bytes) },
+        },
+    };
+}
+
+fn ownCatalogRejected(allocator: std.mem.Allocator, command_id: tracking.Id, issue: tracking.Issue) std.mem.Allocator.Error!tracking.CatalogCommandResult {
+    const issues = try allocator.alloc(tracking.Issue, 1);
+    issues[0] = issue;
+    return .{ .rejected = .{ .command_id = try ownId(allocator, command_id), .issues = issues } };
 }
 
 pub fn openInMemory(options: Options) OpenError!*Adapter {
