@@ -35,6 +35,7 @@ const help_text =
     \\  caudex [global options] history last EXERCISE
     \\  caudex [global options] history correct-set --workout ID --exercise ID --set ID METRICS... [--yes]
     \\  caudex [global options] config path|show|set (color|table) VALUE
+    \\  caudex batch FILE
     \\  caudex --help
     \\  caudex version
     \\
@@ -184,7 +185,7 @@ fn run(
     environ: *const std.process.Environ.Map,
     args: []const []const u8,
     stdout: *std.Io.Writer,
-) !?errors.Failure {
+) anyerror!?errors.Failure {
     if (args.len == 1 or
         (args.len == 2 and
             (std.mem.eql(u8, args[1], "--help") or std.mem.eql(u8, args[1], "help"))))
@@ -196,6 +197,9 @@ fn run(
     if (args.len == 2 and std.mem.eql(u8, args[1], "version")) {
         try output.writeVersion(stdout, version);
         return null;
+    }
+    if (args.len == 3 and std.mem.eql(u8, args[1], "batch")) {
+        return try runBatch(io, allocator, environ, args[2], stdout);
     }
 
     const global = try parseGlobalOptions(args);
@@ -318,6 +322,30 @@ fn run(
         );
     }
     return error.InvalidArguments;
+}
+
+const BatchOperation = struct { args: []const []const u8 };
+
+fn runBatch(io: std.Io, allocator: std.mem.Allocator, environ: *const std.process.Environ.Map, path: []const u8, stdout: *std.Io.Writer) !?errors.Failure {
+    const input = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(64 * 1024));
+    var lines = std.mem.splitScalar(u8, input, '\n');
+    var count: usize = 0;
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        if (line.len > 2048 or count == 100) return error.InvalidArguments;
+        const parsed = std.json.parseFromSlice(BatchOperation, allocator, line, .{ .duplicate_field_behavior = .@"error", .ignore_unknown_fields = false, .allocate = .alloc_always }) catch return error.InvalidArguments;
+        defer parsed.deinit();
+        if (parsed.value.args.len == 0 or std.mem.eql(u8, parsed.value.args[0], "batch")) return error.InvalidArguments;
+        const command = try allocator.alloc([]const u8, parsed.value.args.len + 3);
+        command[0] = "caudex";
+        command[1] = "--format";
+        command[2] = "json";
+        @memcpy(command[3..], parsed.value.args);
+        if (try run(io, allocator, environ, command, stdout)) |failure|
+            try output.writeFailure(stdout, .json, failure);
+        count += 1;
+    }
+    return null;
 }
 
 fn configCommand(io: std.Io, allocator: std.mem.Allocator, environment: PathEnvironment, args: []const []const u8, settings: output.Settings, stdout: *std.Io.Writer) !?errors.Failure {

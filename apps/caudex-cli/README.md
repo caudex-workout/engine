@@ -91,6 +91,11 @@ caudex config set color never
 caudex config set table wide
 ```
 
+For bounded automation, `caudex batch FILE` accepts at most 100 JSON Lines
+records (64 KiB total). Each record has an `args` array containing ordinary CLI
+arguments; each result is emitted as its usual versioned JSON document. Batch
+operations preserve normal command IDs and retry behavior.
+
 `--format human|json` selects human output or a versioned JSON envelope.
 Diagnostics use stderr and the same selected format; requested data remains on
 stdout. `--color auto|always|never` controls human styling, while JSON and
