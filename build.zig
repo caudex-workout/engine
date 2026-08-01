@@ -663,6 +663,12 @@ pub fn build(b: *std.Build) void {
     });
     cli_completion_test.addArtifactArg(cli);
 
+    const cli_shell_smoke_test = b.addSystemCommand(&.{
+        "bash",
+        "tests/cli_shell_smoke_test.sh",
+    });
+    cli_shell_smoke_test.addArtifactArg(cli);
+
     const architecture_probe_files = b.addWriteFiles();
     const private_import_probe = architecture_probe_files.add("caudex_private_import.zig",
         \\const private = @import("caudex_private_root");
@@ -696,6 +702,7 @@ pub fn build(b: *std.Build) void {
     cli_test_step.dependOn(&cli_ergonomics_test.step);
     cli_test_step.dependOn(&cli_batch_test.step);
     cli_test_step.dependOn(&cli_completion_test.step);
+    cli_test_step.dependOn(&cli_shell_smoke_test.step);
     cli_test_step.dependOn(&private_import_check.step);
 
     const npm_package_test = b.addSystemCommand(&.{
@@ -868,6 +875,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&cli_set_commands_test.step);
     test_step.dependOn(&cli_workout_end_test.step);
     test_step.dependOn(&cli_completion_test.step);
+    test_step.dependOn(&cli_shell_smoke_test.step);
     test_step.dependOn(&private_import_check.step);
     test_step.dependOn(&npm_clean_smoke.step);
     test_step.dependOn(&npm_release_test.step);
