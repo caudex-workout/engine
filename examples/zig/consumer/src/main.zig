@@ -78,7 +78,7 @@ pub fn main() !void {
         return error.UnsupportedPersistenceContract;
     if (caudex_persistence.canonical != caudex.canonical)
         return error.PersistenceUsesDifferentCanonicalContract;
-    if (caudex_tracking.contract_version != 5)
+    if (caudex_tracking.contract_version != 6)
         return error.UnsupportedTrackingContract;
     const database = try caudex_sqlite.openInMemory(.{});
     defer database.close();

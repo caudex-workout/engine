@@ -411,6 +411,32 @@ test "workout finish and cancel persist atomically and replay idempotently" {
     try std.testing.expect(active == .none);
 }
 
+test "completed history is bounded, indexed, and corrected with a receipt" {
+    const database = try sqlite.openInMemory(.{});
+    defer database.close();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    try database.replaceCatalog(allocator, .{ .host_scope_key = scope.host_scope_key.bytes, .as_of = start.started_at.bytes }, &.{.{ .id = "bench" }});
+    _ = try database.startWorkout(allocator, start);
+    _ = try database.addExercise(allocator, .{ .metadata = metadata("history-add"), .scope = scope, .workout_id = start.workout_id, .expected_revision = 1, .membership_id = .{ .bytes = "history-membership" }, .exercise_id = .{ .bytes = "bench" }, .anchor = .end });
+    _ = try database.addSet(allocator, .{ .metadata = metadata("history-set"), .scope = scope, .workout_id = start.workout_id, .expected_revision = 2, .membership_id = .{ .bytes = "history-membership" }, .set_id = .{ .bytes = "history-set" }, .kind = .{ .bytes = "working" }, .anchor = .end });
+    const first_metric: tracking.Metric = .{ .code = .{ .bytes = "rpe" }, .value = .{ .value = .{ .mantissa = 8, .scale = 0 }, .unit = .rpe } };
+    _ = try database.logSet(allocator, .{ .metadata = metadata("history-log"), .scope = scope, .workout_id = start.workout_id, .expected_revision = 3, .membership_id = .{ .bytes = "history-membership" }, .set_id = .{ .bytes = "history-set" }, .actual_metrics = &.{first_metric}, .completed_at = .{ .bytes = "2026-07-26T12:02:00Z" } });
+    _ = try database.completeWorkout(allocator, .{ .metadata = metadata("history-finish"), .scope = scope, .workout_id = start.workout_id, .expected_revision = 4, .completed_at = .{ .bytes = "2026-07-26T12:03:00Z" } });
+    const page = try database.listHistory(allocator, .{ .scope = scope, .from = .{ .bytes = "2026-07-26T12:00:00Z" }, .through = .{ .bytes = "2026-07-26T12:04:00Z" }, .exercise_id = .{ .bytes = "bench" }, .max_results = 1 });
+    try std.testing.expectEqual(@as(usize, 1), page.workouts.len);
+    const last = try database.lastPerformance(allocator, .{ .scope = scope, .exercise_id = .{ .bytes = "bench" } });
+    try std.testing.expectEqualStrings("workout-1", last.found.id.bytes);
+    const corrected_metric: tracking.Metric = .{ .code = .{ .bytes = "rpe" }, .value = .{ .value = .{ .mantissa = 9, .scale = 0 }, .unit = .rpe } };
+    const correction: tracking.CorrectSetCommand = .{ .metadata = metadata("history-correct"), .scope = scope, .workout_id = start.workout_id, .expected_revision = 5, .membership_id = .{ .bytes = "history-membership" }, .set_id = .{ .bytes = "history-set" }, .actual_metrics = &.{corrected_metric}, .completed_at = .{ .bytes = "2026-07-26T12:04:00Z" } };
+    const applied = try database.correctSet(allocator, correction);
+    try std.testing.expectEqual(@as(u64, 6), applied.accepted.workout.revision);
+    try std.testing.expectEqual(@as(i64, 9), applied.accepted.workout.exercises[0].sets[0].actual_metrics[0].value.value.mantissa);
+    const replayed = try database.correctSet(allocator, correction);
+    try std.testing.expectEqual(tracking.CommandDisposition.replayed, replayed.accepted.disposition);
+}
+
 test "managed catalog is revisioned searchable idempotent and snapshot compatible" {
     const database = try sqlite.openInMemory(.{});
     defer database.close();

@@ -7,7 +7,7 @@
 const std = @import("std");
 const caudex = @import("caudex");
 
-pub const contract_version: u32 = 5;
+pub const contract_version: u32 = 6;
 
 pub const Id = caudex.primitives.Id;
 pub const Timestamp = caudex.primitives.Timestamp;
@@ -361,6 +361,9 @@ pub const issue_codes = struct {
     pub const catalog_invalid_exercise = "catalog.invalid_exercise";
     pub const catalog_invalid_transition = "catalog.invalid_transition";
     pub const catalog_invalid_query = "catalog.invalid_query";
+    pub const history_invalid_query = "history.invalid_query";
+    pub const history_not_completed = "history.workout_not_completed";
+    pub const correction_invalid_transition = "history.correction_invalid_transition";
 };
 
 pub const CommandDisposition = enum {
@@ -400,6 +403,60 @@ pub const ReadWorkoutResult = union(enum) {
 pub const ListActiveWorkoutsQuery = struct {
     scope: Scope,
     max_results: u16,
+};
+
+pub const HistoryCursor = struct {
+    completed_at: Timestamp,
+    workout_id: Id,
+};
+
+/// Bounded chronological completed-workout history. `after` is exclusive.
+pub const HistoryQuery = struct {
+    scope: Scope,
+    from: ?Timestamp = null,
+    through: ?Timestamp = null,
+    exercise_id: ?Id = null,
+    max_results: u16,
+    after: ?HistoryCursor = null,
+};
+
+pub const HistoryPage = struct {
+    workouts: []const Workout,
+    next: ?HistoryCursor = null,
+};
+
+pub const LastPerformanceQuery = struct {
+    scope: Scope,
+    exercise_id: Id,
+};
+
+pub const LastPerformanceResult = union(enum) {
+    found: Workout,
+    not_found: Issue,
+};
+
+/// Audited, revision-checked replacement of a completed historical set.
+pub const CorrectSetCommand = struct {
+    metadata: CommandMetadata,
+    scope: Scope,
+    workout_id: Id,
+    expected_revision: u64,
+    membership_id: Id,
+    set_id: Id,
+    actual_metrics: []const Metric,
+    status: SetStatus = .completed,
+    completed_at: Timestamp,
+};
+
+pub const AcceptedCorrection = struct {
+    command_id: Id,
+    disposition: CommandDisposition,
+    workout: Workout,
+};
+
+pub const CorrectionResult = union(enum) {
+    accepted: AcceptedCorrection,
+    rejected: RejectedCommand,
 };
 
 /// Makes zero, one, or multiple active workouts explicit so hosts never guess.
@@ -1144,6 +1201,34 @@ pub fn readWorkout(
         .severity = .@"error",
         .message = "No workout matched the requested scope and ID.",
     } };
+}
+
+/// Validates a historical correction against the supplied completed workout.
+/// Storage applies the replacement and returns a freshly loaded workout.
+pub fn validateCorrection(workout: Workout, command: CorrectSetCommand, issues: []Issue) DecisionError!CorrectionResult {
+    if (!validId(command.metadata.command_id) or !validId(command.scope.host_scope_key) or !validId(command.workout_id) or !validId(command.membership_id) or !validId(command.set_id))
+        return correctionReject(command.metadata.command_id, issues, invalidIdIssue());
+    if (!validTimestamp(command.metadata.occurred_at) or !validTimestamp(command.completed_at) or !validMetrics(command.actual_metrics))
+        return correctionReject(command.metadata.command_id, issues, .{ .code = issue_codes.invalid_metric, .category = .validation, .severity = .@"error", .message = "A correction timestamp or metric is invalid." });
+    if (!scopesEqual(workout.scope, command.scope) or !workout.id.eql(command.workout_id))
+        return correctionReject(command.metadata.command_id, issues, .{ .code = issue_codes.workout_not_found, .category = .not_found, .severity = .@"error", .message = "No workout matched the correction." });
+    if (workout.status != .completed)
+        return correctionReject(command.metadata.command_id, issues, .{ .code = issue_codes.history_not_completed, .category = .conflict, .severity = .@"error", .message = "Only completed workouts can be corrected." });
+    if (workout.revision != command.expected_revision)
+        return correctionReject(command.metadata.command_id, issues, .{ .code = issue_codes.revision_conflict, .category = .conflict, .severity = .@"error", .message = "The expected workout revision does not match." });
+    const membership = findMembership(workout.exercises, command.membership_id) orelse
+        return correctionReject(command.metadata.command_id, issues, setNotFoundIssue());
+    const set = findSet(workout.exercises[membership].sets, command.set_id) orelse
+        return correctionReject(command.metadata.command_id, issues, setNotFoundIssue());
+    if (workout.exercises[membership].sets[set].status == .open or (command.status != .completed and command.status != .partial and command.status != .failed))
+        return correctionReject(command.metadata.command_id, issues, .{ .code = issue_codes.correction_invalid_transition, .category = .validation, .severity = .@"error", .message = "A correction must record a completed, partial, or failed set." });
+    return .{ .accepted = .{ .command_id = command.metadata.command_id, .disposition = .applied, .workout = .{ .id = workout.id, .scope = workout.scope, .revision = std.math.add(u64, workout.revision, 1) catch return error.RevisionOverflow, .status = workout.status, .started_at = workout.started_at, .completed_at = workout.completed_at, .exercises = workout.exercises } } };
+}
+
+fn correctionReject(command_id: Id, issues: []Issue, issue: Issue) DecisionError!CorrectionResult {
+    if (issues.len == 0) return error.IssueBufferTooSmall;
+    issues[0] = issue;
+    return .{ .rejected = .{ .command_id = command_id, .issues = issues[0..1] } };
 }
 
 /// Selects active workouts without guessing when multiple matches exist.

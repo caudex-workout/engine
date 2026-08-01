@@ -12,7 +12,7 @@ const c = @cImport({
 });
 
 pub const adapter_version = "0.1.0";
-pub const schema_version: u32 = 6;
+pub const schema_version: u32 = 7;
 pub const minimum_schema_version: u32 = 1;
 
 pub const Options = struct {
@@ -131,6 +131,18 @@ pub const Adapter = opaque {
         query: tracking.ListActiveWorkoutsQuery,
     ) TrackingError!tracking.ActiveWorkoutSelection {
         return listTrackedActiveWorkouts(self, allocator, query);
+    }
+
+    pub fn listHistory(self: *Adapter, allocator: std.mem.Allocator, query: tracking.HistoryQuery) TrackingError!tracking.HistoryPage {
+        return listTrackedHistory(self, allocator, query);
+    }
+
+    pub fn lastPerformance(self: *Adapter, allocator: std.mem.Allocator, query: tracking.LastPerformanceQuery) TrackingError!tracking.LastPerformanceResult {
+        return lastTrackedPerformance(self, allocator, query);
+    }
+
+    pub fn correctSet(self: *Adapter, allocator: std.mem.Allocator, command: tracking.CorrectSetCommand) TrackingError!tracking.CorrectionResult {
+        return correctTrackedSet(self, allocator, command);
     }
 
     pub fn createExercise(self: *Adapter, allocator: std.mem.Allocator, command: tracking.CreateExerciseCommand) TrackingError!tracking.CatalogCommandResult {
@@ -474,6 +486,10 @@ pub const Adapter = opaque {
             6,
             @embedFile("sqlite/migrations/006_catalog_management.sql"),
         );
+        if (current < 7) try self.applyMigration(
+            7,
+            @embedFile("sqlite/migrations/007_history_queries.sql"),
+        );
     }
 
     fn applyMigration(
@@ -792,6 +808,137 @@ fn listTrackedActiveWorkouts(
         return .{ .one = first.? };
     }
     return .{ .ambiguous = try matches.toOwnedSlice(allocator) };
+}
+
+fn listTrackedHistory(self: *Adapter, allocator: std.mem.Allocator, query: tracking.HistoryQuery) TrackingError!tracking.HistoryPage {
+    if (query.max_results == 0 or query.max_results > 100) return error.InvalidData;
+    if (query.from) |value| _ = tracking.Timestamp.parse(value.bytes) catch return error.InvalidData;
+    if (query.through) |value| _ = tracking.Timestamp.parse(value.bytes) catch return error.InvalidData;
+    var statement = try self.prepare(
+        \\SELECT workout_id FROM tracking_workouts
+        \\WHERE host_scope_key = ?1 AND athlete_id = ?2 AND status = 'completed'
+        \\ AND (?3 IS NULL OR completed_at >= ?3) AND (?4 IS NULL OR completed_at <= ?4)
+        \\ AND (?5 IS NULL OR EXISTS (SELECT 1 FROM tracking_workout_exercises e
+        \\   WHERE e.host_scope_key = tracking_workouts.host_scope_key AND e.athlete_id = tracking_workouts.athlete_id
+        \\     AND e.workout_id = tracking_workouts.workout_id AND e.exercise_id = ?5))
+        \\ AND (?6 IS NULL OR completed_at > ?6 OR (completed_at = ?6 AND workout_id > ?7))
+        \\ORDER BY completed_at, workout_id LIMIT ?8
+    );
+    defer statement.finalize();
+    try statement.bindText(1, query.scope.host_scope_key.bytes);
+    try statement.bindText(2, athleteKey(query.scope));
+    if (query.from) |value| try statement.bindText(3, value.bytes) else try statement.bindNull(3);
+    if (query.through) |value| try statement.bindText(4, value.bytes) else try statement.bindNull(4);
+    if (query.exercise_id) |value| try statement.bindText(5, value.bytes) else try statement.bindNull(5);
+    if (query.after) |value| {
+        try statement.bindText(6, value.completed_at.bytes);
+        try statement.bindText(7, value.workout_id.bytes);
+    } else {
+        try statement.bindNull(6);
+        try statement.bindNull(7);
+    }
+    try statement.bindInt(8, query.max_results);
+    var values: std.ArrayList(tracking.Workout) = .empty;
+    errdefer values.deinit(allocator);
+    while (try statement.row()) {
+        const id = tracking.Id{ .bytes = try dupeColumn(allocator, statement.raw, 0) };
+        try values.append(allocator, (try loadTrackedWorkout(self, allocator, query.scope, id)).?);
+    }
+    const workouts = try values.toOwnedSlice(allocator);
+    const next: ?tracking.HistoryCursor = if (workouts.len == query.max_results) .{ .completed_at = workouts[workouts.len - 1].completed_at.?, .workout_id = workouts[workouts.len - 1].id } else null;
+    return .{ .workouts = workouts, .next = next };
+}
+
+fn lastTrackedPerformance(self: *Adapter, allocator: std.mem.Allocator, query: tracking.LastPerformanceQuery) TrackingError!tracking.LastPerformanceResult {
+    var statement = try self.prepare(
+        \\SELECT w.workout_id FROM tracking_workouts w
+        \\WHERE w.host_scope_key = ?1 AND w.athlete_id = ?2 AND w.status = 'completed'
+        \\ AND EXISTS (SELECT 1 FROM tracking_workout_exercises e WHERE e.host_scope_key = w.host_scope_key
+        \\   AND e.athlete_id = w.athlete_id AND e.workout_id = w.workout_id AND e.exercise_id = ?3)
+        \\ORDER BY w.completed_at DESC, w.workout_id DESC LIMIT 1
+    );
+    defer statement.finalize();
+    try statement.bindText(1, query.scope.host_scope_key.bytes);
+    try statement.bindText(2, athleteKey(query.scope));
+    try statement.bindText(3, query.exercise_id.bytes);
+    if (!try statement.row()) return .{ .not_found = .{ .code = tracking.issue_codes.workout_not_found, .category = .not_found, .severity = .@"error", .message = "No completed performance matched the exercise." } };
+    const id = tracking.Id{ .bytes = try dupeColumn(allocator, statement.raw, 0) };
+    return .{ .found = (try loadTrackedWorkout(self, allocator, query.scope, id)).? };
+}
+
+fn correctTrackedSet(self: *Adapter, allocator: std.mem.Allocator, command: tracking.CorrectSetCommand) TrackingError!tracking.CorrectionResult {
+    const payload = try encodeAlloc(allocator, command);
+    defer allocator.free(payload);
+    try self.execute("BEGIN IMMEDIATE");
+    errdefer self.execute("ROLLBACK") catch {};
+    var receipt = try self.prepare("SELECT payload_json FROM tracking_correction_receipts WHERE host_scope_key = ?1 AND athlete_id = ?2 AND command_id = ?3");
+    defer receipt.finalize();
+    try receipt.bindText(1, command.scope.host_scope_key.bytes);
+    try receipt.bindText(2, athleteKey(command.scope));
+    try receipt.bindText(3, command.metadata.command_id.bytes);
+    if (try receipt.row()) {
+        const prior = try dupeColumn(allocator, receipt.raw, 0);
+        defer allocator.free(prior);
+        if (!std.mem.eql(u8, prior, payload)) {
+            var issues = [1]tracking.Issue{.{ .code = tracking.issue_codes.command_payload_conflict, .category = .conflict, .severity = .@"error", .message = "The command ID was already used with another payload." }};
+            const rejected = try ownRejected(allocator, .{ .command_id = command.metadata.command_id, .issues = &issues });
+            try self.execute("ROLLBACK");
+            return .{ .rejected = rejected.rejected };
+        }
+        const current = (try loadTrackedWorkout(self, allocator, command.scope, command.workout_id)) orelse return error.InvalidData;
+        try self.execute("COMMIT");
+        return .{ .accepted = .{ .command_id = try ownId(allocator, command.metadata.command_id), .disposition = .replayed, .workout = current } };
+    }
+    const current = (try loadTrackedWorkout(self, allocator, command.scope, command.workout_id)) orelse {
+        var issues = [1]tracking.Issue{.{ .code = tracking.issue_codes.workout_not_found, .category = .not_found, .severity = .@"error", .message = "No workout matched the correction." }};
+        const owned = try ownRejected(allocator, .{ .command_id = command.metadata.command_id, .issues = &issues });
+        try self.execute("ROLLBACK");
+        return .{ .rejected = owned.rejected };
+    };
+    var issues: [1]tracking.Issue = undefined;
+    const decision = tracking.validateCorrection(current, command, &issues) catch return error.InvalidData;
+    switch (decision) {
+        .rejected => |rejected| {
+            const owned = try ownRejected(allocator, rejected);
+            try self.execute("ROLLBACK");
+            return .{ .rejected = owned.rejected };
+        },
+        .accepted => {},
+    }
+    const actuals = try encodeAlloc(allocator, command.actual_metrics);
+    defer allocator.free(actuals);
+    var set_update = try self.prepare(
+        \\UPDATE tracking_workout_sets SET actual_metrics_json = ?1, status = ?2, recorded_at = ?3
+        \\WHERE host_scope_key = ?4 AND athlete_id = ?5 AND workout_id = ?6 AND membership_id = ?7 AND set_id = ?8
+    );
+    defer set_update.finalize();
+    try set_update.bindText(1, actuals);
+    try set_update.bindText(2, setStatusText(command.status));
+    try set_update.bindText(3, command.completed_at.bytes);
+    try set_update.bindText(4, command.scope.host_scope_key.bytes);
+    try set_update.bindText(5, athleteKey(command.scope));
+    try set_update.bindText(6, command.workout_id.bytes);
+    try set_update.bindText(7, command.membership_id.bytes);
+    try set_update.bindText(8, command.set_id.bytes);
+    try set_update.done();
+    var workout_update = try self.prepare("UPDATE tracking_workouts SET revision = revision + 1 WHERE host_scope_key = ?1 AND athlete_id = ?2 AND workout_id = ?3 AND revision = ?4");
+    defer workout_update.finalize();
+    try workout_update.bindText(1, command.scope.host_scope_key.bytes);
+    try workout_update.bindText(2, athleteKey(command.scope));
+    try workout_update.bindText(3, command.workout_id.bytes);
+    try workout_update.bindInt(4, command.expected_revision);
+    try workout_update.done();
+    var insert = try self.prepare("INSERT INTO tracking_correction_receipts (host_scope_key, athlete_id, command_id, workout_id, payload_json) VALUES (?1, ?2, ?3, ?4, ?5)");
+    defer insert.finalize();
+    try insert.bindText(1, command.scope.host_scope_key.bytes);
+    try insert.bindText(2, athleteKey(command.scope));
+    try insert.bindText(3, command.metadata.command_id.bytes);
+    try insert.bindText(4, command.workout_id.bytes);
+    try insert.bindText(5, payload);
+    try insert.done();
+    const corrected = (try loadTrackedWorkout(self, allocator, command.scope, command.workout_id)) orelse return error.InvalidData;
+    try self.execute("COMMIT");
+    return .{ .accepted = .{ .command_id = try ownId(allocator, command.metadata.command_id), .disposition = .applied, .workout = corrected } };
 }
 
 const ExerciseChange = union(enum) {
