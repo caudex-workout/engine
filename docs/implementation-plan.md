@@ -830,6 +830,8 @@ definition of done.
 
 **Class:** Missing public engine capability review.
 
+**Review:** [Accepted catalog-management scope](catalog/architecture-review-cwe-130.md).
+
 **Acceptance criteria:**
 
 - Athlete, equipment, exercise, alias, archive, restore, annotation, and
