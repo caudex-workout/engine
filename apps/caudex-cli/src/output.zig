@@ -91,12 +91,28 @@ pub fn writeExercises(writer: *std.Io.Writer, settings: Settings, kind: []const 
         .human => {
             if (exercises.len == 0) return writer.writeAll("No exercises.\n");
             try writer.writeAll("ID  NAME  STATUS  REVISION\n");
-            for (exercises) |exercise| try writer.print("{s}  {s}  {s}  {d}\n", .{ exercise.id, exercise.name orelse "-", exercise.availability, exercise.revision });
+            for (exercises) |exercise| {
+                try writer.print("{s}  ", .{exercise.id});
+                try writeTerminalText(writer, exercise.name orelse "-");
+                try writer.print("  {s}  {d}\n", .{ exercise.availability, exercise.revision });
+            }
         },
         .json => {
             try std.json.Stringify.value(.{ .schemaVersion = 1, .kind = kind, .data = .{ .commandId = command_id, .disposition = disposition, .exercises = exercises } }, .{ .emit_null_optional_fields = false }, writer);
             try writer.writeByte('\n');
         },
+    }
+}
+
+/// Human output escapes terminal control characters; JSON keeps the source
+/// value and its normal JSON escaping rules.
+fn writeTerminalText(writer: *std.Io.Writer, value: []const u8) !void {
+    for (value) |byte| {
+        if (byte < 0x20 or byte == 0x7f or byte == 0x1b) {
+            try writer.print("\\x{X:0>2}", .{byte});
+        } else {
+            try writer.writeByte(byte);
+        }
     }
 }
 

@@ -480,6 +480,7 @@ pub fn build(b: *std.Build) void {
         \\  caudex [global options] history exercise EXERCISE [--limit N]
         \\  caudex [global options] history last EXERCISE
         \\  caudex [global options] history correct-set --workout ID --exercise ID --set ID METRICS... [--yes]
+        \\  caudex [global options] config path|show|set (color|table) VALUE
         \\  caudex --help
         \\  caudex version
         \\
@@ -641,6 +642,12 @@ pub fn build(b: *std.Build) void {
     cli_history_commands_test.addArtifactArg(cli);
     cli_history_commands_test.addArtifactArg(cli_catalog_seed);
 
+    const cli_ergonomics_test = b.addSystemCommand(&.{
+        "bash",
+        "tests/cli_ergonomics_test.sh",
+    });
+    cli_ergonomics_test.addArtifactArg(cli);
+
     const architecture_probe_files = b.addWriteFiles();
     const private_import_probe = architecture_probe_files.add("caudex_private_import.zig",
         \\const private = @import("caudex_private_root");
@@ -671,6 +678,7 @@ pub fn build(b: *std.Build) void {
     cli_test_step.dependOn(&cli_workout_end_test.step);
     cli_test_step.dependOn(&cli_catalog_commands_test.step);
     cli_test_step.dependOn(&cli_history_commands_test.step);
+    cli_test_step.dependOn(&cli_ergonomics_test.step);
     cli_test_step.dependOn(&private_import_check.step);
 
     const npm_package_test = b.addSystemCommand(&.{

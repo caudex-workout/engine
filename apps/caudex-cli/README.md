@@ -79,6 +79,18 @@ caudex --database caudex.sqlite history correct-set --yes \
 idempotent when retried with the same command ID, and never changes methodology
 state automatically.
 
+Every noun and verb accepts a trailing `--help`. The documented long nouns are
+`workout`, `set`, `exercise`, and `history`; the additive aliases `w`, `s`,
+`e`, and `h` are convenient for interactive use. Client-only presentation
+preferences are inspectable and atomically stored outside the workout database:
+
+```sh
+caudex config path
+caudex config show
+caudex config set color never
+caudex config set table wide
+```
+
 `--format human|json` selects human output or a versioned JSON envelope.
 Diagnostics use stderr and the same selected format; requested data remains on
 stdout. `--color auto|always|never` controls human styling, while JSON and

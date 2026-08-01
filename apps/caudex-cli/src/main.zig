@@ -34,6 +34,7 @@ const help_text =
     \\  caudex [global options] history exercise EXERCISE [--limit N]
     \\  caudex [global options] history last EXERCISE
     \\  caudex [global options] history correct-set --workout ID --exercise ID --set ID METRICS... [--yes]
+    \\  caudex [global options] config path|show|set (color|table) VALUE
     \\  caudex --help
     \\  caudex version
     \\
@@ -224,7 +225,21 @@ fn run(
         .no_color = no_color,
         .quiet = global.quiet,
     };
-    const remaining = args[global.command_index..];
+    var remaining = args[global.command_index..];
+    if (remaining.len > 0 and (std.mem.eql(u8, remaining[remaining.len - 1], "--help") or std.mem.eql(u8, remaining[remaining.len - 1], "help"))) {
+        try output.writeHelp(stdout, help_text);
+        return null;
+    }
+    if (remaining.len > 0) {
+        const alias: ?[]const u8 = if (std.mem.eql(u8, remaining[0], "w")) "workout" else if (std.mem.eql(u8, remaining[0], "s")) "set" else if (std.mem.eql(u8, remaining[0], "e")) "exercise" else if (std.mem.eql(u8, remaining[0], "h")) "history" else null;
+        if (alias) |noun| {
+            const expanded = try allocator.dupe([]const u8, remaining);
+            expanded[0] = noun;
+            remaining = expanded;
+        }
+    }
+    if (remaining.len >= 2 and std.mem.eql(u8, remaining[0], "config"))
+        return try configCommand(io, allocator, environment, remaining[1..], settings, stdout);
     if (remaining.len >= 2 and std.mem.eql(u8, remaining[0], "history"))
         return try historyCommand(io, allocator, adapter, global, remaining[1], remaining[2..], settings, stdout);
     if (remaining.len >= 2 and std.mem.eql(u8, remaining[0], "exercise"))
@@ -303,6 +318,32 @@ fn run(
         );
     }
     return error.InvalidArguments;
+}
+
+fn configCommand(io: std.Io, allocator: std.mem.Allocator, environment: PathEnvironment, args: []const []const u8, settings: output.Settings, stdout: *std.Io.Writer) !?errors.Failure {
+    const path = try resolveConfigPath(allocator, environment, nativePlatform());
+    if (args.len == 1 and std.mem.eql(u8, args[0], "path")) {
+        if (settings.format == .json) try std.json.Stringify.value(.{ .schemaVersion = 1, .kind = "caudex.config.path", .data = .{ .path = path } }, .{}, stdout) else try stdout.print("{s}\n", .{path});
+        if (settings.format == .json) try stdout.writeByte('\n');
+        return null;
+    }
+    if (args.len == 1 and std.mem.eql(u8, args[0], "show")) {
+        const value = readConfig(allocator, io, path) catch "color=auto\ntable=compact\n";
+        if (settings.format == .json) try std.json.Stringify.value(.{ .schemaVersion = 1, .kind = "caudex.config.show", .data = .{ .path = path, .preferences = value } }, .{}, stdout) else try stdout.writeAll(value);
+        if (settings.format == .json) try stdout.writeByte('\n');
+        return null;
+    }
+    if (args.len != 3 or !std.mem.eql(u8, args[0], "set") or (!std.mem.eql(u8, args[1], "color") and !std.mem.eql(u8, args[1], "table"))) return error.InvalidArguments;
+    if (std.mem.eql(u8, args[1], "color") and !std.mem.eql(u8, args[2], "auto") and !std.mem.eql(u8, args[2], "always") and !std.mem.eql(u8, args[2], "never")) return error.InvalidArguments;
+    if (std.mem.eql(u8, args[1], "table") and !std.mem.eql(u8, args[2], "compact") and !std.mem.eql(u8, args[2], "wide")) return error.InvalidArguments;
+    const existing = readConfig(allocator, io, path) catch "color=auto\ntable=compact\n";
+    const updated = if (std.mem.eql(u8, args[1], "color")) try std.fmt.allocPrint(allocator, "color={s}\ntable={s}\n", .{ args[2], configValue(existing, "table") orelse "compact" }) else try std.fmt.allocPrint(allocator, "color={s}\ntable={s}\n", .{ configValue(existing, "color") orelse "auto", args[2] });
+    try writeConfigAtomically(io, path, updated);
+    if (settings.format == .json) {
+        try std.json.Stringify.value(.{ .schemaVersion = 1, .kind = "caudex.config.set", .data = .{ .path = path, .key = args[1], .value = args[2] } }, .{}, stdout);
+        try stdout.writeByte('\n');
+    } else try stdout.print("{s}={s}\n", .{ args[1], args[2] });
+    return null;
 }
 
 fn historyCommand(io: std.Io, allocator: std.mem.Allocator, adapter: *sqlite.Adapter, global: GlobalOptions, verb: []const u8, args: []const []const u8, settings: output.Settings, stdout: *std.Io.Writer) !?errors.Failure {
@@ -1227,6 +1268,39 @@ fn resolveDatabasePath(
         else
             error.DataDirectoryUnavailable,
     };
+}
+
+fn resolveConfigPath(allocator: std.mem.Allocator, environment: PathEnvironment, platform: Platform) ![:0]u8 {
+    return switch (platform) {
+        .macos => if (nonEmpty(environment.home)) |home| std.fs.path.joinZ(allocator, &.{ home, "Library", "Application Support", "Caudex", "config" }) else error.DataDirectoryUnavailable,
+        .windows => if (nonEmpty(environment.local_app_data)) |data| std.fs.path.joinZ(allocator, &.{ data, "Caudex", "config" }) else error.DataDirectoryUnavailable,
+        .unix => if (nonEmpty(environment.xdg_data_home)) |data| std.fs.path.joinZ(allocator, &.{ data, "caudex", "config" }) else if (nonEmpty(environment.home)) |home| std.fs.path.joinZ(allocator, &.{ home, ".local", "share", "caudex", "config" }) else error.DataDirectoryUnavailable,
+    };
+}
+
+fn readConfig(allocator: std.mem.Allocator, io: std.Io, path: []const u8) ![]const u8 {
+    return std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(4096));
+}
+
+fn writeConfigAtomically(io: std.Io, path: []const u8, value: []const u8) !void {
+    const parent = std.fs.path.dirname(path) orelse return error.DataDirectoryUnavailable;
+    try std.Io.Dir.cwd().createDirPath(io, parent);
+    var atomic = try std.Io.Dir.cwd().createFileAtomic(io, path, .{ .replace = true });
+    defer atomic.deinit(io);
+    var buffer: [512]u8 = undefined;
+    var writer = atomic.file.writer(io, &buffer);
+    try writer.interface.writeAll(value);
+    try writer.interface.flush();
+    try atomic.replace(io);
+}
+
+fn configValue(config: []const u8, key: []const u8) ?[]const u8 {
+    var lines = std.mem.splitScalar(u8, config, '\n');
+    while (lines.next()) |line| {
+        if (!std.mem.startsWith(u8, line, key) or line.len <= key.len or line[key.len] != '=') continue;
+        return line[key.len + 1 ..];
+    }
+    return null;
 }
 
 fn ensureDatabaseDirectory(io: std.Io, path: []const u8) !void {
