@@ -47,6 +47,10 @@ pub fn exerciseNotFound() Failure {
     };
 }
 
+pub fn managedExerciseNotFound() Failure {
+    return .{ .exit_class = .not_found, .code = "catalog.exercise_not_found", .category = "not_found", .message = "No managed exercise matched the reference." };
+}
+
 pub fn membershipNotFound() Failure {
     return .{ .exit_class = .not_found, .code = "tracking.membership_not_found", .category = "not_found", .message = "No unique workout exercise matched; pass --exercise with a membership or exercise ID." };
 }

@@ -41,3 +41,41 @@ pub fn resolveExercise(
     );
     return resolution.resolveExercise(catalog, reference, output);
 }
+
+pub const ManagedExerciseResolution = union(enum) {
+    found: tracking.ManagedExercise,
+    not_found,
+    ambiguous: []const tracking.ManagedExercise,
+};
+
+pub fn resolveManagedExercise(adapter: *sqlite.Adapter, allocator: std.mem.Allocator, scope: tracking.Id, reference: []const u8) !ManagedExerciseResolution {
+    if (tracking.Id.parse(reference)) |id| {
+        switch (try adapter.readManagedExercise(allocator, .{ .host_scope_key = scope, .exercise_id = id })) {
+            .found => |value| return .{ .found = value },
+            .not_found => {},
+        }
+    } else |_| {}
+    const searched = try adapter.searchExercises(allocator, .{ .host_scope_key = scope, .text = reference, .max_results = 100, .include_archived = true });
+    const values = switch (searched) {
+        .found => |found| found,
+        .rejected => return .not_found,
+    };
+    if (values.len == 0) return .not_found;
+    const canonical_values = try allocator.alloc(persistence.canonical.Exercise, values.len);
+    const matches = try allocator.alloc(persistence.canonical.Exercise, values.len);
+    for (values, 0..) |value, index| canonical_values[index] = value.exercise;
+    return switch (try resolution.resolveExercise(canonical_values, reference, matches)) {
+        .found => |exercise| for (values) |value| {
+            if (std.mem.eql(u8, value.exercise.id, exercise.id)) return .{ .found = value };
+        } else unreachable,
+        .not_found => .not_found,
+        .ambiguous => |exercises| blk: {
+            const managed = try allocator.alloc(tracking.ManagedExercise, exercises.len);
+            for (exercises, 0..) |exercise, index| for (values) |value| if (std.mem.eql(u8, value.exercise.id, exercise.id)) {
+                managed[index] = value;
+                break;
+            };
+            break :blk .{ .ambiguous = managed };
+        },
+    };
+}

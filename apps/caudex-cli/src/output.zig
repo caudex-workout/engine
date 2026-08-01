@@ -51,6 +51,33 @@ pub const WorkoutExerciseInfo = struct {
     setCount: usize,
 };
 
+pub const ExerciseInfo = struct {
+    id: []const u8,
+    name: ?[]const u8,
+    aliases: []const []const u8,
+    equipmentIds: []const []const u8,
+    movementTags: []const []const u8,
+    unilateral: ?bool,
+    revision: u64,
+    availability: []const u8,
+    updatedAt: []const u8,
+};
+
+pub fn writeExercises(writer: *std.Io.Writer, settings: Settings, kind: []const u8, command_id: ?[]const u8, disposition: ?[]const u8, exercises: []const ExerciseInfo) !void {
+    if (settings.quiet) return;
+    switch (settings.format) {
+        .human => {
+            if (exercises.len == 0) return writer.writeAll("No exercises.\n");
+            try writer.writeAll("ID  NAME  STATUS  REVISION\n");
+            for (exercises) |exercise| try writer.print("{s}  {s}  {s}  {d}\n", .{ exercise.id, exercise.name orelse "-", exercise.availability, exercise.revision });
+        },
+        .json => {
+            try std.json.Stringify.value(.{ .schemaVersion = 1, .kind = kind, .data = .{ .commandId = command_id, .disposition = disposition, .exercises = exercises } }, .{ .emit_null_optional_fields = false }, writer);
+            try writer.writeByte('\n');
+        },
+    }
+}
+
 pub fn requestedFormat(args: []const []const u8) Format {
     var index: usize = 1;
     while (index + 1 < args.len) : (index += 1) {

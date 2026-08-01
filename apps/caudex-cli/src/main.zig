@@ -23,6 +23,12 @@ const help_text =
     \\  caudex [global options] set reopen [--workout ID] [--exercise ID] --set ID
     \\  caudex [global options] workout finish [--workout ID]
     \\  caudex [global options] workout cancel [--workout ID] [--yes]
+    \\  caudex [global options] exercise create ID --name NAME [exercise options]
+    \\  caudex [global options] exercise edit EXERCISE [exercise options]
+    \\  caudex [global options] exercise show EXERCISE
+    \\  caudex [global options] exercise list [--limit N] [--include-archived]
+    \\  caudex [global options] exercise search TEXT [--limit N] [--include-archived]
+    \\  caudex [global options] exercise archive|restore EXERCISE [command options]
     \\  caudex --help
     \\  caudex version
     \\
@@ -88,6 +94,22 @@ const EndOptions = struct {
     command_id: ?[]const u8 = null,
     occurred_at: ?[]const u8 = null,
     yes: bool = false,
+};
+
+const CatalogOptions = struct {
+    reference: ?[]const u8 = null,
+    name: ?[]const u8 = null,
+    aliases: [32][]const u8 = undefined,
+    alias_count: usize = 0,
+    equipment: [32][]const u8 = undefined,
+    equipment_count: usize = 0,
+    movements: [32][]const u8 = undefined,
+    movement_count: usize = 0,
+    unilateral: ?bool = null,
+    command_id: ?[]const u8 = null,
+    occurred_at: ?[]const u8 = null,
+    limit: u16 = 25,
+    include_archived: bool = false,
 };
 
 const PathEnvironment = struct {
@@ -183,6 +205,8 @@ fn run(
         .quiet = global.quiet,
     };
     const remaining = args[global.command_index..];
+    if (remaining.len >= 2 and std.mem.eql(u8, remaining[0], "exercise"))
+        return try catalogCommand(io, allocator, adapter, global, remaining[1], remaining[2..], settings, stdout);
     if (remaining.len == 2 and
         std.mem.eql(u8, remaining[0], "database") and
         std.mem.eql(u8, remaining[1], "info"))
@@ -257,6 +281,143 @@ fn run(
         );
     }
     return error.InvalidArguments;
+}
+
+fn catalogCommand(io: std.Io, allocator: std.mem.Allocator, adapter: *sqlite.Adapter, global: GlobalOptions, verb: []const u8, args: []const []const u8, settings: output.Settings, stdout: *std.Io.Writer) !?errors.Failure {
+    const scope = try tracking.Id.parse(global.scope);
+    if (std.mem.eql(u8, verb, "list")) {
+        const options = try parseCatalogQueryOptions(args, false);
+        return writeCatalogQuery(allocator, stdout, settings, "caudex.exercise.list", try adapter.listExercises(allocator, .{ .host_scope_key = scope, .max_results = options.limit, .include_archived = options.include_archived }));
+    }
+    if (std.mem.eql(u8, verb, "search")) {
+        const options = try parseCatalogQueryOptions(args, true);
+        return writeCatalogQuery(allocator, stdout, settings, "caudex.exercise.search", try adapter.searchExercises(allocator, .{ .host_scope_key = scope, .text = options.reference.?, .max_results = options.limit, .include_archived = options.include_archived }));
+    }
+    if (!std.mem.eql(u8, verb, "create") and !std.mem.eql(u8, verb, "edit") and !std.mem.eql(u8, verb, "show") and !std.mem.eql(u8, verb, "archive") and !std.mem.eql(u8, verb, "restore")) return error.InvalidArguments;
+    const options = try parseCatalogMutationOptions(args, verb);
+    if (std.mem.eql(u8, verb, "show")) {
+        const managed = switch (try use_cases.resolveManagedExercise(adapter, allocator, scope, options.reference.?)) {
+            .found => |value| value,
+            .not_found => return errors.managedExerciseNotFound(),
+            .ambiguous => |values| return errors.ambiguousExercise(try managedExerciseIds(allocator, values)),
+        };
+        try writeManagedExercises(allocator, stdout, settings, "caudex.exercise.show", null, null, &.{managed});
+        return null;
+    }
+    const occurred_at = options.occurred_at orelse try currentTimestamp(io, allocator);
+    const metadata: tracking.CommandMetadata = .{ .command_id = try tracking.Id.parse(options.command_id orelse try generateId(io, allocator, "command")), .occurred_at = try tracking.Timestamp.parse(occurred_at) };
+    const result: tracking.CatalogCommandResult = if (std.mem.eql(u8, verb, "create"))
+        try adapter.createExercise(allocator, .{ .metadata = metadata, .host_scope_key = scope, .exercise = .{ .id = options.reference.?, .name = options.name, .aliases = options.aliases[0..options.alias_count], .equipmentIds = options.equipment[0..options.equipment_count], .movementTags = options.movements[0..options.movement_count], .unilateral = options.unilateral } })
+    else blk: {
+        const current = switch (try use_cases.resolveManagedExercise(adapter, allocator, scope, options.reference.?)) {
+            .found => |value| value,
+            .not_found => return errors.managedExerciseNotFound(),
+            .ambiguous => |values| return errors.ambiguousExercise(try managedExerciseIds(allocator, values)),
+        };
+        if (std.mem.eql(u8, verb, "edit")) {
+            var exercise = current.exercise;
+            if (options.name) |name| exercise.name = name;
+            if (options.alias_count != 0) exercise.aliases = options.aliases[0..options.alias_count];
+            if (options.equipment_count != 0) exercise.equipmentIds = options.equipment[0..options.equipment_count];
+            if (options.movement_count != 0) exercise.movementTags = options.movements[0..options.movement_count];
+            if (options.unilateral) |value| exercise.unilateral = value;
+            break :blk try adapter.editExercise(allocator, .{ .metadata = metadata, .host_scope_key = scope, .exercise = exercise, .expected_revision = current.revision });
+        }
+        const change: tracking.ChangeExerciseAvailabilityCommand = .{ .metadata = metadata, .host_scope_key = scope, .exercise_id = .{ .bytes = current.exercise.id }, .expected_revision = current.revision };
+        break :blk if (std.mem.eql(u8, verb, "archive")) try adapter.archiveExercise(allocator, change) else try adapter.restoreExercise(allocator, change);
+    };
+    switch (result) {
+        .accepted => |accepted| {
+            try writeManagedExercises(allocator, stdout, settings, if (std.mem.eql(u8, verb, "create")) "caudex.exercise.created" else if (std.mem.eql(u8, verb, "edit")) "caudex.exercise.edited" else if (std.mem.eql(u8, verb, "archive")) "caudex.exercise.archived" else "caudex.exercise.restored", accepted.command_id.bytes, @tagName(accepted.disposition), &.{accepted.exercise});
+            return null;
+        },
+        .rejected => |rejected| return errors.fromTrackingIssue(rejected.issues[0]),
+    }
+}
+
+fn writeCatalogQuery(allocator: std.mem.Allocator, stdout: *std.Io.Writer, settings: output.Settings, kind: []const u8, result: tracking.SearchExercisesResult) !?errors.Failure {
+    return switch (result) {
+        .found => |values| blk: {
+            try writeManagedExercises(allocator, stdout, settings, kind, null, null, values);
+            break :blk null;
+        },
+        .rejected => |issue| errors.fromTrackingIssue(issue),
+    };
+}
+
+fn writeManagedExercises(allocator: std.mem.Allocator, stdout: *std.Io.Writer, settings: output.Settings, kind: []const u8, command_id: ?[]const u8, disposition: ?[]const u8, values: []const tracking.ManagedExercise) !void {
+    const infos = try allocator.alloc(output.ExerciseInfo, values.len);
+    for (values, 0..) |value, index| infos[index] = .{ .id = value.exercise.id, .name = value.exercise.name, .aliases = value.exercise.aliases, .equipmentIds = value.exercise.equipmentIds, .movementTags = value.exercise.movementTags, .unilateral = value.exercise.unilateral, .revision = value.revision, .availability = @tagName(value.availability), .updatedAt = value.updated_at.bytes };
+    try output.writeExercises(stdout, settings, kind, command_id, disposition, infos);
+}
+
+fn managedExerciseIds(allocator: std.mem.Allocator, values: []const tracking.ManagedExercise) ![]const []const u8 {
+    const ids = try allocator.alloc([]const u8, values.len);
+    for (values, 0..) |value, index| ids[index] = value.exercise.id;
+    return ids;
+}
+
+fn parseCatalogQueryOptions(args: []const []const u8, require_reference: bool) !CatalogOptions {
+    var options = CatalogOptions{};
+    var index: usize = 0;
+    if (require_reference) {
+        if (args.len == 0 or std.mem.startsWith(u8, args[0], "--")) return error.InvalidArguments;
+        options.reference = args[0];
+        index = 1;
+    }
+    while (index < args.len) : (index += 1) {
+        if (std.mem.eql(u8, args[index], "--include-archived")) {
+            options.include_archived = true;
+            continue;
+        }
+        if (!std.mem.eql(u8, args[index], "--limit") or index + 1 >= args.len) return error.InvalidArguments;
+        index += 1;
+        options.limit = std.fmt.parseInt(u16, args[index], 10) catch return error.InvalidArguments;
+    }
+    if (options.limit == 0 or options.limit > 100) return error.InvalidArguments;
+    return options;
+}
+
+fn parseCatalogMutationOptions(args: []const []const u8, verb: []const u8) !CatalogOptions {
+    if (args.len == 0 or std.mem.startsWith(u8, args[0], "--")) return error.InvalidArguments;
+    var options = CatalogOptions{ .reference = args[0] };
+    if (std.mem.eql(u8, verb, "show") and args.len != 1) return error.InvalidArguments;
+    var index: usize = 1;
+    while (index < args.len) : (index += 1) {
+        const token = args[index];
+        if (std.mem.eql(u8, token, "--unilateral") or std.mem.eql(u8, token, "--bilateral")) {
+            if (options.unilateral != null) return error.InvalidArguments;
+            options.unilateral = std.mem.eql(u8, token, "--unilateral");
+            continue;
+        }
+        index += 1;
+        if (index >= args.len or args[index].len == 0) return error.InvalidArguments;
+        if (std.mem.eql(u8, token, "--name")) {
+            if (options.name != null) return error.InvalidArguments;
+            options.name = args[index];
+        } else if (std.mem.eql(u8, token, "--alias")) {
+            if (options.alias_count == options.aliases.len) return error.InvalidArguments;
+            options.aliases[options.alias_count] = args[index];
+            options.alias_count += 1;
+        } else if (std.mem.eql(u8, token, "--equipment")) {
+            if (options.equipment_count == options.equipment.len) return error.InvalidArguments;
+            options.equipment[options.equipment_count] = args[index];
+            options.equipment_count += 1;
+        } else if (std.mem.eql(u8, token, "--movement")) {
+            if (options.movement_count == options.movements.len) return error.InvalidArguments;
+            options.movements[options.movement_count] = args[index];
+            options.movement_count += 1;
+        } else if (std.mem.eql(u8, token, "--command-id")) {
+            if (options.command_id != null) return error.InvalidArguments;
+            options.command_id = args[index];
+        } else if (std.mem.eql(u8, token, "--occurred-at")) {
+            if (options.occurred_at != null) return error.InvalidArguments;
+            options.occurred_at = args[index];
+        } else return error.InvalidArguments;
+    }
+    if (std.mem.eql(u8, verb, "create") and options.name == null) return error.InvalidArguments;
+    if ((std.mem.eql(u8, verb, "archive") or std.mem.eql(u8, verb, "restore")) and (options.name != null or options.alias_count != 0 or options.equipment_count != 0 or options.movement_count != 0 or options.unilateral != null)) return error.InvalidArguments;
+    return options;
 }
 
 fn addExercise(

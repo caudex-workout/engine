@@ -469,6 +469,12 @@ pub fn build(b: *std.Build) void {
         \\  caudex [global options] set reopen [--workout ID] [--exercise ID] --set ID
         \\  caudex [global options] workout finish [--workout ID]
         \\  caudex [global options] workout cancel [--workout ID] [--yes]
+        \\  caudex [global options] exercise create ID --name NAME [exercise options]
+        \\  caudex [global options] exercise edit EXERCISE [exercise options]
+        \\  caudex [global options] exercise show EXERCISE
+        \\  caudex [global options] exercise list [--limit N] [--include-archived]
+        \\  caudex [global options] exercise search TEXT [--limit N] [--include-archived]
+        \\  caudex [global options] exercise archive|restore EXERCISE [command options]
         \\  caudex --help
         \\  caudex version
         \\
@@ -617,6 +623,12 @@ pub fn build(b: *std.Build) void {
     });
     cli_workout_end_test.addArtifactArg(cli);
 
+    const cli_catalog_commands_test = b.addSystemCommand(&.{
+        "bash",
+        "tests/cli_catalog_commands_test.sh",
+    });
+    cli_catalog_commands_test.addArtifactArg(cli);
+
     const architecture_probe_files = b.addWriteFiles();
     const private_import_probe = architecture_probe_files.add("caudex_private_import.zig",
         \\const private = @import("caudex_private_root");
@@ -645,6 +657,7 @@ pub fn build(b: *std.Build) void {
     cli_test_step.dependOn(&cli_workout_start_test.step);
     cli_test_step.dependOn(&cli_set_commands_test.step);
     cli_test_step.dependOn(&cli_workout_end_test.step);
+    cli_test_step.dependOn(&cli_catalog_commands_test.step);
     cli_test_step.dependOn(&private_import_check.step);
 
     const npm_package_test = b.addSystemCommand(&.{

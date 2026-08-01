@@ -52,6 +52,19 @@ caudex --database caudex.sqlite --format json \
   workout show --workout workout-example
 ```
 
+Catalog examples are created through the same public client surface; no SQL or
+private seed command is required:
+
+```sh
+caudex --database caudex.sqlite exercise create bench-press \
+  --name "Bench Press" --alias bench --equipment barbell
+caudex --database caudex.sqlite exercise search bench
+caudex --database caudex.sqlite exercise edit bench-press \
+  --name "Competition Bench Press"
+caudex --database caudex.sqlite exercise archive bench-press
+caudex --database caudex.sqlite exercise restore bench-press
+```
+
 `--format human|json` selects human output or a versioned JSON envelope.
 Diagnostics use stderr and the same selected format; requested data remains on
 stdout. `--color auto|always|never` controls human styling, while JSON and
