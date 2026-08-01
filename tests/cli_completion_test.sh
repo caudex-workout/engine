@@ -12,15 +12,16 @@ CAUDEX_DATABASE="$temporary_directory/missing/caudex.sqlite" "$cli" completion f
 printf '%s\n' \
   '# bash completion for caudex' \
   '_caudex() {' \
-  '    local commands="database workout set exercise history config batch completion command-reference"' \
+  '    local commands="database doctor workout set exercise history config batch completion command-reference"' \
   '    COMPREPLY=( $(compgen -W "$commands" -- "${COMP_WORDS[COMP_CWORD]}") )' \
   '}' \
   'complete -F _caudex caudex' >"$temporary_directory/expected-bash"
 printf '%s\n' \
   '#compdef caudex' \
-  "_arguments '1:command:(database workout set exercise history config batch completion command-reference)'" >"$temporary_directory/expected-zsh"
+  "_arguments '1:command:(database doctor workout set exercise history config batch completion command-reference)'" >"$temporary_directory/expected-zsh"
 printf '%s\n' \
   "complete -c caudex -f -a 'database'" \
+  "complete -c caudex -f -a 'doctor'" \
   "complete -c caudex -f -a 'workout'" \
   "complete -c caudex -f -a 'set'" \
   "complete -c caudex -f -a 'exercise'" \

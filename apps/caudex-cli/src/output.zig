@@ -31,6 +31,11 @@ pub const DatabaseInfo = struct {
     compatibility: []const u8,
 };
 
+pub const DatabaseCheck = struct {
+    path: []const u8,
+    status: []const u8,
+};
+
 pub const WorkoutInfo = struct {
     document_kind: []const u8,
     command_id: ?[]const u8 = null,
@@ -144,6 +149,17 @@ pub fn writeDatabaseInfo(
     switch (settings.format) {
         .human => try writeHumanDatabaseInfo(writer, settings.useColor(), info),
         .json => try writeJsonDatabaseInfo(writer, info),
+    }
+}
+
+pub fn writeDatabaseCheck(writer: *std.Io.Writer, settings: Settings, kind: []const u8, check: DatabaseCheck) !void {
+    if (settings.quiet) return;
+    switch (settings.format) {
+        .human => try writer.print("Database: {s}\nIntegrity: {s}\n", .{ check.path, check.status }),
+        .json => {
+            try std.json.Stringify.value(.{ .schemaVersion = 1, .kind = kind, .data = .{ .databasePath = check.path, .integrity = check.status } }, .{}, writer);
+            try writer.writeByte('\n');
+        },
     }
 }
 

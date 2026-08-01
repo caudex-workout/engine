@@ -117,15 +117,15 @@ pub fn fromError(err: anyerror) Failure {
         },
         error.MigrationFailed => .{
             .exit_class = .database,
-            .code = "database.migration_failed",
+            .code = "database.incompatible",
             .category = "database",
-            .message = "The database migration failed.",
+            .message = "The database is incompatible and could not be migrated.",
         },
         error.UnsupportedSchema => .{
             .exit_class = .database,
-            .code = "database.unsupported_schema",
+            .code = "database.newer_schema",
             .category = "database",
-            .message = "The database schema is not supported.",
+            .message = "The database was created by a newer Caudex version.",
         },
         error.DataDirectoryUnavailable => .{
             .exit_class = .runtime,

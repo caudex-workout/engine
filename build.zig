@@ -460,7 +460,8 @@ pub fn build(b: *std.Build) void {
         \\Caudex Workout Engine reference client
         \\
         \\Usage:
-        \\  caudex [--database PATH] [--format human|json] [--color auto|always|never] database info
+        \\  caudex [--database PATH] [--format human|json] [--color auto|always|never] database info|check
+        \\  caudex [global options] doctor
         \\  caudex [global options] workout start [start options]
         \\  caudex [global options] workout add-exercise EXERCISE [options]
         \\  caudex [global options] workout show [--workout ID]
@@ -669,6 +670,12 @@ pub fn build(b: *std.Build) void {
     });
     cli_shell_smoke_test.addArtifactArg(cli);
 
+    const cli_database_diagnostics_test = b.addSystemCommand(&.{
+        "bash",
+        "tests/cli_database_diagnostics_test.sh",
+    });
+    cli_database_diagnostics_test.addArtifactArg(cli);
+
     const architecture_probe_files = b.addWriteFiles();
     const private_import_probe = architecture_probe_files.add("caudex_private_import.zig",
         \\const private = @import("caudex_private_root");
@@ -703,6 +710,7 @@ pub fn build(b: *std.Build) void {
     cli_test_step.dependOn(&cli_batch_test.step);
     cli_test_step.dependOn(&cli_completion_test.step);
     cli_test_step.dependOn(&cli_shell_smoke_test.step);
+    cli_test_step.dependOn(&cli_database_diagnostics_test.step);
     cli_test_step.dependOn(&private_import_check.step);
 
     const npm_package_test = b.addSystemCommand(&.{
@@ -876,6 +884,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&cli_workout_end_test.step);
     test_step.dependOn(&cli_completion_test.step);
     test_step.dependOn(&cli_shell_smoke_test.step);
+    test_step.dependOn(&cli_database_diagnostics_test.step);
     test_step.dependOn(&private_import_check.step);
     test_step.dependOn(&npm_clean_smoke.step);
     test_step.dependOn(&npm_release_test.step);

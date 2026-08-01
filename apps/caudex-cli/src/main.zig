@@ -15,7 +15,8 @@ const help_text =
     \\Caudex Workout Engine reference client
     \\
     \\Usage:
-    \\  caudex [--database PATH] [--format human|json] [--color auto|always|never] database info
+    \\  caudex [--database PATH] [--format human|json] [--color auto|always|never] database info|check
+    \\  caudex [global options] doctor
     \\  caudex [global options] workout start [start options]
     \\  caudex [global options] workout add-exercise EXERCISE [options]
     \\  caudex [global options] workout show [--workout ID]
@@ -274,6 +275,16 @@ fn run(
             .minimum_schema_version = metadata.minimum_schema_version,
             .latest_schema_version = metadata.latest_schema_version,
             .compatibility = @tagName(metadata.compatibility),
+        });
+        return null;
+    }
+    if ((remaining.len == 2 and std.mem.eql(u8, remaining[0], "database") and std.mem.eql(u8, remaining[1], "check")) or
+        (remaining.len == 1 and std.mem.eql(u8, remaining[0], "doctor")))
+    {
+        const report = try adapter.integrity();
+        try output.writeDatabaseCheck(stdout, settings, if (remaining.len == 1) "caudex.database.doctor" else "caudex.database.check", .{
+            .path = path,
+            .status = @tagName(report.status),
         });
         return null;
     }

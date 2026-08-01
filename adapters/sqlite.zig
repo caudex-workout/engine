@@ -52,6 +52,21 @@ pub const MetadataError = error{
     OperationFailed,
 };
 
+pub const IntegrityStatus = enum {
+    ok,
+    corrupt,
+};
+
+pub const IntegrityReport = struct {
+    status: IntegrityStatus,
+};
+
+pub const IntegrityError = error{
+    Busy,
+    Corrupt,
+    OperationFailed,
+};
+
 pub const TrackingError = persistence.CapabilityError;
 
 /// Opaque connection handle. Its representation is not public API.
@@ -83,6 +98,19 @@ pub const Adapter = opaque {
             .compatibility = .current,
             .database_kind = kind,
         };
+    }
+
+    /// Checks SQLite's own structural invariants without exposing raw SQLite
+    /// diagnostics, which can contain host paths or internal implementation data.
+    pub fn integrity(self: *Adapter) IntegrityError!IntegrityReport {
+        var query = self.prepare("PRAGMA integrity_check") catch |err| return mapIntegrityError(err);
+        defer query.finalize();
+        var status: IntegrityStatus = .ok;
+        while (query.row() catch |err| return mapIntegrityError(err)) {
+            const value = column(query.raw, 0) orelse return error.Corrupt;
+            if (!std.mem.eql(u8, value, "ok")) status = .corrupt;
+        }
+        return .{ .status = status };
     }
 
     pub fn catalogSource(self: *Adapter) persistence.CatalogSource {
@@ -2008,5 +2036,13 @@ fn mapMetadataError(err: persistence.AdapterError) MetadataError {
         error.Unavailable => error.Busy,
         error.InvalidData, error.UnsupportedVersion => error.Corrupt,
         error.OperationFailed => error.OperationFailed,
+    };
+}
+
+fn mapIntegrityError(err: persistence.AdapterError) IntegrityError {
+    return switch (err) {
+        error.Unavailable => error.Busy,
+        error.InvalidData => error.Corrupt,
+        error.UnsupportedVersion, error.OperationFailed => error.OperationFailed,
     };
 }

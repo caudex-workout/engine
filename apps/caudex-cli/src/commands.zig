@@ -9,7 +9,8 @@ const Command = struct {
 };
 
 const commands = [_]Command{
-    .{ .name = "database", .usage = "database info", .summary = "Show the selected database's public adapter metadata." },
+    .{ .name = "database", .usage = "database info|check", .summary = "Show public adapter metadata or a sanitized integrity result." },
+    .{ .name = "doctor", .usage = "doctor", .summary = "Run the same sanitized database integrity check." },
     .{ .name = "workout", .usage = "workout start|add-exercise|show|finish|cancel", .summary = "Start, modify, inspect, finish, or cancel workouts." },
     .{ .name = "set", .usage = "set log|skip|reopen", .summary = "Record or adjust a workout set." },
     .{ .name = "exercise", .usage = "exercise create|edit|show|list|search|archive|restore", .summary = "Manage the local exercise catalog." },

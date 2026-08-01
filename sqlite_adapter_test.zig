@@ -167,6 +167,13 @@ test "newer schema is rejected distinctly" {
     );
 }
 
+test "integrity report is available through the public adapter" {
+    const adapter = try sqlite.openInMemory(.{});
+    defer adapter.close();
+    const report = try adapter.integrity();
+    try std.testing.expectEqual(sqlite.IntegrityStatus.ok, report.status);
+}
+
 test "schema version one migrates forward to current metadata" {
     var temporary = std.testing.tmpDir(.{});
     defer temporary.cleanup();
