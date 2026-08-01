@@ -159,7 +159,7 @@ test "newer schema is rejected distinctly" {
         database,
         "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY)",
     );
-    try execRaw(database, "INSERT INTO schema_migrations (version) VALUES (5)");
+    try execRaw(database, "INSERT INTO schema_migrations (version) VALUES (6)");
 
     try std.testing.expectError(
         error.UnsupportedSchema,

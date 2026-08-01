@@ -21,6 +21,8 @@ const help_text =
     \\  caudex [global options] set log [--workout ID] [--exercise ID] [--set ID] [METRICS...]
     \\  caudex [global options] set skip [--workout ID] [--exercise ID] [--set ID]
     \\  caudex [global options] set reopen [--workout ID] [--exercise ID] --set ID
+    \\  caudex [global options] workout finish [--workout ID]
+    \\  caudex [global options] workout cancel [--workout ID] [--yes]
     \\  caudex --help
     \\  caudex version
     \\
@@ -79,6 +81,13 @@ const SetOptions = struct {
     occurred_at: ?[]const u8 = null,
     metrics: [5]tracking.Metric = undefined,
     metric_count: usize = 0,
+};
+
+const EndOptions = struct {
+    workout_id: ?[]const u8 = null,
+    command_id: ?[]const u8 = null,
+    occurred_at: ?[]const u8 = null,
+    yes: bool = false,
 };
 
 const PathEnvironment = struct {
@@ -199,6 +208,12 @@ fn run(
             return try changeSet(io, allocator, adapter, global, remaining[2..], settings, stdout, .skip);
         if (std.mem.eql(u8, remaining[1], "reopen"))
             return try changeSet(io, allocator, adapter, global, remaining[2..], settings, stdout, .reopen);
+    }
+    if (remaining.len >= 2 and
+        std.mem.eql(u8, remaining[0], "workout") and
+        (std.mem.eql(u8, remaining[1], "finish") or std.mem.eql(u8, remaining[1], "cancel")))
+    {
+        return try endWorkout(io, allocator, adapter, global, remaining[2..], settings, stdout, if (std.mem.eql(u8, remaining[1], "finish")) .finish else .cancel);
     }
     if (remaining.len >= 2 and
         std.mem.eql(u8, remaining[0], "workout") and
@@ -379,6 +394,82 @@ fn parseGlobalOptions(args: []const []const u8) !GlobalOptions {
 }
 
 const SetAction = enum { log, skip, reopen };
+const EndAction = enum { finish, cancel };
+
+fn endWorkout(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    adapter: *sqlite.Adapter,
+    global: GlobalOptions,
+    args: []const []const u8,
+    settings: output.Settings,
+    stdout: *std.Io.Writer,
+    action: EndAction,
+) !?errors.Failure {
+    const options = try parseEndOptions(args, action);
+    if (action == .cancel and !options.yes) {
+        if (!(std.Io.File.stdin().isTty(io) catch false)) return errors.confirmationRequired();
+        try stdout.writeAll("Cancel this workout? [y/N] ");
+        try stdout.flush();
+        var input_buffer: [16]u8 = undefined;
+        var stdin_reader = std.Io.File.stdin().reader(io, &input_buffer);
+        const answer = (try stdin_reader.interface.takeDelimiter('\n')) orelse return errors.cancelledByUser();
+        if (!std.ascii.eqlIgnoreCase(std.mem.trim(u8, answer, " \r\t"), "y") and
+            !std.ascii.eqlIgnoreCase(std.mem.trim(u8, answer, " \r\t"), "yes"))
+            return errors.cancelledByUser();
+    }
+    const scope = try trackingScope(global);
+    const workout = switch (try use_cases.resolveWorkout(adapter, allocator, scope, if (options.workout_id) |id| try tracking.Id.parse(id) else null)) {
+        .found => |value| value,
+        .not_found => return errors.workoutNotFound(),
+        .ambiguous => |values| return errors.ambiguousWorkout(try workoutIds(allocator, values)),
+    };
+    const occurred_at = options.occurred_at orelse try currentTimestamp(io, allocator);
+    const metadata: tracking.CommandMetadata = .{
+        .command_id = try tracking.Id.parse(options.command_id orelse try generateId(io, allocator, "command")),
+        .occurred_at = try tracking.Timestamp.parse(occurred_at),
+    };
+    const result = switch (action) {
+        .finish => try adapter.completeWorkout(allocator, .{
+            .metadata = metadata,
+            .scope = scope,
+            .workout_id = workout.id,
+            .expected_revision = workout.revision,
+            .completed_at = metadata.occurred_at,
+        }),
+        .cancel => try adapter.cancelWorkout(allocator, .{
+            .metadata = metadata,
+            .scope = scope,
+            .workout_id = workout.id,
+            .expected_revision = workout.revision,
+            .cancelled_at = metadata.occurred_at,
+        }),
+    };
+    switch (result) {
+        .accepted => |accepted| {
+            try writeWorkoutState(allocator, stdout, settings, if (action == .finish) "caudex.workout.finished" else "caudex.workout.cancelled", accepted.command_id.bytes, @tagName(accepted.disposition), accepted.workout);
+            return null;
+        },
+        .rejected => |rejected| return errors.fromTrackingIssue(rejected.issues[0]),
+    }
+}
+
+fn parseEndOptions(args: []const []const u8, action: EndAction) !EndOptions {
+    var options = EndOptions{};
+    var index: usize = 0;
+    while (index < args.len) : (index += 1) {
+        if (std.mem.eql(u8, args[index], "--yes")) {
+            if (action != .cancel or options.yes) return error.InvalidArguments;
+            options.yes = true;
+            continue;
+        }
+        const target: *?[]const u8 = if (std.mem.eql(u8, args[index], "--workout")) &options.workout_id else if (std.mem.eql(u8, args[index], "--command-id")) &options.command_id else if (std.mem.eql(u8, args[index], "--occurred-at")) &options.occurred_at else return error.InvalidArguments;
+        index += 1;
+        if (index >= args.len or target.* != null or args[index].len == 0) return error.InvalidArguments;
+        target.* = args[index];
+    }
+    return options;
+}
 
 fn changeSet(
     io: std.Io,

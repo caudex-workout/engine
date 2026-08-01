@@ -467,6 +467,8 @@ pub fn build(b: *std.Build) void {
         \\  caudex [global options] set log [--workout ID] [--exercise ID] [--set ID] [METRICS...]
         \\  caudex [global options] set skip [--workout ID] [--exercise ID] [--set ID]
         \\  caudex [global options] set reopen [--workout ID] [--exercise ID] --set ID
+        \\  caudex [global options] workout finish [--workout ID]
+        \\  caudex [global options] workout cancel [--workout ID] [--yes]
         \\  caudex --help
         \\  caudex version
         \\
@@ -500,8 +502,8 @@ pub fn build(b: *std.Build) void {
         \\Database: :memory:
         \\Kind: memory
         \\Adapter version: 0.1.0
-        \\Schema version: 4
-        \\Supported schema: 1-4
+        \\Schema version: 5
+        \\Supported schema: 1-5
         \\Compatibility: current
         \\
     );
@@ -518,13 +520,13 @@ pub fn build(b: *std.Build) void {
     cli_database_json.expectStdOutEqual(
         "{\"schemaVersion\":1,\"kind\":\"caudex.database.info\",\"data\":{" ++
             "\"databasePath\":\":memory:\",\"databaseKind\":\"memory\"," ++
-            "\"adapterVersion\":\"0.1.0\",\"databaseSchemaVersion\":4," ++
-            "\"minimumSchemaVersion\":1,\"latestSchemaVersion\":4," ++
+            "\"adapterVersion\":\"0.1.0\",\"databaseSchemaVersion\":5," ++
+            "\"minimumSchemaVersion\":1,\"latestSchemaVersion\":5," ++
             "\"compatibility\":\"current\"}}\n",
     );
 
     const cli_invalid = b.addRunArtifact(cli);
-    cli_invalid.addArgs(&.{ "database", "unknown" });
+    cli_invalid.addArgs(&.{ "--database", ":memory:", "database", "unknown" });
     cli_invalid.expectExitCode(2);
     cli_invalid.expectStdOutEqual("");
     cli_invalid.expectStdErrEqual(
@@ -532,7 +534,7 @@ pub fn build(b: *std.Build) void {
     );
 
     const cli_invalid_json = b.addRunArtifact(cli);
-    cli_invalid_json.addArgs(&.{ "--format", "json", "database", "unknown" });
+    cli_invalid_json.addArgs(&.{ "--database", ":memory:", "--format", "json", "database", "unknown" });
     cli_invalid_json.expectExitCode(2);
     cli_invalid_json.expectStdOutEqual("");
     cli_invalid_json.expectStdErrEqual(
@@ -564,8 +566,8 @@ pub fn build(b: *std.Build) void {
         "{\"schemaVersion\":1,\"kind\":\"caudex.database.info\",\"data\":{" ++
             "\"databasePath\":\".zig-cache/cwe112-broken-pipe.sqlite\"," ++
             "\"databaseKind\":\"file\",\"adapterVersion\":\"0.1.0\"," ++
-            "\"databaseSchemaVersion\":4,\"minimumSchemaVersion\":1," ++
-            "\"latestSchemaVersion\":4,\"compatibility\":\"current\"}}\n",
+            "\"databaseSchemaVersion\":5,\"minimumSchemaVersion\":1," ++
+            "\"latestSchemaVersion\":5,\"compatibility\":\"current\"}}\n",
     );
 
     const cli_workout_start_test = b.addSystemCommand(&.{
@@ -609,6 +611,12 @@ pub fn build(b: *std.Build) void {
     cli_set_commands_test.addArtifactArg(cli);
     cli_set_commands_test.addArtifactArg(cli_catalog_seed);
 
+    const cli_workout_end_test = b.addSystemCommand(&.{
+        "bash",
+        "tests/cli_workout_end_test.sh",
+    });
+    cli_workout_end_test.addArtifactArg(cli);
+
     const architecture_probe_files = b.addWriteFiles();
     const private_import_probe = architecture_probe_files.add("caudex_private_import.zig",
         \\const private = @import("caudex_private_root");
@@ -636,6 +644,7 @@ pub fn build(b: *std.Build) void {
     cli_test_step.dependOn(&cli_after_broken_pipe.step);
     cli_test_step.dependOn(&cli_workout_start_test.step);
     cli_test_step.dependOn(&cli_set_commands_test.step);
+    cli_test_step.dependOn(&cli_workout_end_test.step);
     cli_test_step.dependOn(&private_import_check.step);
 
     const npm_package_test = b.addSystemCommand(&.{
@@ -806,6 +815,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&cli_workout_resolution_test.step);
     test_step.dependOn(&cli_add_exercise_test.step);
     test_step.dependOn(&cli_set_commands_test.step);
+    test_step.dependOn(&cli_workout_end_test.step);
     test_step.dependOn(&private_import_check.step);
     test_step.dependOn(&npm_clean_smoke.step);
     test_step.dependOn(&npm_release_test.step);

@@ -89,6 +89,37 @@ test "invalid identifiers and timestamps are structured rejections" {
     );
 }
 
+test "short completion and cancellation are distinct terminal states" {
+    var issues: [1]tracking.Issue = undefined;
+    const workout = (try tracking.startWorkout(.{}, command, &issues)).accepted.workout;
+    const completed = try tracking.endWorkout(.{ .workouts = &.{workout} }, .{ .complete = .{
+        .metadata = .{ .command_id = .{ .bytes = "finish" }, .occurred_at = .{ .bytes = "2026-07-26T12:05:00Z" } },
+        .scope = scope,
+        .workout_id = workout.id,
+        .expected_revision = 1,
+        .completed_at = .{ .bytes = "2026-07-26T12:05:00Z" },
+    } }, &issues);
+    try std.testing.expectEqual(tracking.WorkoutStatus.completed, completed.accepted.workout.status);
+    try std.testing.expectEqualStrings(tracking.issue_codes.short_workout_completed, completed.accepted.issues[0].code);
+    const cancelled = try tracking.endWorkout(.{ .workouts = &.{workout} }, .{ .cancel = .{
+        .metadata = .{ .command_id = .{ .bytes = "cancel" }, .occurred_at = .{ .bytes = "2026-07-26T12:06:00Z" } },
+        .scope = scope,
+        .workout_id = workout.id,
+        .expected_revision = 1,
+        .cancelled_at = .{ .bytes = "2026-07-26T12:06:00Z" },
+    } }, &issues);
+    try std.testing.expectEqual(tracking.WorkoutStatus.cancelled, cancelled.accepted.workout.status);
+    try std.testing.expectEqual(@as(usize, 0), cancelled.accepted.issues.len);
+    const rejected = try tracking.endWorkout(.{ .workouts = &.{completed.accepted.workout} }, .{ .cancel = .{
+        .metadata = .{ .command_id = .{ .bytes = "late-cancel" }, .occurred_at = .{ .bytes = "2026-07-26T12:07:00Z" } },
+        .scope = scope,
+        .workout_id = workout.id,
+        .expected_revision = 2,
+        .cancelled_at = .{ .bytes = "2026-07-26T12:07:00Z" },
+    } }, &issues);
+    try expectRejectedCode(rejected, tracking.issue_codes.workout_not_active);
+}
+
 test "read finds exact scope and reports structured not found" {
     var issues: [1]tracking.Issue = undefined;
     const workout = (try tracking.startWorkout(.{}, command, &issues)).accepted.workout;

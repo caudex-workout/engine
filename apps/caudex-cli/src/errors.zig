@@ -55,6 +55,14 @@ pub fn setNotFound() Failure {
     return .{ .exit_class = .not_found, .code = "tracking.set_not_found", .category = "not_found", .message = "No unique eligible set matched; pass --set with a stable ID." };
 }
 
+pub fn confirmationRequired() Failure {
+    return .{ .exit_class = .syntax, .code = "client.confirmation_required", .category = "syntax", .message = "Cancellation requires --yes when input is not a TTY." };
+}
+
+pub fn cancelledByUser() Failure {
+    return .{ .exit_class = .interrupted, .code = "client.cancelled", .category = "interrupted", .message = "Cancellation was not confirmed." };
+}
+
 pub fn ambiguousExercise(candidate_ids: []const []const u8) Failure {
     return .{
         .exit_class = .ambiguity,

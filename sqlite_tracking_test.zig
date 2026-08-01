@@ -376,6 +376,41 @@ test "set lifecycle is exact idempotent and transactional" {
     try std.testing.expectEqual(@as(usize, 0), reopened.accepted.workout.exercises[0].sets[0].actual_metrics.len);
 }
 
+test "workout finish and cancel persist atomically and replay idempotently" {
+    const database = try sqlite.openInMemory(.{});
+    defer database.close();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    _ = try database.startWorkout(allocator, start);
+    const finish: tracking.CompleteWorkoutCommand = .{
+        .metadata = metadata("finish-workout"),
+        .scope = scope,
+        .workout_id = start.workout_id,
+        .expected_revision = 1,
+        .completed_at = .{ .bytes = "2026-07-26T12:05:00Z" },
+    };
+    const applied = try database.completeWorkout(allocator, finish);
+    try std.testing.expectEqual(tracking.WorkoutStatus.completed, applied.accepted.workout.status);
+    try std.testing.expectEqual(@as(usize, 1), applied.accepted.issues.len);
+    const replayed = try database.completeWorkout(allocator, finish);
+    try std.testing.expectEqual(tracking.CommandDisposition.replayed, replayed.accepted.disposition);
+    var second = start;
+    second.metadata.command_id = .{ .bytes = "start-cancelled" };
+    second.workout_id = .{ .bytes = "workout-cancelled" };
+    _ = try database.startWorkout(allocator, second);
+    const cancelled = try database.cancelWorkout(allocator, .{
+        .metadata = metadata("cancel-workout"),
+        .scope = scope,
+        .workout_id = second.workout_id,
+        .expected_revision = 1,
+        .cancelled_at = .{ .bytes = "2026-07-26T12:06:00Z" },
+    });
+    try std.testing.expectEqual(tracking.WorkoutStatus.cancelled, cancelled.accepted.workout.status);
+    const active = try database.listActiveWorkouts(allocator, .{ .scope = scope, .max_results = 10 });
+    try std.testing.expect(active == .none);
+}
+
 fn metadata(command_id: []const u8) tracking.CommandMetadata {
     return .{
         .command_id = .{ .bytes = command_id },

@@ -12,7 +12,7 @@ const c = @cImport({
 });
 
 pub const adapter_version = "0.1.0";
-pub const schema_version: u32 = 4;
+pub const schema_version: u32 = 5;
 pub const minimum_schema_version: u32 = 1;
 
 pub const Options = struct {
@@ -107,6 +107,14 @@ pub const Adapter = opaque {
         command: tracking.StartWorkoutCommand,
     ) TrackingError!tracking.CommandResult {
         return startTrackedWorkout(self, allocator, command);
+    }
+
+    pub fn completeWorkout(self: *Adapter, allocator: std.mem.Allocator, command: tracking.CompleteWorkoutCommand) TrackingError!tracking.CommandResult {
+        return endTrackedWorkout(self, allocator, .{ .complete = command });
+    }
+
+    pub fn cancelWorkout(self: *Adapter, allocator: std.mem.Allocator, command: tracking.CancelWorkoutCommand) TrackingError!tracking.CommandResult {
+        return endTrackedWorkout(self, allocator, .{ .cancel = command });
     }
 
     pub fn readWorkout(
@@ -261,6 +269,10 @@ pub const Adapter = opaque {
             4,
             @embedFile("sqlite/migrations/004_tracking_sets.sql"),
         );
+        if (current < 5) try self.applyMigration(
+            5,
+            @embedFile("sqlite/migrations/005_tracking_workout_end.sql"),
+        );
     }
 
     fn applyMigration(
@@ -410,6 +422,81 @@ fn startTrackedWorkout(
     try insertStartReceipt(self, command, accepted);
     try self.execute("COMMIT");
     return .{ .accepted = accepted };
+}
+
+fn endTrackedWorkout(
+    self: *Adapter,
+    allocator: std.mem.Allocator,
+    command: tracking.EndWorkoutCommand,
+) TrackingError!tracking.CommandResult {
+    const payload = try encodeAlloc(allocator, command);
+    defer allocator.free(payload);
+    const scope, const workout_id, const command_id = switch (command) {
+        inline else => |value| .{ value.scope, value.workout_id, value.metadata.command_id },
+    };
+    try self.execute("BEGIN IMMEDIATE");
+    errdefer self.execute("ROLLBACK") catch {};
+    if (try loadEndReceipt(self, allocator, scope, command_id)) |prior| {
+        if (!std.mem.eql(u8, prior, payload)) {
+            var issues = [1]tracking.Issue{.{
+                .code = tracking.issue_codes.command_payload_conflict,
+                .category = .conflict,
+                .severity = .@"error",
+                .message = "The command ID was already used with another payload.",
+            }};
+            const rejected = try ownRejected(allocator, .{ .command_id = command_id, .issues = &issues });
+            try self.execute("ROLLBACK");
+            return rejected;
+        }
+        const current = (try loadTrackedWorkout(self, allocator, scope, workout_id)) orelse return error.InvalidData;
+        const accepted = try ownAccepted(allocator, .{ .command_id = command_id, .disposition = .replayed, .workout = current });
+        try self.execute("COMMIT");
+        return .{ .accepted = accepted };
+    }
+    const current = try loadTrackedWorkout(self, allocator, scope, workout_id);
+    var issue_storage: [1]tracking.Issue = undefined;
+    const decided = tracking.endWorkout(.{ .workouts = if (current) |value| &.{value} else &.{} }, command, &issue_storage) catch return error.InvalidData;
+    const proposed = switch (decided) {
+        .accepted => |accepted| accepted,
+        .rejected => |rejected| {
+            const owned = try ownRejected(allocator, rejected);
+            try self.execute("ROLLBACK");
+            return owned;
+        },
+    };
+    const accepted = try ownAccepted(allocator, proposed);
+    try persistWorkoutState(self, allocator, accepted.workout);
+    try insertEndReceipt(self, scope, command_id, workout_id, payload);
+    try self.execute("COMMIT");
+    return .{ .accepted = accepted };
+}
+
+fn loadEndReceipt(self: *Adapter, allocator: std.mem.Allocator, scope: tracking.Scope, command_id: tracking.Id) TrackingError!?[]const u8 {
+    var statement = try self.prepare(
+        \\SELECT payload_json FROM tracking_workout_end_receipts
+        \\WHERE host_scope_key = ?1 AND athlete_id = ?2 AND command_id = ?3
+    );
+    defer statement.finalize();
+    try statement.bindText(1, scope.host_scope_key.bytes);
+    try statement.bindText(2, athleteKey(scope));
+    try statement.bindText(3, command_id.bytes);
+    if (!try statement.row()) return null;
+    return try dupeColumn(allocator, statement.raw, 0);
+}
+
+fn insertEndReceipt(self: *Adapter, scope: tracking.Scope, command_id: tracking.Id, workout_id: tracking.Id, payload: []const u8) TrackingError!void {
+    var statement = try self.prepare(
+        \\INSERT INTO tracking_workout_end_receipts
+        \\  (host_scope_key, athlete_id, command_id, workout_id, payload_json)
+        \\VALUES (?1, ?2, ?3, ?4, ?5)
+    );
+    defer statement.finalize();
+    try statement.bindText(1, scope.host_scope_key.bytes);
+    try statement.bindText(2, athleteKey(scope));
+    try statement.bindText(3, command_id.bytes);
+    try statement.bindText(4, workout_id.bytes);
+    try statement.bindText(5, payload);
+    try statement.done();
 }
 
 fn readTrackedWorkout(
@@ -764,14 +851,16 @@ fn persistWorkoutState(
     workout: tracking.Workout,
 ) persistence.CapabilityError!void {
     var update = try self.prepare(
-        \\UPDATE tracking_workouts SET revision = ?1
-        \\WHERE host_scope_key = ?2 AND athlete_id = ?3 AND workout_id = ?4
+        \\UPDATE tracking_workouts SET revision = ?1, status = ?2, completed_at = ?3
+        \\WHERE host_scope_key = ?4 AND athlete_id = ?5 AND workout_id = ?6
     );
     defer update.finalize();
     try update.bindInt(1, workout.revision);
-    try update.bindText(2, workout.scope.host_scope_key.bytes);
-    try update.bindText(3, athleteKey(workout.scope));
-    try update.bindText(4, workout.id.bytes);
+    try update.bindText(2, workoutStatusText(workout.status));
+    if (workout.completed_at) |ended| try update.bindText(3, ended.bytes) else try update.bindNull(3);
+    try update.bindText(4, workout.scope.host_scope_key.bytes);
+    try update.bindText(5, athleteKey(workout.scope));
+    try update.bindText(6, workout.id.bytes);
     try update.done();
 
     var delete_sets = try self.prepare(
@@ -1201,12 +1290,14 @@ fn workoutStatusText(status: tracking.WorkoutStatus) []const u8 {
     return switch (status) {
         .active => "active",
         .completed => "completed",
+        .cancelled => "cancelled",
     };
 }
 
 fn parseWorkoutStatus(value: []const u8) persistence.AdapterError!tracking.WorkoutStatus {
     if (std.mem.eql(u8, value, "active")) return .active;
     if (std.mem.eql(u8, value, "completed")) return .completed;
+    if (std.mem.eql(u8, value, "cancelled")) return .cancelled;
     return error.InvalidData;
 }
 

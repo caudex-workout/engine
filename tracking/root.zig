@@ -7,7 +7,7 @@
 const std = @import("std");
 const caudex = @import("caudex");
 
-pub const contract_version: u32 = 3;
+pub const contract_version: u32 = 4;
 
 pub const Id = caudex.primitives.Id;
 pub const Timestamp = caudex.primitives.Timestamp;
@@ -38,6 +38,7 @@ pub const CommandMetadata = struct {
 pub const WorkoutStatus = enum {
     active,
     completed,
+    cancelled,
 };
 
 pub const SetStatus = enum {
@@ -202,6 +203,19 @@ pub const CompleteWorkoutCommand = struct {
     completed_at: Timestamp,
 };
 
+pub const CancelWorkoutCommand = struct {
+    metadata: CommandMetadata,
+    scope: Scope,
+    workout_id: Id,
+    expected_revision: u64,
+    cancelled_at: Timestamp,
+};
+
+pub const EndWorkoutCommand = union(enum) {
+    complete: CompleteWorkoutCommand,
+    cancel: CancelWorkoutCommand,
+};
+
 pub const Command = union(enum) {
     start_workout: StartWorkoutCommand,
     add_exercise: AddExerciseCommand,
@@ -215,6 +229,7 @@ pub const Command = union(enum) {
     remove_set: RemoveSetCommand,
     reorder_set: ReorderSetCommand,
     complete_workout: CompleteWorkoutCommand,
+    cancel_workout: CancelWorkoutCommand,
 };
 
 pub const IssueCategory = enum {
@@ -421,6 +436,97 @@ pub fn startWorkout(
             .started_at = command.started_at,
         },
     } };
+}
+
+/// Proposes completion or cancellation of an active workout.
+pub fn endWorkout(
+    snapshot: LifecycleSnapshot,
+    command: EndWorkoutCommand,
+    issue_storage: []Issue,
+) DecisionError!CommandResult {
+    const metadata, const scope, const workout_id, const expected_revision, const ended_at = switch (command) {
+        .complete => |value| .{ value.metadata, value.scope, value.workout_id, value.expected_revision, value.completed_at },
+        .cancel => |value| .{ value.metadata, value.scope, value.workout_id, value.expected_revision, value.cancelled_at },
+    };
+    if (!validId(metadata.command_id) or !validId(scope.host_scope_key) or
+        (scope.athlete_id != null and !validId(scope.athlete_id.?)) or
+        !validId(workout_id))
+        return reject(metadata.command_id, issue_storage, invalidIdIssue());
+    if (!validTimestamp(metadata.occurred_at) or !validTimestamp(ended_at))
+        return reject(metadata.command_id, issue_storage, .{
+            .code = issue_codes.invalid_timestamp,
+            .category = .validation,
+            .severity = .@"error",
+            .message = "A command timestamp is not valid RFC 3339.",
+        });
+    const workout = findWorkout(snapshot, scope, workout_id) orelse
+        return reject(metadata.command_id, issue_storage, .{
+            .code = issue_codes.workout_not_found,
+            .category = .not_found,
+            .severity = .@"error",
+            .message = "No workout matched the requested scope and ID.",
+        });
+    if (workout.status != .active)
+        return reject(metadata.command_id, issue_storage, .{
+            .code = issue_codes.workout_not_active,
+            .category = .conflict,
+            .severity = .@"error",
+            .message = "Only an active workout can be finished or cancelled.",
+        });
+    if (workout.revision != expected_revision)
+        return reject(metadata.command_id, issue_storage, .{
+            .code = issue_codes.revision_conflict,
+            .category = .conflict,
+            .severity = .@"error",
+            .message = "The expected workout revision does not match.",
+        });
+    if (ended_at.unixSeconds() < workout.started_at.unixSeconds())
+        return reject(metadata.command_id, issue_storage, .{
+            .code = issue_codes.invalid_timestamp_order,
+            .category = .validation,
+            .severity = .@"error",
+            .message = "The workout end time precedes its start time.",
+        });
+    var issues: []const Issue = &.{};
+    if (switch (command) {
+        .complete => workoutIsShort(workout),
+        .cancel => false,
+    }) {
+        if (issue_storage.len == 0) return error.IssueBufferTooSmall;
+        issue_storage[0] = .{
+            .code = issue_codes.short_workout_completed,
+            .category = .validation,
+            .severity = .warning,
+            .message = "The workout completed with partial or no logged work.",
+        };
+        issues = issue_storage[0..1];
+    }
+    return .{ .accepted = .{
+        .command_id = metadata.command_id,
+        .disposition = .applied,
+        .workout = .{
+            .id = workout.id,
+            .scope = workout.scope,
+            .revision = std.math.add(u64, workout.revision, 1) catch return error.RevisionOverflow,
+            .status = switch (command) {
+                .complete => .completed,
+                .cancel => .cancelled,
+            },
+            .started_at = workout.started_at,
+            .completed_at = ended_at,
+            .exercises = workout.exercises,
+        },
+        .issues = issues,
+    } };
+}
+
+fn workoutIsShort(workout: Workout) bool {
+    if (workout.exercises.len == 0) return true;
+    for (workout.exercises) |exercise| {
+        if (exercise.sets.len == 0) return true;
+        for (exercise.sets) |set| if (set.status == .open) return true;
+    }
+    return false;
 }
 
 /// Proposes adding one catalog exercise at a semantic anchor.
