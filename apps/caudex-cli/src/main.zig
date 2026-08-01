@@ -7,6 +7,7 @@ const tracking = @import("caudex_tracking");
 const errors = @import("errors.zig");
 const output = @import("output.zig");
 const use_cases = @import("use_cases.zig");
+const commands = @import("commands.zig");
 
 const version = "0.1.0";
 
@@ -36,6 +37,8 @@ const help_text =
     \\  caudex [global options] history correct-set --workout ID --exercise ID --set ID METRICS... [--yes]
     \\  caudex [global options] config path|show|set (color|table) VALUE
     \\  caudex batch FILE
+    \\  caudex completion bash|zsh|fish
+    \\  caudex command-reference
     \\  caudex --help
     \\  caudex version
     \\
@@ -203,6 +206,16 @@ fn run(
     }
 
     const global = try parseGlobalOptions(args);
+    const command = args[global.command_index..];
+    if (command.len == 2 and std.mem.eql(u8, command[0], "completion")) {
+        const shell = commands.parseCompletionShell(command[1]) orelse return error.InvalidArguments;
+        try commands.writeCompletion(stdout, shell);
+        return null;
+    }
+    if (command.len == 1 and std.mem.eql(u8, command[0], "command-reference")) {
+        try commands.writeReference(stdout);
+        return null;
+    }
     const environment = PathEnvironment{
         .database_override = nonEmpty(environ.get("CAUDEX_DATABASE")),
         .xdg_data_home = nonEmpty(environ.get("XDG_DATA_HOME")),
@@ -1514,14 +1527,15 @@ test "client source imports only approved public packages" {
                 std.mem.eql(u8, name, "caudex_tracking") or
                 std.mem.eql(u8, name, "errors.zig") or
                 std.mem.eql(u8, name, "output.zig") or
-                std.mem.eql(u8, name, "use_cases.zig"),
+                std.mem.eql(u8, name, "use_cases.zig") or
+                std.mem.eql(u8, name, "commands.zig"),
         );
 
         import_count += 1;
         remainder = tail[name_end + 1 ..];
     }
 
-    try std.testing.expectEqual(@as(usize, 9), import_count);
+    try std.testing.expectEqual(@as(usize, 10), import_count);
 }
 
 test "client sources contain no SQL or private path imports" {
@@ -1529,6 +1543,7 @@ test "client sources contain no SQL or private path imports" {
         @embedFile("main.zig"),
         @embedFile("errors.zig"),
         @embedFile("output.zig"),
+        @embedFile("commands.zig"),
     };
     const forbidden = [_][]const u8{
         ".." ++ "/",

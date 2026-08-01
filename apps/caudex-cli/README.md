@@ -101,3 +101,13 @@ Diagnostics use stderr and the same selected format; requested data remains on
 stdout. `--color auto|always|never` controls human styling, while JSON and
 non-terminal automatic output never contain ANSI sequences. `NO_COLOR`
 disables styling.
+
+Shell completion never opens the workout database. Install the output that
+matches your shell, or inspect the generated command reference:
+
+```sh
+caudex completion bash >>"${HOME}/.bashrc"
+caudex completion zsh >>"${HOME}/.zshrc"
+caudex completion fish >~/.config/fish/completions/caudex.fish
+caudex command-reference
+```
