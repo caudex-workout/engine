@@ -65,6 +65,20 @@ caudex --database caudex.sqlite exercise archive bench-press
 caudex --database caudex.sqlite exercise restore bench-press
 ```
 
+Completed workout history is available from a fresh client process:
+
+```sh
+caudex --database caudex.sqlite history list --from 2026-07-01T00:00:00Z
+caudex --database caudex.sqlite history exercise bench-press
+caudex --database caudex.sqlite --format json history last bench-press
+caudex --database caudex.sqlite history correct-set --yes \
+  --workout workout-example --exercise membership-example --set set-example 8r @8rpe
+```
+
+`history correct-set` requires `--yes` outside a TTY. It is revision-checked,
+idempotent when retried with the same command ID, and never changes methodology
+state automatically.
+
 `--format human|json` selects human output or a versioned JSON envelope.
 Diagnostics use stderr and the same selected format; requested data remains on
 stdout. `--color auto|always|never` controls human styling, while JSON and

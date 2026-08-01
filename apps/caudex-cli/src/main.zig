@@ -29,6 +29,11 @@ const help_text =
     \\  caudex [global options] exercise list [--limit N] [--include-archived]
     \\  caudex [global options] exercise search TEXT [--limit N] [--include-archived]
     \\  caudex [global options] exercise archive|restore EXERCISE [command options]
+    \\  caudex [global options] history list [--from TIME] [--through TIME] [--limit N]
+    \\  caudex [global options] history show WORKOUT
+    \\  caudex [global options] history exercise EXERCISE [--limit N]
+    \\  caudex [global options] history last EXERCISE
+    \\  caudex [global options] history correct-set --workout ID --exercise ID --set ID METRICS... [--yes]
     \\  caudex --help
     \\  caudex version
     \\
@@ -110,6 +115,21 @@ const CatalogOptions = struct {
     occurred_at: ?[]const u8 = null,
     limit: u16 = 25,
     include_archived: bool = false,
+};
+
+const HistoryOptions = struct {
+    reference: ?[]const u8 = null,
+    workout_id: ?[]const u8 = null,
+    exercise_id: ?[]const u8 = null,
+    set_id: ?[]const u8 = null,
+    command_id: ?[]const u8 = null,
+    occurred_at: ?[]const u8 = null,
+    from: ?[]const u8 = null,
+    through: ?[]const u8 = null,
+    limit: u16 = 25,
+    yes: bool = false,
+    metrics: [5]tracking.Metric = undefined,
+    metric_count: usize = 0,
 };
 
 const PathEnvironment = struct {
@@ -205,6 +225,8 @@ fn run(
         .quiet = global.quiet,
     };
     const remaining = args[global.command_index..];
+    if (remaining.len >= 2 and std.mem.eql(u8, remaining[0], "history"))
+        return try historyCommand(io, allocator, adapter, global, remaining[1], remaining[2..], settings, stdout);
     if (remaining.len >= 2 and std.mem.eql(u8, remaining[0], "exercise"))
         return try catalogCommand(io, allocator, adapter, global, remaining[1], remaining[2..], settings, stdout);
     if (remaining.len == 2 and
@@ -281,6 +303,118 @@ fn run(
         );
     }
     return error.InvalidArguments;
+}
+
+fn historyCommand(io: std.Io, allocator: std.mem.Allocator, adapter: *sqlite.Adapter, global: GlobalOptions, verb: []const u8, args: []const []const u8, settings: output.Settings, stdout: *std.Io.Writer) !?errors.Failure {
+    const scope = try trackingScope(global);
+    if (std.mem.eql(u8, verb, "list")) {
+        const options = try parseHistoryOptions(args, false, false);
+        const page = try adapter.listHistory(allocator, .{ .scope = scope, .from = if (options.from) |value| try tracking.Timestamp.parse(value) else null, .through = if (options.through) |value| try tracking.Timestamp.parse(value) else null, .max_results = options.limit });
+        try writeHistoryPage(allocator, stdout, settings, "caudex.history.list", page);
+        return null;
+    }
+    if (std.mem.eql(u8, verb, "show")) {
+        const options = try parseHistoryOptions(args, true, false);
+        const result = try adapter.readWorkout(allocator, .{ .scope = scope, .workout_id = try tracking.Id.parse(options.reference.?) });
+        const workout = switch (result) {
+            .found => |value| value,
+            .not_found => return errors.workoutNotFound(),
+        };
+        if (workout.status != .completed) return errors.managedExerciseNotFound();
+        try writeWorkoutState(allocator, stdout, settings, "caudex.history.show", null, null, workout);
+        return null;
+    }
+    if (std.mem.eql(u8, verb, "exercise") or std.mem.eql(u8, verb, "last")) {
+        const options = try parseHistoryOptions(args, true, false);
+        const exercise = switch (try use_cases.resolveManagedExercise(adapter, allocator, scope.host_scope_key, options.reference.?)) {
+            .found => |value| value,
+            .not_found => return errors.managedExerciseNotFound(),
+            .ambiguous => |values| return errors.ambiguousExercise(try managedExerciseIds(allocator, values)),
+        };
+        if (std.mem.eql(u8, verb, "last")) {
+            const result = try adapter.lastPerformance(allocator, .{ .scope = scope, .exercise_id = .{ .bytes = exercise.exercise.id } });
+            const workout = switch (result) {
+                .found => |value| value,
+                .not_found => return errors.workoutNotFound(),
+            };
+            try writeHistoryPage(allocator, stdout, settings, "caudex.history.last", .{ .workouts = &.{workout} });
+            return null;
+        }
+        const page = try adapter.listHistory(allocator, .{ .scope = scope, .exercise_id = .{ .bytes = exercise.exercise.id }, .max_results = options.limit });
+        try writeHistoryPage(allocator, stdout, settings, "caudex.history.exercise", page);
+        return null;
+    }
+    if (!std.mem.eql(u8, verb, "correct-set")) return error.InvalidArguments;
+    const options = try parseHistoryOptions(args, false, true);
+    if (!options.yes) {
+        if (!(std.Io.File.stdin().isTty(io) catch false)) return errors.confirmationRequired();
+        try stdout.writeAll("Correct this completed set? [y/N] ");
+        try stdout.flush();
+        var buffer: [16]u8 = undefined;
+        var reader = std.Io.File.stdin().reader(io, &buffer);
+        const answer = (try reader.interface.takeDelimiter('\n')) orelse return errors.cancelledByUser();
+        if (!std.ascii.eqlIgnoreCase(std.mem.trim(u8, answer, " \r\t"), "y") and !std.ascii.eqlIgnoreCase(std.mem.trim(u8, answer, " \r\t"), "yes")) return errors.cancelledByUser();
+    }
+    const current = switch (try adapter.readWorkout(allocator, .{ .scope = scope, .workout_id = try tracking.Id.parse(options.workout_id.?) })) {
+        .found => |value| value,
+        .not_found => return errors.workoutNotFound(),
+    };
+    const result = try adapter.correctSet(allocator, .{ .metadata = .{ .command_id = try tracking.Id.parse(options.command_id orelse try generateId(io, allocator, "command")), .occurred_at = try tracking.Timestamp.parse(options.occurred_at orelse try currentTimestamp(io, allocator)) }, .scope = scope, .workout_id = current.id, .expected_revision = current.revision, .membership_id = try tracking.Id.parse(options.exercise_id.?), .set_id = try tracking.Id.parse(options.set_id.?), .actual_metrics = options.metrics[0..options.metric_count], .completed_at = try tracking.Timestamp.parse(options.occurred_at orelse try currentTimestamp(io, allocator)) });
+    switch (result) {
+        .accepted => |accepted| {
+            try writeWorkoutState(allocator, stdout, settings, "caudex.history.set_corrected", accepted.command_id.bytes, @tagName(accepted.disposition), accepted.workout);
+            return null;
+        },
+        .rejected => |rejected| return errors.fromTrackingIssue(rejected.issues[0]),
+    }
+}
+
+fn writeHistoryPage(allocator: std.mem.Allocator, stdout: *std.Io.Writer, settings: output.Settings, kind: []const u8, page: tracking.HistoryPage) !void {
+    const values = try allocator.alloc(output.HistoryInfo, page.workouts.len);
+    for (page.workouts, 0..) |workout, index| values[index] = .{ .workoutId = workout.id.bytes, .revision = workout.revision, .completedAt = workout.completed_at.?.bytes, .exerciseCount = workout.exercises.len };
+    try output.writeHistory(stdout, settings, kind, values);
+}
+
+fn parseHistoryOptions(args: []const []const u8, require_reference: bool, correction: bool) !HistoryOptions {
+    var options = HistoryOptions{};
+    var index: usize = 0;
+    if (require_reference) {
+        if (args.len == 0 or std.mem.startsWith(u8, args[0], "--")) return error.InvalidArguments;
+        options.reference = args[0];
+        index = 1;
+    }
+    while (index < args.len) : (index += 1) {
+        const token = args[index];
+        if (correction and std.mem.eql(u8, token, "--yes")) {
+            if (options.yes) return error.InvalidArguments;
+            options.yes = true;
+            continue;
+        }
+        if (correction and !std.mem.startsWith(u8, token, "--")) {
+            const metric = try parseMetricShorthand(token);
+            try appendHistoryMetric(&options, metric.code, metric.value, metric.unit);
+            continue;
+        }
+        const target: *?[]const u8 = if (std.mem.eql(u8, token, "--workout")) &options.workout_id else if (std.mem.eql(u8, token, "--exercise")) &options.exercise_id else if (std.mem.eql(u8, token, "--set")) &options.set_id else if (std.mem.eql(u8, token, "--command-id")) &options.command_id else if (std.mem.eql(u8, token, "--occurred-at")) &options.occurred_at else if (std.mem.eql(u8, token, "--from")) &options.from else if (std.mem.eql(u8, token, "--through")) &options.through else if (std.mem.eql(u8, token, "--limit")) {
+            index += 1;
+            if (index >= args.len) return error.InvalidArguments;
+            options.limit = std.fmt.parseInt(u16, args[index], 10) catch return error.InvalidArguments;
+            continue;
+        } else return error.InvalidArguments;
+        index += 1;
+        if (index >= args.len or target.* != null or args[index].len == 0) return error.InvalidArguments;
+        target.* = args[index];
+    }
+    if (options.limit == 0 or options.limit > 100) return error.InvalidArguments;
+    if (correction and (options.workout_id == null or options.exercise_id == null or options.set_id == null or options.metric_count == 0)) return error.InvalidArguments;
+    return options;
+}
+
+fn appendHistoryMetric(options: *HistoryOptions, code: []const u8, value: tracking.Decimal, unit: caudex.primitives.Unit) !void {
+    if (options.metric_count == options.metrics.len) return error.InvalidArguments;
+    for (options.metrics[0..options.metric_count]) |metric| if (std.mem.eql(u8, metric.code.bytes, code)) return error.InvalidArguments;
+    options.metrics[options.metric_count] = .{ .code = try tracking.Id.parse(code), .value = .{ .value = value, .unit = unit } };
+    options.metric_count += 1;
 }
 
 fn catalogCommand(io: std.Io, allocator: std.mem.Allocator, adapter: *sqlite.Adapter, global: GlobalOptions, verb: []const u8, args: []const []const u8, settings: output.Settings, stdout: *std.Io.Writer) !?errors.Failure {

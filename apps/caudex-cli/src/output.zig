@@ -63,6 +63,28 @@ pub const ExerciseInfo = struct {
     updatedAt: []const u8,
 };
 
+pub const HistoryInfo = struct {
+    workoutId: []const u8,
+    revision: u64,
+    completedAt: []const u8,
+    exerciseCount: usize,
+};
+
+pub fn writeHistory(writer: *std.Io.Writer, settings: Settings, kind: []const u8, workouts: []const HistoryInfo) !void {
+    if (settings.quiet) return;
+    switch (settings.format) {
+        .human => {
+            if (workouts.len == 0) return writer.writeAll("No completed workouts.\n");
+            try writer.writeAll("WORKOUT  COMPLETED  EXERCISES  REVISION\n");
+            for (workouts) |workout| try writer.print("{s}  {s}  {d}  {d}\n", .{ workout.workoutId, workout.completedAt, workout.exerciseCount, workout.revision });
+        },
+        .json => {
+            try std.json.Stringify.value(.{ .schemaVersion = 1, .kind = kind, .data = .{ .workouts = workouts } }, .{}, writer);
+            try writer.writeByte('\n');
+        },
+    }
+}
+
 pub fn writeExercises(writer: *std.Io.Writer, settings: Settings, kind: []const u8, command_id: ?[]const u8, disposition: ?[]const u8, exercises: []const ExerciseInfo) !void {
     if (settings.quiet) return;
     switch (settings.format) {
