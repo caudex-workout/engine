@@ -67,6 +67,8 @@ pub const IntegrityError = error{
     OperationFailed,
 };
 
+pub const TransferError = error{ DestinationExists, Symlink, Busy, Corrupt, Incompatible, OperationFailed };
+
 pub const TrackingError = persistence.CapabilityError;
 
 /// Opaque connection handle. Its representation is not public API.
@@ -111,6 +113,22 @@ pub const Adapter = opaque {
             if (!std.mem.eql(u8, value, "ok")) status = .corrupt;
         }
         return .{ .status = status };
+    }
+
+    /// Creates a consistent SQLite backup. The destination must be a new regular path.
+    pub fn backup(self: *Adapter, io: std.Io, destination: [:0]const u8) TransferError!void {
+        try requireNewRegularPath(io, destination);
+        try copyToPath(self, destination);
+    }
+
+    /// Validates a source database before copying it into this open database.
+    pub fn restore(self: *Adapter, io: std.Io, source_path: [:0]const u8) TransferError!void {
+        try requireExistingRegularPath(io, source_path);
+        const source = open(source_path, .{ .create_if_missing = false }) catch |err| return mapTransferOpenError(err);
+        defer source.close();
+        const report = source.integrity() catch |err| return mapTransferIntegrityError(err);
+        if (report.status != .ok) return error.Corrupt;
+        try copyDatabase(self, source);
     }
 
     pub fn catalogSource(self: *Adapter) persistence.CatalogSource {
@@ -2044,5 +2062,64 @@ fn mapIntegrityError(err: persistence.AdapterError) IntegrityError {
         error.Unavailable => error.Busy,
         error.InvalidData => error.Corrupt,
         error.UnsupportedVersion, error.OperationFailed => error.OperationFailed,
+    };
+}
+
+fn requireNewRegularPath(io: std.Io, path: []const u8) TransferError!void {
+    const stat = std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = false }) catch |err| switch (err) {
+        error.FileNotFound => return,
+        else => return error.OperationFailed,
+    };
+    if (stat.kind == .sym_link) return error.Symlink;
+    return error.DestinationExists;
+}
+
+fn requireExistingRegularPath(io: std.Io, path: []const u8) TransferError!void {
+    const stat = std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = false }) catch return error.OperationFailed;
+    if (stat.kind == .sym_link) return error.Symlink;
+    if (stat.kind != .file) return error.Incompatible;
+}
+
+fn copyToPath(source: *Adapter, destination: [:0]const u8) TransferError!void {
+    var target_raw: ?*c.sqlite3 = null;
+    const status = c.sqlite3_open_v2(destination.ptr, &target_raw, c.SQLITE_OPEN_READWRITE | c.SQLITE_OPEN_CREATE | c.SQLITE_OPEN_FULLMUTEX, null);
+    if (status != c.SQLITE_OK or target_raw == null) return mapTransferStatus(status);
+    defer _ = c.sqlite3_close(target_raw.?);
+    try copyRaw(target_raw.?, raw(source));
+}
+
+fn copyDatabase(destination: *Adapter, source: *Adapter) TransferError!void {
+    try copyRaw(raw(destination), raw(source));
+}
+
+fn copyRaw(destination: *c.sqlite3, source: *c.sqlite3) TransferError!void {
+    const backup = c.sqlite3_backup_init(destination, "main", source, "main") orelse return error.OperationFailed;
+    defer _ = c.sqlite3_backup_finish(backup);
+    const status = c.sqlite3_backup_step(backup, -1);
+    if (status != c.SQLITE_DONE) return mapTransferStatus(status);
+}
+
+fn mapTransferStatus(status: c_int) TransferError {
+    return switch (status) {
+        c.SQLITE_BUSY, c.SQLITE_LOCKED => error.Busy,
+        c.SQLITE_CORRUPT, c.SQLITE_NOTADB => error.Corrupt,
+        else => error.OperationFailed,
+    };
+}
+
+fn mapTransferOpenError(err: OpenError) TransferError {
+    return switch (err) {
+        error.Busy => error.Busy,
+        error.Corrupt => error.Corrupt,
+        error.UnsupportedSchema, error.MigrationFailed => error.Incompatible,
+        error.OpenFailed => error.OperationFailed,
+    };
+}
+
+fn mapTransferIntegrityError(err: IntegrityError) TransferError {
+    return switch (err) {
+        error.Busy => error.Busy,
+        error.Corrupt => error.Corrupt,
+        error.OperationFailed => error.OperationFailed,
     };
 }

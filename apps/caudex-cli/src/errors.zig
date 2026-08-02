@@ -127,6 +127,9 @@ pub fn fromError(err: anyerror) Failure {
             .category = "database",
             .message = "The database was created by a newer Caudex version.",
         },
+        error.DestinationExists => .{ .exit_class = .database, .code = "database.destination_exists", .category = "database", .message = "The backup destination already exists." },
+        error.Symlink => .{ .exit_class = .database, .code = "database.symlink", .category = "database", .message = "Database transfer paths must not be symlinks." },
+        error.Incompatible => .{ .exit_class = .database, .code = "database.incompatible", .category = "database", .message = "The database is incompatible with this Caudex version." },
         error.DataDirectoryUnavailable => .{
             .exit_class = .runtime,
             .code = "client.data_directory_unavailable",

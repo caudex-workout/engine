@@ -16,6 +16,8 @@ const help_text =
     \\
     \\Usage:
     \\  caudex [--database PATH] [--format human|json] [--color auto|always|never] database info|check
+    \\  caudex [global options] database backup DESTINATION
+    \\  caudex [global options] database restore SOURCE --yes
     \\  caudex [global options] doctor
     \\  caudex [global options] workout start [start options]
     \\  caudex [global options] workout add-exercise EXERCISE [options]
@@ -276,6 +278,18 @@ fn run(
             .latest_schema_version = metadata.latest_schema_version,
             .compatibility = @tagName(metadata.compatibility),
         });
+        return null;
+    }
+    if (remaining.len == 3 and std.mem.eql(u8, remaining[0], "database") and std.mem.eql(u8, remaining[1], "backup")) {
+        const destination = try allocator.dupeZ(u8, remaining[2]);
+        try adapter.backup(io, destination);
+        if (!settings.quiet) try stdout.print("Backup created: {s}\n", .{remaining[2]});
+        return null;
+    }
+    if (remaining.len == 4 and std.mem.eql(u8, remaining[0], "database") and std.mem.eql(u8, remaining[1], "restore") and std.mem.eql(u8, remaining[3], "--yes")) {
+        const source = try allocator.dupeZ(u8, remaining[2]);
+        try adapter.restore(io, source);
+        if (!settings.quiet) try stdout.print("Database restored from: {s}\n", .{remaining[2]});
         return null;
     }
     if ((remaining.len == 2 and std.mem.eql(u8, remaining[0], "database") and std.mem.eql(u8, remaining[1], "check")) or
