@@ -1,0 +1,66 @@
+name: CLI release
+
+on:
+  push:
+    tags: ["v0.1.0"]
+
+permissions:
+  contents: write
+  attestations: write
+  id-token: write
+
+jobs:
+  package:
+    name: ${{ matrix.asset }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-linux-gnu, asset: caudex-workout-cli-0.1.0-x86_64-linux-gnu.tar.gz }
+          - { os: ubuntu-24.04-arm, target: aarch64-linux-gnu, asset: caudex-workout-cli-0.1.0-aarch64-linux-gnu.tar.gz }
+          - { os: macos-13, target: x86_64-macos, asset: caudex-workout-cli-0.1.0-x86_64-macos.tar.gz }
+          - { os: macos-14, target: aarch64-macos, asset: caudex-workout-cli-0.1.0-aarch64-macos.tar.gz }
+          - { os: windows-latest, target: x86_64-windows-gnu, asset: caudex-workout-cli-0.1.0-x86_64-windows-gnu.zip, windows: true }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with: { persist-credentials: false }
+      - uses: mlugg/setup-zig@v2
+        with: { version: 0.16.0 }
+      - name: Build ReleaseSafe CLI
+        run: zig build -Doptimize=ReleaseSafe caudex-cli
+      - name: Stage and smoke test Unix archive
+        if: ${{ !matrix.windows }}
+        shell: bash
+        run: |
+          stem=${{ matrix.asset }}; stem=${stem%.tar.gz}; mkdir -p stage/$stem
+          cp zig-out/bin/caudex LICENSE NOTICE apps/caudex-cli/README.md stage/$stem/
+          printf '{"version":"0.1.0","target":"${{ matrix.target }}","sqlite":{"linkage":"system","source":"runner system SQLite"}}\n' > stage/$stem/build-metadata.json
+          tar --sort=name --mtime='UTC 2026-01-01' --owner=0 --group=0 --numeric-owner -czf "$stem.tar.gz" -C stage "$stem"
+          mkdir extract; tar -xzf "$stem.tar.gz" -C extract; extract/$stem/caudex version; extract/$stem/caudex --help; TMPDIR="$PWD/extract" extract/$stem/caudex --database "$PWD/extract/smoke.sqlite" database check
+      - name: Stage and smoke test Windows archive
+        if: ${{ matrix.windows }}
+        shell: pwsh
+        run: |
+          $stem='caudex-workout-cli-0.1.0-x86_64-windows-gnu'; New-Item -ItemType Directory -Force stage/$stem | Out-Null
+          Copy-Item zig-out/bin/caudex.exe,LICENSE,NOTICE,apps/caudex-cli/README.md stage/$stem/
+          Invoke-WebRequest https://www.sqlite.org/2026/sqlite-dll-win-x64-3490100.zip -OutFile sqlite.zip
+          Expand-Archive sqlite.zip sqlite; Copy-Item sqlite/sqlite3.dll stage/$stem/
+          '{"version":"0.1.0","target":"x86_64-windows-gnu","sqlite":{"version":"3.49.1","linkage":"bundled DLL","source":"sqlite.org","checksum":"recorded by release verification"}}' | Set-Content stage/$stem/build-metadata.json
+          Compress-Archive -Path stage/$stem -DestinationPath "$stem.zip"; Expand-Archive "$stem.zip" extract; extract/$stem/caudex.exe version; extract/$stem/caudex.exe --database "$PWD/extract/smoke.sqlite" database check
+      - uses: actions/upload-artifact@v7
+        with: { name: ${{ matrix.asset }}, path: ${{ matrix.asset }}, if-no-files-found: error }
+      - uses: actions/attest-build-provenance@v3
+        with: { subject-path: ${{ matrix.asset }} }
+
+  publish-draft:
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with: { path: assets, merge-multiple: true }
+      - run: cd assets && sha256sum caudex-workout-cli-* > SHA256SUMS
+      - uses: actions/attest-build-provenance@v3
+        with: { subject-path: assets/SHA256SUMS }
+      - uses: softprops/action-gh-release@v2
+        with: { draft: true, files: "assets/*", generate_release_notes: true }
