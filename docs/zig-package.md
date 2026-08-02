@@ -4,6 +4,10 @@ Caudex supports direct source-package consumption with Zig 0.16.0. Tagged
 releases include `build.zig.zon`, the public `caudex` module, license and
 changelog files, module documentation, and the checked-in Zig consumer.
 
+For a third-party application that builds its own client, see the
+[Zig integrator guide](zig-integrator-guide.md). It demonstrates public-module
+imports only and keeps storage, protocol, and presentation code in the host.
+
 ## Add a tagged release
 
 From a Zig 0.16.0 consumer project, add the release archive:

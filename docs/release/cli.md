@@ -9,3 +9,6 @@ documented system SQLite runtime. Initial binaries are not platform-code-signed.
 The `CLI release` workflow creates deterministic Unix archives where supported,
 checksums, provenance attestations, and a draft release. Publishing requires an
 annotated SSH-signed `v0.1.0` tag and review of every native smoke-test result.
+
+For installation, first-workout, scripting, backup, exit-code, TUI, and
+troubleshooting instructions, see the [reference-client user guide](../../apps/caudex-cli/README.md).

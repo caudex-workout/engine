@@ -820,6 +820,16 @@ pub fn build(b: *std.Build) void {
     );
     docs_quickstart_step.dependOn(&docs_quickstart_test.step);
 
+    const cli_documentation_test = b.addSystemCommand(&.{
+        "node",
+        "tests/cli_documentation_test.mjs",
+    });
+    const cli_documentation_step = b.step(
+        "test-cli-documentation",
+        "Check reference-client and Zig integrator documentation coverage",
+    );
+    cli_documentation_step.dependOn(&cli_documentation_test.step);
+
     const methodology_guides_test = b.addSystemCommand(&.{
         "node",
         "tests/methodology_guides_test.mjs",
@@ -967,6 +977,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&npm_clean_smoke.step);
     test_step.dependOn(&npm_release_test.step);
     test_step.dependOn(&docs_quickstart_test.step);
+    test_step.dependOn(&cli_documentation_test.step);
     test_step.dependOn(&methodology_guides_test.step);
     test_step.dependOn(&data_mapping_guide_test.step);
     test_step.dependOn(&custom_repository_test.step);

@@ -78,6 +78,13 @@ support policy, and the checked-in consumer. `zig build test-zig-package`
 verifies both named imports from a clean copy containing only the source
 package's declared paths.
 
+The first-party [`caudex` CLI guide](apps/caudex-cli/README.md) covers the
+v0.1.0 GitHub Release installation path, first workout, JSON and shell
+automation, database backup/restore, exit codes, TUI keybindings, and
+troubleshooting. Third-party Zig applications should start with the
+[Zig integrator guide](docs/zig-integrator-guide.md), which uses public
+packages without copying CLI or TUI presentation logic.
+
 Native C consumers can use the prebuilt static or shared libraries documented
 in the [C release matrix](docs/release/c.md). Every target bundle includes the
 public header, license notices, build metadata, SHA-256 checksums, and measured
@@ -120,13 +127,12 @@ fitness platform. The host owns users, UI, workout-history persistence,
 synchronization, and whether a recommendation is accepted or stored. The core
 does not require SQLite or any other database.
 
-The next major phase adds `caudex-cli`, a first-party Zig reference client under
-`apps/caudex-cli`. The application remains architecturally external to the
-engine: it will consume intentionally public engine and SQLite-adapter packages
-and will not import private modules or mutate adapter tables directly. The
-[reference-client implementation plan](docs/implementation-plan.md) begins by
-making those Zig adapter boundaries genuinely public before implementing a
-line-oriented CLI and, later, a TUI.
+The first-party `caudex-cli` reference client lives under `apps/caudex-cli`. It
+remains architecturally external to the engine: it consumes intentionally
+public engine and SQLite-adapter packages and does not import private modules
+or mutate adapter tables directly. The [reference-client implementation
+plan](docs/implementation-plan.md) records its command, persistence, TUI, and
+release boundaries.
 
 ## v0.1 scope
 
@@ -141,9 +147,10 @@ The initial release targets Zig 0.16.0 and includes:
 - An npm/WebAssembly package with Node and browser examples
 - Canonical schemas and cross-language conformance fixtures
 
-It does not include a tracker UI, required persistence, user accounts, sync, a
-CLI product, a hosted API, full periodization, cardio programming, arbitrary
-runtime plugins, or medical/AI coaching.
+The engine itself does not include a tracker UI, required persistence, user
+accounts, sync, a hosted API, full periodization, cardio programming, arbitrary
+runtime plugins, or medical/AI coaching. The separate reference CLI is an
+optional local client and does not change the engine's stateless scope.
 
 ## Architecture
 

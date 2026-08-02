@@ -1,8 +1,8 @@
 # Caudex CLI
 
-`caudex` is the reference command-line client for Caudex Workout Engine. The
-walking skeleton provides command discovery, version reporting, and public
-SQLite adapter metadata inspection:
+`caudex` is the reference command-line client for Caudex Workout Engine. It
+provides a line-oriented workflow for local workout tracking, history, catalog
+management, database maintenance, and automation:
 
 ```text
 caudex --help
@@ -12,12 +12,33 @@ caudex --format json database info
 caudex workout start
 ```
 
+## Installation and runtime baseline
+
+The v0.1.0 binaries are distributed only through the immutable GitHub Release
+`v0.1.0`. The release matrix verifies x86_64 and aarch64 Linux GNU, x86_64 and
+aarch64 macOS, and x86_64 Windows GNU. The initial archives are not
+platform-code-signed. Linux and macOS use the documented system SQLite
+runtime; Windows includes the pinned official `sqlite3.dll` beside
+`caudex.exe`.
+
+Building from the tagged source is also supported. Use Zig 0.16.0 and the
+safe release profile:
+
+```sh
+zig build caudex-cli -Doptimize=ReleaseSafe
+```
+
+Run `caudex version` after installation to record the CLI, engine, contract,
+and SQLite schema versions. `caudex --help` is the authoritative overview of
+the command grammar, while `caudex command-reference` emits a shell- and
+documentation-friendly reference.
+
 Build and run it from the repository root:
 
 ```sh
 zig build caudex-cli
 zig build run-caudex-cli -- --help
-zig build test-caudex-cli
+zig build test
 ```
 
 The client receives only the public `caudex`, `caudex_persistence`,
@@ -35,6 +56,11 @@ platform default:
 - Windows uses `%LOCALAPPDATA%\Caudex\caudex.sqlite`.
 
 Missing parent directories are created when the database is opened.
+
+The application-created data directory is private to the current user. A
+database, config file, batch input, or backup path that is a symlink is
+rejected. Backups must be new regular files; restores must name an existing
+regular SQLite file.
 
 ## Compatibility contract
 
@@ -80,6 +106,37 @@ caudex --database caudex.sqlite exercise edit bench-press \
 caudex --database caudex.sqlite exercise archive bench-press
 caudex --database caudex.sqlite exercise restore bench-press
 ```
+
+## First workout
+
+This complete shell sequence creates a catalog entry, starts a workout, adds
+an exercise, logs a set, finishes the workout, and reads it from a new process.
+Supply IDs and timestamps explicitly when a script must be repeatable:
+
+```sh
+set -euo pipefail
+db="${TMPDIR:-/tmp}/caudex-first-workout.sqlite"
+
+caudex --database "$db" exercise create bench-press \
+  --name "Bench Press" --equipment barbell \
+  --command-id catalog-create --occurred-at 2026-07-26T12:00:00Z
+caudex --database "$db" workout start \
+  --command-id workout-start --workout workout-1 \
+  --started-at 2026-07-26T12:01:00Z --occurred-at 2026-07-26T12:01:00Z
+caudex --database "$db" workout add-exercise bench-press \
+  --workout workout-1 --membership-id membership-1 \
+  --command-id exercise-add --occurred-at 2026-07-26T12:02:00Z
+caudex --database "$db" set log 70kg 8r @2rir \
+  --workout workout-1 --exercise membership-1 --set set-1 \
+  --command-id set-log --occurred-at 2026-07-26T12:03:00Z
+caudex --database "$db" workout finish --workout workout-1 \
+  --command-id workout-finish --occurred-at 2026-07-26T12:04:00Z
+caudex --database "$db" history show workout-1
+```
+
+The line client accepts a short workout with no logged sets, but logging a set
+is useful for a completed-history and `history last` smoke check. Repeat a
+command with the same command ID to obtain the recorded idempotent result.
 
 Completed workout history is available from a fresh client process:
 
@@ -127,3 +184,89 @@ caudex completion zsh >>"${HOME}/.zshrc"
 caudex completion fish >~/.config/fish/completions/caudex.fish
 caudex command-reference
 ```
+
+## Shell scripting, JSON, and exit codes
+
+Use `--format json` for machine consumers. Successful data is written to
+stdout; failures are written to stderr, leaving stdout empty. JSON documents
+have `schemaVersion: 1` and a stable `kind`. `--quiet` suppresses successful
+human and JSON output without changing the operation.
+
+```sh
+set -euo pipefail
+result=$(caudex --database "$db" --format json \
+  workout show --workout workout-1)
+printf '%s\n' "$result" | jq -r '.data.workoutId'
+```
+
+`caudex batch FILE` accepts bounded JSON Lines input. Each line contains an
+`args` array of ordinary CLI arguments, and each result is emitted as a JSON
+document. Batch files are limited to 64 KiB and 100 operations.
+
+| Exit | Meaning |
+| ---: | --- |
+| 0 | Success |
+| 2 | Syntax or invalid arguments |
+| 3 | Validation issue |
+| 4 | Not found |
+| 5 | Ambiguous match |
+| 6 | Revision or state conflict |
+| 7 | Database busy |
+| 8 | Database, migration, or transfer failure |
+| 70 | Unexpected runtime failure |
+| 130 | User interruption or declined confirmation |
+
+## Database, backup, and restore
+
+`database info` reports the adapter and schema compatibility boundary;
+`database check` and `doctor` run SQLite integrity checks. A backup is a
+consistent SQLite copy and must target a new regular path:
+
+```sh
+caudex --database "$db" database info
+caudex --database "$db" database check
+caudex --database "$db" database backup "$db.backup"
+caudex --database "$db" database restore "$db.backup" --yes
+```
+
+Restore validates the source before copying it into the selected database.
+Keep backups with the same user and access controls as the database. The CLI
+does not encrypt, upload, or rotate backups.
+
+## TUI and accessibility
+
+The application-owned TUI facade uses the tested low-level terminal lifecycle;
+the line CLI remains the supported accessible fallback. The key conventions
+are:
+
+- `↑`/`k` and `↓`/`j` navigate; `Tab` moves forward.
+- `Enter` or `Space` selects; `?` or `F1` opens help.
+- `Esc` cancels a prompt; `q` quits.
+- Resize and interruption restore the terminal before returning.
+
+Color is decorative and `NO_COLOR` disables styling. Narrow terminals retain
+IDs and status labels, with ASCII fallbacks for Unicode glyphs. See
+[`TUI-COMPATIBILITY.md`](TUI-COMPATIBILITY.md) for the verified platform and
+runtime baseline.
+
+## Troubleshooting
+
+- **`caudex: command not found`:** add the extracted release directory to
+  `PATH`, or invoke the source build from `zig-out/bin/caudex`.
+- **SQLite library error:** Linux and macOS require the system SQLite runtime;
+  Windows requires the release's adjacent `sqlite3.dll`. Do not mix an
+  archive with a different DLL.
+- **Database is busy:** retry after the other process closes its transaction;
+  the CLI uses a bounded busy timeout and returns exit 7 when it expires.
+- **Newer schema:** install the matching Caudex release. The CLI refuses to
+  mutate a database created by a newer schema.
+- **Symlink or permission error:** use a regular file in a user-owned,
+  private directory. The CLI intentionally refuses symlink transfer paths.
+- **Terminal rendering is unsuitable:** set `NO_COLOR=1`, use a monochrome
+  terminal, or use the line CLI with `--format json`.
+
+For a host application that needs recommendation generation rather than local
+tracking, use the stateless engine and public adapter contracts documented in
+the [Zig integrator guide](../../docs/zig-integrator-guide.md). A host owns its
+storage and presentation; it should not copy this CLI's formatting or private
+database SQL.
