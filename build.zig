@@ -478,6 +478,12 @@ pub fn build(b: *std.Build) void {
     const run_tui_session_tests = b.addRunArtifact(tui_session_tests);
     const tui_session_step = b.step("test-tui-session", "Test completion, cancellation, and recovery states");
     tui_session_step.dependOn(&run_tui_session_tests.step);
+    const tui_harness = b.addExecutable(.{ .name = "caudex-tui-e2e-harness", .root_module = b.createModule(.{ .root_source_file = b.path("tests/tui_live_workout_harness.zig"), .target = target, .optimize = optimize, .imports = &.{ .{ .name = "caudex_persistence", .module = persistence_module }, .{ .name = "caudex_sqlite", .module = sqlite_module }, .{ .name = "caudex_tracking", .module = tracking_module }, .{ .name = "caudex_tui", .module = b.createModule(.{ .root_source_file = b.path("apps/caudex-cli/src/tui/root.zig") }) } } }) });
+    const tui_e2e = b.addSystemCommand(&.{ "bash", "tests/tui_live_workout_test.sh" });
+    tui_e2e.addArtifactArg(cli);
+    tui_e2e.addArtifactArg(tui_harness);
+    const tui_e2e_step = b.step("test-tui-e2e", "Run fake-terminal live workout end to end");
+    tui_e2e_step.dependOn(&tui_e2e.step);
 
     const cli_help = b.addRunArtifact(cli);
     cli_help.addArg("--help");
@@ -908,6 +914,12 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_sqlite_adapter_tests.step);
     test_step.dependOn(&run_sqlite_tracking_tests.step);
     test_step.dependOn(&run_cli_tests.step);
+    test_step.dependOn(&run_tui_lifecycle_tests.step);
+    test_step.dependOn(&run_tui_model_tests.step);
+    test_step.dependOn(&run_tui_dashboard_tests.step);
+    test_step.dependOn(&run_tui_workout_tests.step);
+    test_step.dependOn(&run_tui_session_tests.step);
+    test_step.dependOn(&tui_e2e.step);
     test_step.dependOn(&cli_help.step);
     test_step.dependOn(&cli_version.step);
     test_step.dependOn(&cli_database_human.step);
