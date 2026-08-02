@@ -462,6 +462,10 @@ pub fn build(b: *std.Build) void {
     const run_tui_lifecycle_tests = b.addRunArtifact(tui_lifecycle_tests);
     const tui_lifecycle_step = b.step("test-tui-lifecycle", "Test terminal lifecycle with a fake terminal");
     tui_lifecycle_step.dependOn(&run_tui_lifecycle_tests.step);
+    const tui_model_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("apps/caudex-cli/src/tui/model.zig"), .target = target, .optimize = optimize }) });
+    const run_tui_model_tests = b.addRunArtifact(tui_model_tests);
+    const tui_model_step = b.step("test-tui-model", "Test deterministic TUI update and render model");
+    tui_model_step.dependOn(&run_tui_model_tests.step);
 
     const cli_help = b.addRunArtifact(cli);
     cli_help.addArg("--help");
