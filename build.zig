@@ -454,6 +454,15 @@ pub fn build(b: *std.Build) void {
     });
     const run_cli_tests = b.addRunArtifact(cli_tests);
 
+    const tui_lifecycle_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("apps/caudex-cli/src/tui/terminal.zig"),
+        .target = target,
+        .optimize = optimize,
+    }) });
+    const run_tui_lifecycle_tests = b.addRunArtifact(tui_lifecycle_tests);
+    const tui_lifecycle_step = b.step("test-tui-lifecycle", "Test terminal lifecycle with a fake terminal");
+    tui_lifecycle_step.dependOn(&run_tui_lifecycle_tests.step);
+
     const cli_help = b.addRunArtifact(cli);
     cli_help.addArg("--help");
     cli_help.expectStdOutEqual(
@@ -704,6 +713,7 @@ pub fn build(b: *std.Build) void {
 
     const cli_test_step = b.step("test-caudex-cli", "Test the caudex reference client");
     cli_test_step.dependOn(&run_cli_tests.step);
+    cli_test_step.dependOn(&run_tui_lifecycle_tests.step);
     cli_test_step.dependOn(&cli_help.step);
     cli_test_step.dependOn(&cli_version.step);
     cli_test_step.dependOn(&cli_database_human.step);

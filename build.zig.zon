@@ -3,7 +3,13 @@
     .version = "0.1.0",
     .fingerprint = 0xce9bd7149cfb6bb7, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0",
-    .dependencies = .{},
+    .dependencies = .{
+        .vaxis = .{
+            .url = "git+https://github.com/rockorager/libvaxis.git#cca454be4e002dbe1a386ff0fd3420ea21813fb5",
+            .hash = "vaxis-0.6.0-BWNV_DYXCgBP-oydkwMvwclWtjMrMAmSmg7cO6wtYFno",
+            .lazy = true,
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",

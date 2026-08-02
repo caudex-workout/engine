@@ -3,6 +3,13 @@
 - Status: Accepted
 - Date: 2026-08-01
 
+Dependency: `rockorager/libvaxis`, revision
+`cca454be4e002dbe1a386ff0fd3420ea21813fb5`, upstream `0.6.0`, Zig `0.16.0`.
+The exact Git revision and Zig-generated content hash are the pin. libvaxis is
+used only for low-level terminal primitives behind the app facade; upgrades are
+manual focused changes. Its MIT license belongs in third-party notices. `vxfw`
+is not adopted or authorized.
+
 ## Decision
 
 The first Caudex TUI will use **libvaxis**, pinned to a reviewed source revision,
