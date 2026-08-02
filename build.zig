@@ -466,6 +466,10 @@ pub fn build(b: *std.Build) void {
     const run_tui_model_tests = b.addRunArtifact(tui_model_tests);
     const tui_model_step = b.step("test-tui-model", "Test deterministic TUI update and render model");
     tui_model_step.dependOn(&run_tui_model_tests.step);
+    const tui_dashboard_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("apps/caudex-cli/src/tui/dashboard.zig"), .target = target, .optimize = optimize }) });
+    const run_tui_dashboard_tests = b.addRunArtifact(tui_dashboard_tests);
+    const tui_dashboard_step = b.step("test-tui-dashboard", "Test safe current-workout dashboard states");
+    tui_dashboard_step.dependOn(&run_tui_dashboard_tests.step);
 
     const cli_help = b.addRunArtifact(cli);
     cli_help.addArg("--help");

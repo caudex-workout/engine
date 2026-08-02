@@ -24,6 +24,14 @@ pub fn resolveWorkout(
     return resolution.resolveActiveWorkout(explicit_id, explicit_result, active);
 }
 
+pub fn loadActiveWorkouts(adapter: *sqlite.Adapter, allocator: std.mem.Allocator, scope: tracking.Scope) !tracking.ActiveWorkoutSelection {
+    return adapter.listActiveWorkouts(allocator, .{ .scope = scope, .max_results = 32 });
+}
+
+pub fn loadLastPerformance(adapter: *sqlite.Adapter, allocator: std.mem.Allocator, scope: tracking.Scope, exercise_id: tracking.Id) !tracking.LastPerformanceResult {
+    return adapter.lastPerformance(allocator, .{ .scope = scope, .exercise_id = exercise_id });
+}
+
 pub fn resolveExercise(
     adapter: *sqlite.Adapter,
     allocator: std.mem.Allocator,
