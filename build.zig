@@ -681,6 +681,11 @@ pub fn build(b: *std.Build) void {
     });
     cli_database_diagnostics_test.addArtifactArg(cli);
 
+    const cli_benchmark = b.addSystemCommand(&.{ "bash", "tests/cli_benchmark.sh" });
+    cli_benchmark.addArtifactArg(cli);
+    const cli_benchmark_step = b.step("benchmark-caudex-cli", "Measure repeatable caudex CLI baselines");
+    cli_benchmark_step.dependOn(&cli_benchmark.step);
+
     const architecture_probe_files = b.addWriteFiles();
     const private_import_probe = architecture_probe_files.add("caudex_private_import.zig",
         \\const private = @import("caudex_private_root");
