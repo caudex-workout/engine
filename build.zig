@@ -484,6 +484,10 @@ pub fn build(b: *std.Build) void {
     tui_e2e.addArtifactArg(tui_harness);
     const tui_e2e_step = b.step("test-tui-e2e", "Run fake-terminal live workout end to end");
     tui_e2e_step.dependOn(&tui_e2e.step);
+    const tui_catalog_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("apps/caudex-cli/src/tui/catalog_screen.zig"), .target = target, .optimize = optimize }) });
+    const run_tui_catalog_tests = b.addRunArtifact(tui_catalog_tests);
+    const tui_catalog_step = b.step("test-tui-catalog", "Test public catalog-management TUI screens");
+    tui_catalog_step.dependOn(&run_tui_catalog_tests.step);
 
     const cli_help = b.addRunArtifact(cli);
     cli_help.addArg("--help");
@@ -919,6 +923,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_tui_dashboard_tests.step);
     test_step.dependOn(&run_tui_workout_tests.step);
     test_step.dependOn(&run_tui_session_tests.step);
+    test_step.dependOn(&run_tui_catalog_tests.step);
     test_step.dependOn(&tui_e2e.step);
     test_step.dependOn(&cli_help.step);
     test_step.dependOn(&cli_version.step);

@@ -9,6 +9,7 @@ pub const Action = union(enum) {
     add_exercise: []const u8,
     reorder_exercise: ReorderExercise,
     change_set: ChangeSet,
+    catalog: CatalogAction,
     move_selection: Direction,
     show_help,
     quit,
@@ -19,6 +20,13 @@ pub const SetAction = enum { log, skip, reopen };
 pub const WorkoutEndAction = enum { finish, cancel };
 pub const ReorderExercise = struct { membership_id: []const u8, direction: Direction };
 pub const ChangeSet = struct { set_id: []const u8, action: SetAction };
+pub const CatalogAction = union(enum) {
+    create: CatalogDraft,
+    edit: CatalogDraft,
+    archive: []const u8,
+    restore: []const u8,
+};
+pub const CatalogDraft = struct { id: []const u8, name: []const u8, aliases: []const []const u8 = &.{}, equipment: []const []const u8 = &.{}, movements: []const []const u8 = &.{}, unilateral: ?bool = null };
 
 pub const Executor = struct {
     context: *anyopaque,
