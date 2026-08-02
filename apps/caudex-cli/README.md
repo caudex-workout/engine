@@ -36,6 +36,22 @@ platform default:
 
 Missing parent directories are created when the database is opened.
 
+## Compatibility contract
+
+The command grammar is the generated `caudex command-reference` output. The
+stable machine interface is versioned JSON (`schemaVersion: 1`) on stdout;
+diagnostics are written to stderr with the selected human or JSON format. Exit
+classes are stable: `0` success, `2` syntax, `3` validation, `4` not found,
+`5` ambiguity, `6` conflict, `7` busy, `8` database, `70` runtime, and `130`
+interrupted. Human table wording, spacing, and color are intentionally not a
+compatibility guarantee.
+
+Database paths resolve as documented above. `caudex version` reports the
+independent CLI, engine/schema, persistence-contract, tracking-contract, and
+SQLite adapter/schema boundaries so automation can record an exact contract
+set. Older supported SQLite files migrate forward; a newer schema is rejected
+without mutation.
+
 The local reference client uses host scope `local` unless `--scope ID` is
 provided; `--athlete ID` selects an optional athlete within that scope. Workout
 start generates secure command and workout IDs plus a current UTC timestamp.

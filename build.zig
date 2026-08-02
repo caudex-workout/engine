@@ -461,6 +461,8 @@ pub fn build(b: *std.Build) void {
         \\
         \\Usage:
         \\  caudex [--database PATH] [--format human|json] [--color auto|always|never] database info|check
+        \\  caudex [global options] database backup DESTINATION
+        \\  caudex [global options] database restore SOURCE --yes
         \\  caudex [global options] doctor
         \\  caudex [global options] workout start [start options]
         \\  caudex [global options] workout add-exercise EXERCISE [options]
@@ -510,7 +512,10 @@ pub fn build(b: *std.Build) void {
 
     const cli_version = b.addRunArtifact(cli);
     cli_version.addArg("version");
-    cli_version.expectStdOutEqual("caudex 0.1.0\n");
+    cli_version.expectStdOutEqual(
+        "caudex 0.1.0\nengine: 0.1.0 (schema 1)\npersistence contract: 1\n" ++
+            "tracking contract: 6\nsqlite adapter: 0.1.0 (schema 1-7)\n",
+    );
 
     const cli_database_human = b.addRunArtifact(cli);
     cli_database_human.addArgs(&.{ "--database", ":memory:", "database", "info" });

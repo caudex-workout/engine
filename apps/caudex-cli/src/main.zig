@@ -201,7 +201,7 @@ fn run(
     }
 
     if (args.len == 2 and std.mem.eql(u8, args[1], "version")) {
-        try output.writeVersion(stdout, version);
+        try stdout.print("caudex {s}\nengine: {s} (schema {d})\npersistence contract: {d}\ntracking contract: {d}\nsqlite adapter: {s} (schema {d}-{d})\n", .{ version, caudex.engine.engine_version, caudex.engine.schema_version, persistence.contract_version, tracking.contract_version, sqlite.adapter_version, sqlite.minimum_schema_version, sqlite.schema_version });
         return null;
     }
     if (args.len == 3 and std.mem.eql(u8, args[1], "batch")) {
