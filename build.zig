@@ -707,6 +707,8 @@ pub fn build(b: *std.Build) void {
     cli_test_step.dependOn(&cli_invalid_json.step);
     cli_test_step.dependOn(&cli_after_broken_pipe.step);
     cli_test_step.dependOn(&cli_workout_start_test.step);
+    cli_test_step.dependOn(&cli_workout_resolution_test.step);
+    cli_test_step.dependOn(&cli_add_exercise_test.step);
     cli_test_step.dependOn(&cli_set_commands_test.step);
     cli_test_step.dependOn(&cli_workout_end_test.step);
     cli_test_step.dependOn(&cli_catalog_commands_test.step);
@@ -887,6 +889,10 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&cli_add_exercise_test.step);
     test_step.dependOn(&cli_set_commands_test.step);
     test_step.dependOn(&cli_workout_end_test.step);
+    test_step.dependOn(&cli_catalog_commands_test.step);
+    test_step.dependOn(&cli_history_commands_test.step);
+    test_step.dependOn(&cli_ergonomics_test.step);
+    test_step.dependOn(&cli_batch_test.step);
     test_step.dependOn(&cli_completion_test.step);
     test_step.dependOn(&cli_shell_smoke_test.step);
     test_step.dependOn(&cli_database_diagnostics_test.step);
