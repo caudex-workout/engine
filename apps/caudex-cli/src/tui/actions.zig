@@ -5,6 +5,9 @@ pub const Action = union(enum) {
     start_workout,
     finish_workout,
     log_selected_set,
+    add_exercise: []const u8,
+    reorder_exercise: ReorderExercise,
+    change_set: ChangeSet,
     move_selection: Direction,
     show_help,
     quit,
@@ -13,6 +16,8 @@ pub const Action = union(enum) {
 pub const Direction = enum { up, down };
 pub const SetAction = enum { log, skip, reopen };
 pub const WorkoutEndAction = enum { finish, cancel };
+pub const ReorderExercise = struct { membership_id: []const u8, direction: Direction };
+pub const ChangeSet = struct { set_id: []const u8, action: SetAction };
 
 pub const Executor = struct {
     context: *anyopaque,
