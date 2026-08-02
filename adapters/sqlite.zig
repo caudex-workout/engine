@@ -4,6 +4,7 @@
 //! statements, and physical schema details are private implementation data.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const caudex = @import("caudex");
 const persistence = @import("caudex_persistence");
 const tracking = @import("caudex_tracking");
@@ -118,7 +119,7 @@ pub const Adapter = opaque {
     /// Creates a consistent SQLite backup. The destination must be a new regular path.
     pub fn backup(self: *Adapter, io: std.Io, destination: [:0]const u8) TransferError!void {
         try requireNewRegularPath(io, destination);
-        try copyToPath(self, destination);
+        try copyToPath(self, io, destination);
     }
 
     /// Validates a source database before copying it into this open database.
@@ -2080,11 +2081,14 @@ fn requireExistingRegularPath(io: std.Io, path: []const u8) TransferError!void {
     if (stat.kind != .file) return error.Incompatible;
 }
 
-fn copyToPath(source: *Adapter, destination: [:0]const u8) TransferError!void {
+fn copyToPath(source: *Adapter, io: std.Io, destination: [:0]const u8) TransferError!void {
     var target_raw: ?*c.sqlite3 = null;
     const status = c.sqlite3_open_v2(destination.ptr, &target_raw, c.SQLITE_OPEN_READWRITE | c.SQLITE_OPEN_CREATE | c.SQLITE_OPEN_FULLMUTEX, null);
     if (status != c.SQLITE_OK or target_raw == null) return mapTransferStatus(status);
     defer _ = c.sqlite3_close(target_raw.?);
+    if (builtin.os.tag != .windows) {
+        std.Io.Dir.cwd().setFilePermissions(io, destination, std.Io.File.Permissions.fromMode(0o600), .{ .follow_symlinks = false }) catch return error.OperationFailed;
+    }
     try copyRaw(target_raw.?, raw(source));
 }
 

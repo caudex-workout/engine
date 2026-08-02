@@ -14,7 +14,7 @@ fn fakeStep(context: *anyopaque) !void {
     const value: *Fake = @ptrCast(@alignCast(context));
     value.calls += 1;
 }
-fn fakeLeave(context: *anyopaque) void {
+fn fakeLeave(context: *anyopaque) !void {
     const value: *Fake = @ptrCast(@alignCast(context));
     value.calls += 1;
 }

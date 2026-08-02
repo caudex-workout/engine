@@ -2,11 +2,11 @@ pub const Stage = enum { idle, raw_mode, alternate_screen, resize_registered, ac
 pub const Driver = struct {
     context: *anyopaque,
     enter_raw: *const fn (*anyopaque) anyerror!void,
-    leave_raw: *const fn (*anyopaque) void,
+    leave_raw: *const fn (*anyopaque) anyerror!void,
     enter_screen: *const fn (*anyopaque) anyerror!void,
-    leave_screen: *const fn (*anyopaque) void,
+    leave_screen: *const fn (*anyopaque) anyerror!void,
     register_resize: *const fn (*anyopaque) anyerror!void,
-    unregister_resize: *const fn (*anyopaque) void,
+    unregister_resize: *const fn (*anyopaque) anyerror!void,
 };
 
 test "initialization failure at every stage restores entered stages once" {
@@ -32,6 +32,18 @@ test "ordinary restore unregisters resize before screen and raw mode" {
     try @import("std").testing.expectEqual(Stage.restored, terminal.stage);
     try @import("std").testing.expectEqual(@as(usize, 6), value.calls);
 }
+
+test "restore continues after injected cleanup failures and remains idempotent" {
+    const fake = @import("terminal/fake.zig");
+    var value = fake.Fake{ .fail_cleanup_at = 4 };
+    var terminal = Terminal{ .driver = fake.driver(&value) };
+    try terminal.init();
+    terminal.restore();
+    try @import("std").testing.expectEqual(Stage.restored, terminal.stage);
+    try @import("std").testing.expectEqual(@as(usize, 6), value.calls);
+    terminal.restore();
+    try @import("std").testing.expectEqual(@as(usize, 6), value.calls);
+}
 pub const Terminal = struct {
     driver: Driver,
     stage: Stage = .idle,
@@ -47,15 +59,15 @@ pub const Terminal = struct {
     }
     pub fn restore(self: *Terminal) void {
         switch (self.stage) {
-            .active, .resize_registered => self.driver.unregister_resize(self.driver.context),
+            .active, .resize_registered => self.driver.unregister_resize(self.driver.context) catch {},
             else => {},
         }
         switch (self.stage) {
-            .active, .resize_registered, .alternate_screen => self.driver.leave_screen(self.driver.context),
+            .active, .resize_registered, .alternate_screen => self.driver.leave_screen(self.driver.context) catch {},
             else => {},
         }
         switch (self.stage) {
-            .active, .resize_registered, .alternate_screen, .raw_mode => self.driver.leave_raw(self.driver.context),
+            .active, .resize_registered, .alternate_screen, .raw_mode => self.driver.leave_raw(self.driver.context) catch {},
             else => {},
         }
         self.stage = .restored;

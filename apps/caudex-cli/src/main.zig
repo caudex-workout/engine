@@ -6,6 +6,7 @@ const sqlite = @import("caudex_sqlite");
 const tracking = @import("caudex_tracking");
 const errors = @import("errors.zig");
 const output = @import("output.zig");
+const security = @import("security.zig");
 const use_cases = @import("use_cases.zig");
 const commands = @import("commands.zig");
 const tui_actions = @import("tui/actions.zig");
@@ -174,9 +175,14 @@ pub fn main(init: std.process.Init) !void {
         init.environ_map,
         args,
         stdout,
-    ) catch |err| errors.fromError(err);
+    ) catch |err| blk: {
+        if (security.isClosedOutput(err)) return;
+        break :blk errors.fromError(err);
+    };
     if (maybe_failure) |failure| {
-        output.writeFailure(stderr, requested_format, failure) catch {};
+        output.writeFailure(stderr, requested_format, failure) catch |err| {
+            if (security.isClosedOutput(err)) return;
+        };
         stderr_writer.flush() catch {};
         std.process.exit(@intFromEnum(failure.exit_class));
     }
@@ -193,6 +199,7 @@ fn run(
     args: []const []const u8,
     stdout: *std.Io.Writer,
 ) anyerror!?errors.Failure {
+    try security.validateArgs(args);
     if (args.len == 1 or
         (args.len == 2 and
             (std.mem.eql(u8, args[1], "--help") or std.mem.eql(u8, args[1], "help"))))
@@ -232,10 +239,13 @@ fn run(
         environment,
         nativePlatform(),
     );
+    try security.validatePath(path);
     try ensureDatabaseDirectory(io, path);
+    try rejectSymlink(io, path);
 
     const adapter = try sqlite.open(path, .{});
     defer adapter.close();
+    try setPrivateFilePermissions(io, path);
 
     const no_color = environ.get("NO_COLOR") != null;
     const is_terminal = std.Io.File.stdout().isTty(io) catch false;
@@ -284,13 +294,21 @@ fn run(
     if (remaining.len == 3 and std.mem.eql(u8, remaining[0], "database") and std.mem.eql(u8, remaining[1], "backup")) {
         const destination = try allocator.dupeZ(u8, remaining[2]);
         try adapter.backup(io, destination);
-        if (!settings.quiet) try stdout.print("Backup created: {s}\n", .{remaining[2]});
+        if (!settings.quiet) {
+            try stdout.writeAll("Backup created: ");
+            try output.writeTerminalText(stdout, remaining[2]);
+            try stdout.writeByte('\n');
+        }
         return null;
     }
     if (remaining.len == 4 and std.mem.eql(u8, remaining[0], "database") and std.mem.eql(u8, remaining[1], "restore") and std.mem.eql(u8, remaining[3], "--yes")) {
         const source = try allocator.dupeZ(u8, remaining[2]);
         try adapter.restore(io, source);
-        if (!settings.quiet) try stdout.print("Database restored from: {s}\n", .{remaining[2]});
+        if (!settings.quiet) {
+            try stdout.writeAll("Database restored from: ");
+            try output.writeTerminalText(stdout, remaining[2]);
+            try stdout.writeByte('\n');
+        }
         return null;
     }
     if ((remaining.len == 2 and std.mem.eql(u8, remaining[0], "database") and std.mem.eql(u8, remaining[1], "check")) or
@@ -366,12 +384,14 @@ fn run(
 const BatchOperation = struct { args: []const []const u8 };
 
 fn runBatch(io: std.Io, allocator: std.mem.Allocator, environ: *const std.process.Environ.Map, path: []const u8, stdout: *std.Io.Writer) !?errors.Failure {
-    const input = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(64 * 1024));
+    try security.validatePath(path);
+    try rejectSymlink(io, path);
+    const input = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(security.max_batch_bytes));
     var lines = std.mem.splitScalar(u8, input, '\n');
     var count: usize = 0;
     while (lines.next()) |line| {
         if (line.len == 0) continue;
-        if (line.len > 2048 or count == 100) return error.InvalidArguments;
+        if (line.len > security.max_batch_line_bytes or count == security.max_batch_operations) return error.InvalidArguments;
         const parsed = std.json.parseFromSlice(BatchOperation, allocator, line, .{ .duplicate_field_behavior = .@"error", .ignore_unknown_fields = false, .allocate = .alloc_always }) catch return error.InvalidArguments;
         defer parsed.deinit();
         if (parsed.value.args.len == 0 or std.mem.eql(u8, parsed.value.args[0], "batch")) return error.InvalidArguments;
@@ -389,9 +409,17 @@ fn runBatch(io: std.Io, allocator: std.mem.Allocator, environ: *const std.proces
 
 fn configCommand(io: std.Io, allocator: std.mem.Allocator, environment: PathEnvironment, args: []const []const u8, settings: output.Settings, stdout: *std.Io.Writer) !?errors.Failure {
     const path = try resolveConfigPath(allocator, environment, nativePlatform());
+    try security.validatePath(path);
+    try ensurePrivateDirectory(io, path);
+    try rejectSymlink(io, path);
     if (args.len == 1 and std.mem.eql(u8, args[0], "path")) {
-        if (settings.format == .json) try std.json.Stringify.value(.{ .schemaVersion = 1, .kind = "caudex.config.path", .data = .{ .path = path } }, .{}, stdout) else try stdout.print("{s}\n", .{path});
+        if (settings.format == .json) {
+            try std.json.Stringify.value(.{ .schemaVersion = 1, .kind = "caudex.config.path", .data = .{ .path = path } }, .{}, stdout);
+        } else {
+            try output.writeTerminalText(stdout, path);
+        }
         if (settings.format == .json) try stdout.writeByte('\n');
+        if (settings.format == .human) try stdout.writeByte('\n');
         return null;
     }
     if (args.len == 1 and std.mem.eql(u8, args[0], "show")) {
@@ -1352,7 +1380,7 @@ fn readConfig(allocator: std.mem.Allocator, io: std.Io, path: []const u8) ![]con
 fn writeConfigAtomically(io: std.Io, path: []const u8, value: []const u8) !void {
     const parent = std.fs.path.dirname(path) orelse return error.DataDirectoryUnavailable;
     try std.Io.Dir.cwd().createDirPath(io, parent);
-    var atomic = try std.Io.Dir.cwd().createFileAtomic(io, path, .{ .replace = true });
+    var atomic = try std.Io.Dir.cwd().createFileAtomic(io, path, .{ .replace = true, .permissions = privateFilePermissions() });
     defer atomic.deinit(io);
     var buffer: [512]u8 = undefined;
     var writer = atomic.file.writer(io, &buffer);
@@ -1374,7 +1402,37 @@ fn ensureDatabaseDirectory(io: std.Io, path: []const u8) !void {
     if (std.mem.eql(u8, path, ":memory:")) return;
     const parent = std.fs.path.dirname(path) orelse return;
     if (parent.len == 0) return;
-    try std.Io.Dir.cwd().createDirPath(io, parent);
+    _ = try std.Io.Dir.cwd().createDirPathStatus(io, parent, privateDirectoryPermissions());
+}
+
+fn ensurePrivateDirectory(io: std.Io, path: []const u8) !void {
+    const parent = std.fs.path.dirname(path) orelse return;
+    if (parent.len == 0) return;
+    _ = try std.Io.Dir.cwd().createDirPathStatus(io, parent, privateDirectoryPermissions());
+}
+
+fn rejectSymlink(io: std.Io, path: []const u8) !void {
+    if (std.mem.eql(u8, path, ":memory:")) return;
+    const stat = std.Io.Dir.cwd().statFile(io, path, .{ .follow_symlinks = false }) catch |err| switch (err) {
+        error.FileNotFound => return,
+        else => return err,
+    };
+    if (stat.kind == .sym_link) return error.Symlink;
+}
+
+fn setPrivateFilePermissions(io: std.Io, path: []const u8) !void {
+    if (std.mem.eql(u8, path, ":memory:") or builtin.os.tag == .windows) return;
+    try std.Io.Dir.cwd().setFilePermissions(io, path, privateFilePermissions(), .{ .follow_symlinks = false });
+}
+
+fn privateFilePermissions() std.Io.File.Permissions {
+    if (builtin.os.tag == .windows) return .default_file;
+    return std.Io.File.Permissions.fromMode(0o600);
+}
+
+fn privateDirectoryPermissions() std.Io.Dir.Permissions {
+    if (builtin.os.tag == .windows) return .default_dir;
+    return std.Io.Dir.Permissions.fromMode(0o700);
 }
 
 fn nonEmpty(value: ?[]const u8) ?[]const u8 {
@@ -1489,6 +1547,11 @@ test "missing database directories are created before adapter open" {
     try ensureDatabaseDirectory(std.testing.io, path);
     const adapter = try sqlite.open(path, .{});
     defer adapter.close();
+    try setPrivateFilePermissions(std.testing.io, path);
+    if (builtin.os.tag != .windows) {
+        const stat = try std.Io.Dir.cwd().statFile(std.testing.io, path, .{ .follow_symlinks = false });
+        try std.testing.expectEqual(@as(std.posix.mode_t, 0o600), stat.permissions.toMode());
+    }
     const metadata = try adapter.metadata();
     try std.testing.expectEqual(sqlite.DatabaseKind.file, metadata.database_kind);
 }
@@ -1555,14 +1618,15 @@ test "client source imports only approved public packages" {
                 std.mem.eql(u8, name, "output.zig") or
                 std.mem.eql(u8, name, "use_cases.zig") or
                 std.mem.eql(u8, name, "commands.zig") or
-                std.mem.eql(u8, name, "tui/actions.zig"),
+                std.mem.eql(u8, name, "tui/actions.zig") or
+                std.mem.eql(u8, name, "security.zig"),
         );
 
         import_count += 1;
         remainder = tail[name_end + 1 ..];
     }
 
-    try std.testing.expectEqual(@as(usize, 11), import_count);
+    try std.testing.expectEqual(@as(usize, 12), import_count);
 }
 
 test "line client does not import libvaxis" {
