@@ -36,6 +36,11 @@ pub fn loadHistory(adapter: *sqlite.Adapter, allocator: std.mem.Allocator, query
     return adapter.listHistory(allocator, query);
 }
 
+pub const DatabaseInspection = struct { metadata: sqlite.Metadata, integrity: sqlite.IntegrityReport };
+pub fn inspectDatabase(adapter: *sqlite.Adapter) !DatabaseInspection {
+    return .{ .metadata = try adapter.metadata(), .integrity = try adapter.integrity() };
+}
+
 pub fn resolveExercise(
     adapter: *sqlite.Adapter,
     allocator: std.mem.Allocator,
