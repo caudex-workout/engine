@@ -4,6 +4,7 @@
 pub const Action = union(enum) {
     start_workout,
     finish_workout,
+    cancel_workout,
     log_selected_set,
     add_exercise: []const u8,
     reorder_exercise: ReorderExercise,
