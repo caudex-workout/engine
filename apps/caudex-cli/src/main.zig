@@ -1550,7 +1550,7 @@ test "missing database directories are created before adapter open" {
     try setPrivateFilePermissions(std.testing.io, path);
     if (builtin.os.tag != .windows) {
         const stat = try std.Io.Dir.cwd().statFile(std.testing.io, path, .{ .follow_symlinks = false });
-        try std.testing.expectEqual(@as(std.posix.mode_t, 0o600), stat.permissions.toMode());
+        try std.testing.expectEqual(@as(std.posix.mode_t, 0o600), stat.permissions.toMode() & 0o777);
     }
     const metadata = try adapter.metadata();
     try std.testing.expectEqual(sqlite.DatabaseKind.file, metadata.database_kind);
