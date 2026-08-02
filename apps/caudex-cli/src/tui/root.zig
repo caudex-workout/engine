@@ -3,3 +3,4 @@ pub const dashboard = @import("dashboard.zig");
 pub const workout = @import("workout_screen.zig");
 pub const session = @import("session.zig");
 pub const catalog = @import("catalog_screen.zig");
+pub const history = @import("history_screen.zig");

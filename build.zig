@@ -488,6 +488,10 @@ pub fn build(b: *std.Build) void {
     const run_tui_catalog_tests = b.addRunArtifact(tui_catalog_tests);
     const tui_catalog_step = b.step("test-tui-catalog", "Test public catalog-management TUI screens");
     tui_catalog_step.dependOn(&run_tui_catalog_tests.step);
+    const tui_history_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("apps/caudex-cli/src/tui/history_screen.zig"), .target = target, .optimize = optimize }) });
+    const run_tui_history_tests = b.addRunArtifact(tui_history_tests);
+    const tui_history_step = b.step("test-tui-history", "Test bounded history and correction TUI flows");
+    tui_history_step.dependOn(&run_tui_history_tests.step);
 
     const cli_help = b.addRunArtifact(cli);
     cli_help.addArg("--help");
@@ -924,6 +928,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_tui_workout_tests.step);
     test_step.dependOn(&run_tui_session_tests.step);
     test_step.dependOn(&run_tui_catalog_tests.step);
+    test_step.dependOn(&run_tui_history_tests.step);
     test_step.dependOn(&tui_e2e.step);
     test_step.dependOn(&cli_help.step);
     test_step.dependOn(&cli_version.step);

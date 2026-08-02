@@ -32,6 +32,10 @@ pub fn loadLastPerformance(adapter: *sqlite.Adapter, allocator: std.mem.Allocato
     return adapter.lastPerformance(allocator, .{ .scope = scope, .exercise_id = exercise_id });
 }
 
+pub fn loadHistory(adapter: *sqlite.Adapter, allocator: std.mem.Allocator, query: tracking.HistoryQuery) !tracking.HistoryPage {
+    return adapter.listHistory(allocator, query);
+}
+
 pub fn resolveExercise(
     adapter: *sqlite.Adapter,
     allocator: std.mem.Allocator,

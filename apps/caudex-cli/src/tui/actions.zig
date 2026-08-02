@@ -10,6 +10,7 @@ pub const Action = union(enum) {
     reorder_exercise: ReorderExercise,
     change_set: ChangeSet,
     catalog: CatalogAction,
+    correct_historical_set: HistoricalCorrection,
     move_selection: Direction,
     show_help,
     quit,
@@ -27,6 +28,8 @@ pub const CatalogAction = union(enum) {
     restore: []const u8,
 };
 pub const CatalogDraft = struct { id: []const u8, name: []const u8, aliases: []const []const u8 = &.{}, equipment: []const []const u8 = &.{}, movements: []const []const u8 = &.{}, unilateral: ?bool = null };
+pub const HistoricalCorrection = struct { workout_id: []const u8, membership_id: []const u8, set_id: []const u8, metrics: []const MetricInput, confirmed: bool };
+pub const MetricInput = struct { code: []const u8, decimal: []const u8, unit: []const u8 };
 
 pub const Executor = struct {
     context: *anyopaque,
