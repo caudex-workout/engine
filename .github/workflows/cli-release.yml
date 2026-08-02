@@ -4,6 +4,10 @@ on:
   push:
     tags: ["v0.1.0"]
 
+concurrency:
+  group: cli-release-v0.1.0
+  cancel-in-progress: false
+
 permissions:
   contents: write
   attestations: write
@@ -11,56 +15,139 @@ permissions:
 
 jobs:
   package:
-    name: ${{ matrix.asset }}
+    name: ${{ matrix.target }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, target: x86_64-linux-gnu, asset: caudex-workout-cli-0.1.0-x86_64-linux-gnu.tar.gz }
-          - { os: ubuntu-24.04-arm, target: aarch64-linux-gnu, asset: caudex-workout-cli-0.1.0-aarch64-linux-gnu.tar.gz }
-          - { os: macos-13, target: x86_64-macos, asset: caudex-workout-cli-0.1.0-x86_64-macos.tar.gz }
-          - { os: macos-14, target: aarch64-macos, asset: caudex-workout-cli-0.1.0-aarch64-macos.tar.gz }
-          - { os: windows-latest, target: x86_64-windows-gnu, asset: caudex-workout-cli-0.1.0-x86_64-windows-gnu.zip, windows: true }
+          - { os: ubuntu-latest, target: x86_64-linux-gnu, archive: caudex-workout-cli-0.1.0-x86_64-linux-gnu.tar.gz }
+          - { os: ubuntu-24.04-arm, target: aarch64-linux-gnu, archive: caudex-workout-cli-0.1.0-aarch64-linux-gnu.tar.gz }
+          - { os: macos-13, target: x86_64-macos, archive: caudex-workout-cli-0.1.0-x86_64-macos.tar.gz }
+          - { os: macos-14, target: aarch64-macos, archive: caudex-workout-cli-0.1.0-aarch64-macos.tar.gz }
+          - { os: windows-latest, target: x86_64-windows-gnu, archive: caudex-workout-cli-0.1.0-x86_64-windows-gnu.zip, windows: true }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v6
-        with: { persist-credentials: false }
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: mlugg/setup-zig@v2
-        with: { version: 0.16.0 }
+        with:
+          version: 0.16.0
       - name: Build ReleaseSafe CLI
-        run: zig build -Doptimize=ReleaseSafe caudex-cli
-      - name: Stage and smoke test Unix archive
+        run: zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe caudex-cli
+      - name: Run native core, persistence, and lifecycle tests
+        run: |
+          zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe test-core
+          zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe test-persistence-sqlite
+          zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe test-tui-lifecycle
+      - name: Package and smoke-test Unix archive
         if: ${{ !matrix.windows }}
         shell: bash
         run: |
-          stem=${{ matrix.asset }}; stem=${stem%.tar.gz}; mkdir -p stage/$stem
-          cp zig-out/bin/caudex LICENSE NOTICE apps/caudex-cli/README.md stage/$stem/
-          printf '{"version":"0.1.0","target":"${{ matrix.target }}","sqlite":{"linkage":"system","source":"runner system SQLite"}}\n' > stage/$stem/build-metadata.json
-          tar --sort=name --mtime='UTC 2026-01-01' --owner=0 --group=0 --numeric-owner -czf "$stem.tar.gz" -C stage "$stem"
-          mkdir extract; tar -xzf "$stem.tar.gz" -C extract; extract/$stem/caudex version; extract/$stem/caudex --help; TMPDIR="$PWD/extract" extract/$stem/caudex --database "$PWD/extract/smoke.sqlite" database check
-      - name: Stage and smoke test Windows archive
+          set -euo pipefail
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            sqlite_library="$(otool -L zig-out/bin/caudex | awk '/sqlite3/{print $1; exit}')"
+            if [[ ! -f "$sqlite_library" ]]; then
+              sqlite_checksum="$(sha256sum /usr/bin/sqlite3 2>/dev/null | awk '{print $1}' || shasum -a 256 /usr/bin/sqlite3 | awk '{print $1}')"
+              sqlite_library="/usr/bin/sqlite3"
+              sqlite_source="runner system SQLite dyld-cache runtime ($sqlite_library; checksum basis: sqlite3 executable)"
+            else
+              sqlite_source="runner system SQLite ($sqlite_library)"
+            fi
+          else
+            sqlite_library="$(ldd zig-out/bin/caudex | awk '/libsqlite3/{print $3; exit}')"
+            sqlite_source="runner system SQLite ($sqlite_library)"
+          fi
+          test -f "$sqlite_library"
+          sqlite_version="$(python3 -c 'import sqlite3; print(sqlite3.sqlite_version)')"
+          package_args=(
+            --target "${{ matrix.target }}" --archive tar.gz
+            --binary zig-out/bin/caudex --output "${{ matrix.archive }}"
+            --sqlite-version "$sqlite_version"
+            --sqlite-linkage "dynamic system library"
+            --sqlite-source "$sqlite_source"
+            --sqlite-library "$sqlite_library"
+          )
+          if [[ -n "${sqlite_checksum:-}" ]]; then
+            package_args+=(--sqlite-checksum "$sqlite_checksum")
+          fi
+          python3 tools/release/package_cli.py "${package_args[@]}"
+      - name: Package and smoke-test Windows archive
         if: ${{ matrix.windows }}
         shell: pwsh
         run: |
-          $stem='caudex-workout-cli-0.1.0-x86_64-windows-gnu'; New-Item -ItemType Directory -Force stage/$stem | Out-Null
-          Copy-Item zig-out/bin/caudex.exe,LICENSE,NOTICE,apps/caudex-cli/README.md stage/$stem/
-          Invoke-WebRequest https://www.sqlite.org/2026/sqlite-dll-win-x64-3490100.zip -OutFile sqlite.zip
-          Expand-Archive sqlite.zip sqlite; Copy-Item sqlite/sqlite3.dll stage/$stem/
-          '{"version":"0.1.0","target":"x86_64-windows-gnu","sqlite":{"version":"3.49.1","linkage":"bundled DLL","source":"sqlite.org","checksum":"recorded by release verification"}}' | Set-Content stage/$stem/build-metadata.json
-          Compress-Archive -Path stage/$stem -DestinationPath "$stem.zip"; Expand-Archive "$stem.zip" extract; extract/$stem/caudex.exe version; extract/$stem/caudex.exe --database "$PWD/extract/smoke.sqlite" database check
-      - uses: actions/upload-artifact@v7
-        with: { name: ${{ matrix.asset }}, path: ${{ matrix.asset }}, if-no-files-found: error }
+          $ErrorActionPreference = 'Stop'
+          $sqliteUrl = 'https://www.sqlite.org/2026/sqlite-dll-win-x64-3490100.zip'
+          Invoke-WebRequest $sqliteUrl -OutFile sqlite-dll.zip
+          Expand-Archive sqlite-dll.zip sqlite-dll -Force
+          $dll = Get-ChildItem sqlite-dll -Filter sqlite3.dll -Recurse | Select-Object -First 1
+          if ($null -eq $dll) { throw 'official SQLite archive did not contain sqlite3.dll' }
+          python tools/release/package_cli.py `
+            --target '${{ matrix.target }}' --archive zip `
+            --binary zig-out/bin/caudex.exe --output '${{ matrix.archive }}' `
+            --sqlite-version '3.49.1' `
+            --sqlite-linkage 'bundled official sqlite3.dll' `
+            --sqlite-source $sqliteUrl `
+            --sqlite-dll $dll.FullName
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive }}
+          path: ${{ matrix.archive }}
+          if-no-files-found: error
       - uses: actions/attest-build-provenance@v3
-        with: { subject-path: ${{ matrix.asset }} }
+        with:
+          subject-path: ${{ matrix.archive }}
 
   publish-draft:
+    name: Verify assets and create draft
     needs: package
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v8
-        with: { path: assets, merge-multiple: true }
-      - run: cd assets && sha256sum caudex-workout-cli-* > SHA256SUMS
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Create deterministic SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd assets
+          sha256sum \
+            caudex-workout-cli-0.1.0-x86_64-linux-gnu.tar.gz \
+            caudex-workout-cli-0.1.0-aarch64-linux-gnu.tar.gz \
+            caudex-workout-cli-0.1.0-x86_64-macos.tar.gz \
+            caudex-workout-cli-0.1.0-aarch64-macos.tar.gz \
+            caudex-workout-cli-0.1.0-x86_64-windows-gnu.zip > SHA256SUMS
+      - name: Verify every archive, metadata, and checksum
+        run: python3 tools/release/verify_cli_release.py assets
       - uses: actions/attest-build-provenance@v3
-        with: { subject-path: assets/SHA256SUMS }
-      - uses: softprops/action-gh-release@v2
-        with: { draft: true, files: "assets/*", generate_release_notes: true }
+        with:
+          subject-path: assets/SHA256SUMS
+      - name: Create immutable draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v0.1.0 \
+            --draft --verify-tag --title "Caudex CLI v0.1.0" \
+            --notes-file docs/release/cli.md assets/*
+      - name: Verify draft asset set
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(gh release view v0.1.0 --json isDraft --jq .isDraft)" = true
+          test "$(gh release view v0.1.0 --json assets --jq '.assets | length')" -eq 6
+
+  publish:
+    name: Publish verified release
+    needs: publish-draft
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish draft without changing the immutable tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit v0.1.0 --draft=false --latest

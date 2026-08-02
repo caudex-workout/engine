@@ -428,6 +428,8 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("apps/caudex-cli/src/main.zig"),
         .target = target,
         .optimize = optimize,
+        // Keep development diagnostics, but do not ship unnecessary symbols.
+        .strip = if (optimize == .Debug) null else true,
         .imports = &.{
             .{ .name = "caudex", .module = module },
             .{ .name = "caudex_persistence", .module = persistence_module },
@@ -830,6 +832,16 @@ pub fn build(b: *std.Build) void {
     );
     cli_documentation_step.dependOn(&cli_documentation_test.step);
 
+    const cli_release_workflow_test = b.addSystemCommand(&.{
+        "node",
+        "tests/cli_release_workflow_test.mjs",
+    });
+    const cli_release_workflow_step = b.step(
+        "test-cli-release-workflow",
+        "Check CLI release targets, packaging, attestation, and publication gates",
+    );
+    cli_release_workflow_step.dependOn(&cli_release_workflow_test.step);
+
     const methodology_guides_test = b.addSystemCommand(&.{
         "node",
         "tests/methodology_guides_test.mjs",
@@ -978,6 +990,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&npm_release_test.step);
     test_step.dependOn(&docs_quickstart_test.step);
     test_step.dependOn(&cli_documentation_test.step);
+    test_step.dependOn(&cli_release_workflow_test.step);
     test_step.dependOn(&methodology_guides_test.step);
     test_step.dependOn(&data_mapping_guide_test.step);
     test_step.dependOn(&custom_repository_test.step);
