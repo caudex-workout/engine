@@ -499,6 +499,10 @@ pub fn build(b: *std.Build) void {
     const tracking_coverage_audit = b.addSystemCommand(&.{ "bash", "tests/tracking_coverage_audit_test.sh" });
     const tracking_coverage_step = b.step("test-tracking-coverage-audit", "Check public tracking coverage audit completeness");
     tracking_coverage_step.dependOn(&tracking_coverage_audit.step);
+    const tui_compatibility_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("apps/caudex-cli/src/tui/compatibility.zig"), .target = target, .optimize = optimize }) });
+    const run_tui_compatibility_tests = b.addRunArtifact(tui_compatibility_tests);
+    const tui_compatibility_step = b.step("test-tui-compatibility", "Test TUI terminal compatibility and accessibility");
+    tui_compatibility_step.dependOn(&run_tui_compatibility_tests.step);
 
     const cli_help = b.addRunArtifact(cli);
     cli_help.addArg("--help");
@@ -938,6 +942,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_tui_history_tests.step);
     test_step.dependOn(&run_tui_data_tests.step);
     test_step.dependOn(&tracking_coverage_audit.step);
+    test_step.dependOn(&run_tui_compatibility_tests.step);
     test_step.dependOn(&tui_e2e.step);
     test_step.dependOn(&cli_help.step);
     test_step.dependOn(&cli_version.step);

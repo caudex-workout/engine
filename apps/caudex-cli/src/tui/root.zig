@@ -5,3 +5,4 @@ pub const session = @import("session.zig");
 pub const catalog = @import("catalog_screen.zig");
 pub const history = @import("history_screen.zig");
 pub const data = @import("data_screen.zig");
+pub const compatibility = @import("compatibility.zig");
