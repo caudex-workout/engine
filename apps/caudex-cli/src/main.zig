@@ -8,6 +8,7 @@ const errors = @import("errors.zig");
 const output = @import("output.zig");
 const use_cases = @import("use_cases.zig");
 const commands = @import("commands.zig");
+const tui_actions = @import("tui/actions.zig");
 
 const version = "0.1.0";
 
@@ -795,8 +796,8 @@ fn parseGlobalOptions(args: []const []const u8) !GlobalOptions {
     return options;
 }
 
-const SetAction = enum { log, skip, reopen };
-const EndAction = enum { finish, cancel };
+const SetAction = tui_actions.SetAction;
+const EndAction = tui_actions.WorkoutEndAction;
 
 fn endWorkout(
     io: std.Io,
@@ -1553,14 +1554,21 @@ test "client source imports only approved public packages" {
                 std.mem.eql(u8, name, "errors.zig") or
                 std.mem.eql(u8, name, "output.zig") or
                 std.mem.eql(u8, name, "use_cases.zig") or
-                std.mem.eql(u8, name, "commands.zig"),
+                std.mem.eql(u8, name, "commands.zig") or
+                std.mem.eql(u8, name, "tui/actions.zig"),
         );
 
         import_count += 1;
         remainder = tail[name_end + 1 ..];
     }
 
-    try std.testing.expectEqual(@as(usize, 10), import_count);
+    try std.testing.expectEqual(@as(usize, 11), import_count);
+}
+
+test "line client does not import libvaxis" {
+    const source = @embedFile("main.zig");
+    const needle = "@im" ++ "port(\"vaxis\")";
+    try std.testing.expect(std.mem.indexOf(u8, source, needle) == null);
 }
 
 test "client sources contain no SQL or private path imports" {
