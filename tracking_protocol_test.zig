@@ -54,3 +54,26 @@ test "batch and snapshot limits fail before domain execution" {
         protocol.decodeAtomicBatchRequest(std.testing.allocator, batch, .{ .max_commands = 0 }),
     );
 }
+
+test "command conversion preserves exact target metrics and explicit anchors" {
+    const command: protocol.Command = .{ .addSet = .{
+        .metadata = .{ .commandId = "add-set-1", .occurredAt = "2026-08-04T12:01:00Z" },
+        .scope = .{ .hostScopeKey = "scope-1" },
+        .workoutId = "workout-1",
+        .expectedRevision = 2,
+        .membershipId = "membership-1",
+        .setId = "set-1",
+        .kind = "working",
+        .targetMetrics = &.{.{
+            .code = "load",
+            .value = .{ .amount = "185.00", .unit = "lb" },
+        }},
+        .anchor = .end,
+    } };
+    var metrics: [protocol.max_metrics_per_set]tracking.Metric = undefined;
+    const typed = try protocol.commandToDomain(command, &metrics);
+    try std.testing.expectEqual(@as(u64, 2), typed.add_set.expected_revision);
+    try std.testing.expectEqual(@as(i64, 18500), typed.add_set.target_metrics[0].value.value.mantissa);
+    try std.testing.expectEqual(@as(u8, 2), typed.add_set.target_metrics[0].value.value.scale);
+    try std.testing.expectEqual(tracking.SetAnchor.end, typed.add_set.anchor);
+}

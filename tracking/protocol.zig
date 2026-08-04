@@ -283,6 +283,85 @@ fn validateSnapshotBounds(snapshot: TrackingSnapshot) error{SnapshotLimitExceede
 
 pub const ConversionError = tracking.Id.ParseError || error{InvalidTimestamp};
 
+pub const CommandConversionError = ConversionError || caudex.primitives.Decimal.ParseError || error{
+    UnknownUnit,
+    MetricBufferTooSmall,
+    UnsupportedSetStatus,
+};
+
+pub fn commandToDomain(value: Command, metric_storage: []tracking.Metric) CommandConversionError!tracking.Command {
+    return switch (value) {
+        .startWorkout => |command| .{ .start_workout = try startWorkoutToDomain(command) },
+        .addExercise => |command| .{ .add_exercise = .{
+            .metadata = try metadataToDomain(command.metadata),
+            .scope = try scopeToDomain(command.scope),
+            .workout_id = try tracking.Id.parse(command.workoutId),
+            .expected_revision = command.expectedRevision,
+            .membership_id = try tracking.Id.parse(command.membershipId),
+            .exercise_id = try tracking.Id.parse(command.exerciseId),
+            .anchor = try exerciseAnchorToDomain(command.anchor),
+        } },
+        .removeExercise => |command| .{ .remove_exercise = try membershipRevisionToDomain(command) },
+        .reorderExercise => |command| .{ .reorder_exercise = .{
+            .metadata = try metadataToDomain(command.metadata),
+            .scope = try scopeToDomain(command.scope),
+            .workout_id = try tracking.Id.parse(command.workoutId),
+            .expected_revision = command.expectedRevision,
+            .membership_id = try tracking.Id.parse(command.membershipId),
+            .anchor = try exerciseAnchorToDomain(command.anchor),
+        } },
+        .addSet => |command| .{ .add_set = .{
+            .metadata = try metadataToDomain(command.metadata),
+            .scope = try scopeToDomain(command.scope),
+            .workout_id = try tracking.Id.parse(command.workoutId),
+            .expected_revision = command.expectedRevision,
+            .membership_id = try tracking.Id.parse(command.membershipId),
+            .set_id = try tracking.Id.parse(command.setId),
+            .kind = try tracking.Id.parse(command.kind),
+            .target_metrics = try metricsToDomain(command.targetMetrics, metric_storage),
+            .anchor = try setAnchorToDomain(command.anchor),
+        } },
+        .completeSet => |command| .{ .complete_set = .{
+            .metadata = try metadataToDomain(command.metadata),
+            .scope = try scopeToDomain(command.scope),
+            .workout_id = try tracking.Id.parse(command.workoutId),
+            .expected_revision = command.expectedRevision,
+            .membership_id = try tracking.Id.parse(command.membershipId),
+            .set_id = try tracking.Id.parse(command.setId),
+            .actual_metrics = try metricsToDomain(command.actualMetrics, metric_storage),
+            .status = try completedSetStatusToDomain(command.status),
+            .completed_at = try tracking.Timestamp.parse(command.completedAt),
+        } },
+        .skipSet => |command| .{ .skip_set = .{
+            .metadata = try metadataToDomain(command.metadata),
+            .scope = try scopeToDomain(command.scope),
+            .workout_id = try tracking.Id.parse(command.workoutId),
+            .expected_revision = command.expectedRevision,
+            .membership_id = try tracking.Id.parse(command.membershipId),
+            .set_id = try tracking.Id.parse(command.setId),
+            .skipped_at = try tracking.Timestamp.parse(command.at),
+        } },
+        .reopenSet => |command| .{ .reopen_set = try setRevisionToDomain(command) },
+        .removeSet => |command| .{ .remove_set = try setRevisionToDomain(command) },
+        .reorderSet => |command| .{ .reorder_set = .{
+            .metadata = try metadataToDomain(command.metadata),
+            .scope = try scopeToDomain(command.scope),
+            .workout_id = try tracking.Id.parse(command.workoutId),
+            .expected_revision = command.expectedRevision,
+            .membership_id = try tracking.Id.parse(command.membershipId),
+            .set_id = try tracking.Id.parse(command.setId),
+            .anchor = try setAnchorToDomain(command.anchor),
+        } },
+        .completeWorkout => |command| .{ .complete_workout = .{
+            .metadata = try metadataToDomain(command.metadata),
+            .scope = try scopeToDomain(command.scope),
+            .workout_id = try tracking.Id.parse(command.workoutId),
+            .expected_revision = command.expectedRevision,
+            .completed_at = try tracking.Timestamp.parse(command.completedAt),
+        } },
+    };
+}
+
 pub fn startWorkoutToDomain(value: StartWorkout) ConversionError!tracking.StartWorkoutCommand {
     return .{
         .metadata = .{
@@ -296,6 +375,83 @@ pub fn startWorkoutToDomain(value: StartWorkout) ConversionError!tracking.StartW
         .workout_id = try tracking.Id.parse(value.workoutId),
         .started_at = try tracking.Timestamp.parse(value.startedAt),
     };
+}
+
+fn metadataToDomain(value: CommandMetadata) ConversionError!tracking.CommandMetadata {
+    return .{
+        .command_id = try tracking.Id.parse(value.commandId),
+        .occurred_at = try tracking.Timestamp.parse(value.occurredAt),
+    };
+}
+
+fn scopeToDomain(value: Scope) tracking.Id.ParseError!tracking.Scope {
+    return .{
+        .host_scope_key = try tracking.Id.parse(value.hostScopeKey),
+        .athlete_id = if (value.athleteId) |id| try tracking.Id.parse(id) else null,
+    };
+}
+
+fn membershipRevisionToDomain(value: MembershipRevision) ConversionError!tracking.RemoveExerciseCommand {
+    return .{
+        .metadata = try metadataToDomain(value.metadata),
+        .scope = try scopeToDomain(value.scope),
+        .workout_id = try tracking.Id.parse(value.workoutId),
+        .expected_revision = value.expectedRevision,
+        .membership_id = try tracking.Id.parse(value.membershipId),
+    };
+}
+
+fn setRevisionToDomain(value: SetRevision) ConversionError!tracking.ReopenSetCommand {
+    return .{
+        .metadata = try metadataToDomain(value.metadata),
+        .scope = try scopeToDomain(value.scope),
+        .workout_id = try tracking.Id.parse(value.workoutId),
+        .expected_revision = value.expectedRevision,
+        .membership_id = try tracking.Id.parse(value.membershipId),
+        .set_id = try tracking.Id.parse(value.setId),
+    };
+}
+
+fn exerciseAnchorToDomain(value: Anchor) tracking.Id.ParseError!tracking.ExerciseAnchor {
+    return switch (value) {
+        .beginning => .beginning,
+        .end => .end,
+        .before => |id| .{ .before = try tracking.Id.parse(id) },
+        .after => |id| .{ .after = try tracking.Id.parse(id) },
+    };
+}
+
+fn setAnchorToDomain(value: Anchor) tracking.Id.ParseError!tracking.SetAnchor {
+    return switch (value) {
+        .beginning => .beginning,
+        .end => .end,
+        .before => |id| .{ .before = try tracking.Id.parse(id) },
+        .after => |id| .{ .after = try tracking.Id.parse(id) },
+    };
+}
+
+fn completedSetStatusToDomain(value: SetStatus) error{UnsupportedSetStatus}!tracking.SetStatus {
+    return switch (value) {
+        .completed => .completed,
+        .partial => .partial,
+        .failed => .failed,
+        .open, .skipped => error.UnsupportedSetStatus,
+    };
+}
+
+fn metricsToDomain(values: []const caudex.canonical.Metric, storage: []tracking.Metric) CommandConversionError![]const tracking.Metric {
+    if (values.len > max_metrics_per_set) return error.MetricBufferTooSmall;
+    if (storage.len < values.len) return error.MetricBufferTooSmall;
+    for (values, 0..) |metric, index| {
+        storage[index] = .{
+            .code = try tracking.Id.parse(metric.code),
+            .value = .{
+                .value = try tracking.Decimal.parse(metric.value.amount),
+                .unit = caudex.primitives.Unit.parse(metric.value.unit) catch return error.UnknownUnit,
+            },
+        };
+    }
+    return storage[0..values.len];
 }
 
 pub fn startWorkoutFromDomain(value: tracking.StartWorkoutCommand) StartWorkout {
