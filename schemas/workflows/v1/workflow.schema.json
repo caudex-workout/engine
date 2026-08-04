@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://caudex.dev/schemas/workflows/v1/workflow.schema.json",
+  "title": "Caudex workflow protocol v1",
+  "$defs": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "scope": {
+      "type": "object", "required": ["hostScopeKey"],
+      "properties": { "hostScopeKey": { "$ref": "#/$defs/id" }, "athleteId": { "$ref": "#/$defs/id" } },
+      "additionalProperties": false
+    },
+    "ids": {
+      "type": "object", "required": ["workoutId", "membershipIds", "setIds"],
+      "properties": {
+        "workoutId": { "$ref": "#/$defs/id" },
+        "membershipIds": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/id" } },
+        "setIds": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/id" } }
+      },
+      "additionalProperties": false
+    },
+    "templateInstantiation": {
+      "type": "object",
+      "required": ["schemaVersion", "template", "catalog", "scope", "ids", "createdAt"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "template": { "$ref": "../../../templates/v1/workout-template.schema.json" },
+        "catalog": { "type": "array", "maxItems": 4096, "items": { "type": "object" } },
+        "scope": { "$ref": "#/$defs/scope" },
+        "ids": { "$ref": "#/$defs/ids" },
+        "createdAt": { "type": "string", "format": "date-time", "maxLength": 64 }
+      },
+      "additionalProperties": false
+    },
+    "recommendationInstantiation": {
+      "type": "object",
+      "required": ["schemaVersion", "recommendationResult", "catalog", "scope", "ids", "createdAt", "acceptedRecommendationId"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "recommendationResult": { "$ref": "../../../v0/canonical.schema.json#/$defs/recommendationResult" },
+        "catalog": { "type": "array", "maxItems": 4096, "items": { "$ref": "../../../v0/canonical.schema.json#/$defs/exercise" } },
+        "scope": { "$ref": "#/$defs/scope" },
+        "ids": { "$ref": "#/$defs/ids" },
+        "createdAt": { "type": "string", "format": "date-time", "maxLength": 64 },
+        "acceptedRecommendationId": { "$ref": "#/$defs/id" },
+        "methodologyStateRevision": { "type": "string", "maxLength": 200 },
+        "methodologyStateFingerprint": { "type": "string", "maxLength": 200 }
+      },
+      "additionalProperties": false
+    },
+    "completion": {
+      "type": "object",
+      "required": ["schemaVersion", "workout", "catalog"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "workout": { "$ref": "../../../tracking/v1/tracking.schema.json#/$defs/workout" },
+        "catalog": { "type": "array", "maxItems": 4096, "items": { "$ref": "../../../v0/canonical.schema.json#/$defs/exercise" } }
+      },
+      "additionalProperties": false
+    }
+  }
+}

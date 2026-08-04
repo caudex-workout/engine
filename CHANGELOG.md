@@ -26,6 +26,8 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   discriminated C/WASM execution envelope.
 - Canonical tracking snapshots now carry their explicit catalog projection and
   single-command results carry the resulting replay-bearing snapshot.
+- Recommendation/template instantiation and tracked-workout completion
+  conversion are available through Zig, C, WASM, and npm workflow operations.
 
 ## [0.1.0] - 2026-07-26
 

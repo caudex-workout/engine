@@ -35,9 +35,10 @@ The request is a canonical execution envelope:
 
 The operation discriminator is explicit. The current dispatcher routes
 `recommend`, `evaluate`, `applyTrackingCommand`, and `applyTrackingBatch`
-through this single entry point. Workflow, discovery, and portable-data
-operations will extend the same versioned registry rather than add
-methodology-specific C functions.
+through this single entry point. `instantiateRecommendation`,
+`instantiateTemplate`, and `completeForEvaluation` expose the pure workflow
+bridge through the same executor. Discovery and portable-data operations will
+extend this registry rather than add methodology-specific C functions.
 
 Call with null output and zero capacity. A valid request returns
 `CAUDEX_STATUS_INSUFFICIENT_OUTPUT` and the exact required byte count. Allocate

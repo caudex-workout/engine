@@ -7,6 +7,7 @@ import {
   type RecommendationRequest,
   type TrackingBatchRequest,
   type TrackingCommandRequest,
+  type TemplateInstantiationRequest,
 } from "../packages/npm/workout-engine/src/index.ts";
 
 const [wasmPath, fixturePath] = process.argv.slice(2);
@@ -70,6 +71,25 @@ const batchRequest: TrackingBatchRequest = {
 const batch = caudex.applyTrackingBatch(batchRequest);
 if (!batch.applied || batch.snapshot.workouts?.[0]?.revision !== 2) {
   throw new Error("atomic tracking batch did not return the final snapshot");
+}
+
+const templateInstantiation: TemplateInstantiationRequest = {
+  schemaVersion: 1,
+  template: {
+    schemaVersion: 1,
+    id: "template-1",
+    displayName: "Squat day",
+    exercises: [{ exerciseId: "squat", sets: [{ kind: "working", targetMetrics: [{ code: "repetitions", value: { amount: "8", unit: "count" } }] }] }],
+    revision: 7,
+  },
+  catalog: [{ id: "squat" }],
+  scope: { hostScopeKey: "scope-1" },
+  ids: { workoutId: "template-workout-1", membershipIds: ["template-membership-1"], setIds: ["template-set-1"] },
+  createdAt: "2026-08-04T12:00:00Z",
+};
+const instantiatedTemplate = caudex.instantiateTemplate(templateInstantiation);
+if (!("accepted" in instantiatedTemplate.outcome) || instantiatedTemplate.outcome.accepted.origin !== "template") {
+  throw new Error("template workflow did not cross the WASM boundary");
 }
 
 const invalid = caudex.recommendSession({

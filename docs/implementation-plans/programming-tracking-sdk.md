@@ -96,8 +96,9 @@ ABI v2 removed caller-mutable allocator metadata and result disposal. Native C,
 WASM, and npm now use required-size discovery plus exact caller-owned output.
 Recommendation and evaluation share one versioned operation dispatcher;
 canonical tracking commands and atomic batches now use that dispatcher too.
-Workflow, discovery, and portable-data operations remain to complete this
-phase.
+Recommendation/template instantiation and completion conversion use the same
+canonical workflow protocol. Discovery and portable-data operations remain to
+complete this phase in their owning phases.
 
 ### 6. npm APIs
 

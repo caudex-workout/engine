@@ -83,6 +83,7 @@ pub fn build(b: *std.Build) void {
         .imports = &.{
             .{ .name = "caudex", .module = module },
             .{ .name = "caudex_tracking", .module = tracking_module },
+            .{ .name = "caudex_tracking_protocol", .module = tracking_protocol_module },
         },
     });
     const c_api_module = b.createModule(.{
@@ -93,6 +94,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "caudex", .module = module },
             .{ .name = "caudex_tracking", .module = tracking_module },
             .{ .name = "caudex_tracking_protocol", .module = tracking_protocol_module },
+            .{ .name = "caudex_workflows", .module = workflows_module },
         },
     });
     const c_library = b.addLibrary(.{ .name = "caudex_c", .root_module = c_api_module });
@@ -142,6 +144,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "caudex_tracking_protocol", .module = tracking_protocol_module },
+                .{ .name = "caudex_workflows", .module = workflows_module },
                 .{ .name = "caudex_tracking", .module = tracking_module },
                 .{ .name = "caudex", .module = module },
             },
@@ -265,6 +268,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "caudex", .module = module },
                 .{ .name = "caudex_tracking", .module = tracking_module },
                 .{ .name = "caudex_tracking_protocol", .module = tracking_protocol_module },
+                .{ .name = "caudex_workflows", .module = workflows_module },
             },
         }),
     });
@@ -349,6 +353,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "caudex", .module = module },
                 .{ .name = "caudex_tracking", .module = tracking_module },
                 .{ .name = "caudex_tracking_protocol", .module = tracking_protocol_module },
+                .{ .name = "caudex_workflows", .module = workflows_module },
             },
         }),
     });

@@ -320,6 +320,53 @@ export interface TrackingBatchResult {
   issues?: TrackingIssue[];
 }
 
+export interface WorkoutTemplateDocument {
+  schemaVersion: 1;
+  id: string;
+  displayName: string;
+  description?: string;
+  exercises: Array<{ exerciseId: string; sets?: Array<{ kind?: string; targetMetrics?: Metric[] }>; notes?: string; tags?: string[] }>;
+  notes?: string;
+  tags?: string[];
+  revision: number;
+}
+
+export interface InstantiationIds {
+  workoutId: string;
+  membershipIds: string[];
+  setIds: string[];
+}
+
+export interface RecommendationInstantiationRequest {
+  schemaVersion: 1;
+  recommendationResult: RecommendationResult;
+  catalog: Exercise[];
+  scope: { hostScopeKey: string; athleteId?: string };
+  ids: InstantiationIds;
+  createdAt: string;
+  acceptedRecommendationId: string;
+  methodologyStateRevision?: string;
+  methodologyStateFingerprint?: string;
+}
+
+export interface TemplateInstantiationRequest {
+  schemaVersion: 1;
+  template: WorkoutTemplateDocument;
+  catalog: Exercise[];
+  scope: { hostScopeKey: string; athleteId?: string };
+  ids: InstantiationIds;
+  createdAt: string;
+}
+
+export interface CompletionConversionRequest {
+  schemaVersion: 1;
+  workout: TrackedWorkout;
+  catalog: Exercise[];
+}
+
+export type InstantiationResult = { schemaVersion: 1; outcome: { accepted: TrackedWorkout } | { rejected: TrackingIssue[] } };
+export type CompletionConversionResult = { schemaVersion: 1; outcome: { accepted: CompletedWorkout } | { rejected: TrackingIssue[] } };
+
 export type InitializationErrorCode =
   | "wasm_load_failed"
   | "wasm_compile_failed"
@@ -360,6 +407,9 @@ export interface Caudex {
   evaluatePerformance(request: EvaluationRequest): EvaluationResult;
   applyTrackingCommand(request: TrackingCommandRequest): TrackingCommandResult;
   applyTrackingBatch(request: TrackingBatchRequest): TrackingBatchResult;
+  instantiateRecommendation(request: RecommendationInstantiationRequest): InstantiationResult;
+  instantiateTemplate(request: TemplateInstantiationRequest): InstantiationResult;
+  completeForEvaluation(request: CompletionConversionRequest): CompletionConversionResult;
   dispose(): void;
 }
 
@@ -506,7 +556,7 @@ function createFacade(exports: WasmExports, runtime: number): Caudex {
   let disposed = false;
   const execute = <Request, Result>(
     request: Request,
-    operation: "recommend" | "evaluate" | "applyTrackingCommand" | "applyTrackingBatch",
+    operation: "recommend" | "evaluate" | "applyTrackingCommand" | "applyTrackingBatch" | "instantiateRecommendation" | "instantiateTemplate" | "completeForEvaluation",
     programmingResult: boolean,
   ): Result => {
     if (disposed) {
@@ -607,6 +657,15 @@ function createFacade(exports: WasmExports, runtime: number): Caudex {
     },
     applyTrackingBatch(request) {
       return execute<TrackingBatchRequest, TrackingBatchResult>(request, "applyTrackingBatch", false);
+    },
+    instantiateRecommendation(request) {
+      return execute<RecommendationInstantiationRequest, InstantiationResult>(request, "instantiateRecommendation", false);
+    },
+    instantiateTemplate(request) {
+      return execute<TemplateInstantiationRequest, InstantiationResult>(request, "instantiateTemplate", false);
+    },
+    completeForEvaluation(request) {
+      return execute<CompletionConversionRequest, CompletionConversionResult>(request, "completeForEvaluation", false);
     },
     dispose() {
       if (!disposed) {

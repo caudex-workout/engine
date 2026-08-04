@@ -10,6 +10,7 @@ const rpe_top_set_backoff = caudex.rpe_top_set_backoff;
 const training = caudex.training;
 const tracking = @import("caudex_tracking");
 const tracking_protocol = @import("caudex_tracking_protocol");
+const workflows = @import("caudex_workflows");
 
 pub const abi_version: u32 = 2;
 const max_result_bytes: usize = 1024 * 1024;
@@ -100,6 +101,9 @@ const Operation = enum {
     evaluate,
     applyTrackingCommand,
     applyTrackingBatch,
+    instantiateRecommendation,
+    instantiateTemplate,
+    completeForEvaluation,
 };
 
 const ExecutionRequest = struct {
@@ -121,7 +125,131 @@ fn executeDispatch(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) Exec
         .evaluate => executeEvaluation(runtime, writer.buffered(), out),
         .applyTrackingCommand => executeTrackingCommand(runtime, writer.buffered(), out),
         .applyTrackingBatch => executeTrackingBatch(runtime, writer.buffered(), out),
+        .instantiateRecommendation => executeRecommendationInstantiation(runtime, writer.buffered(), out),
+        .instantiateTemplate => executeTemplateInstantiation(runtime, writer.buffered(), out),
+        .completeForEvaluation => executeCompletionConversion(runtime, writer.buffered(), out),
     };
+}
+
+fn parseInstantiationIds(allocator: std.mem.Allocator, value: workflows.InstantiationIdsDocument) error{ InvalidRequest, OutOfMemory }!workflows.InstantiationIds {
+    const memberships = allocator.alloc(tracking.Id, value.membershipIds.len) catch return error.OutOfMemory;
+    const sets = allocator.alloc(tracking.Id, value.setIds.len) catch return error.OutOfMemory;
+    for (value.membershipIds, 0..) |id, index| memberships[index] = tracking.Id.parse(id) catch return error.InvalidRequest;
+    for (value.setIds, 0..) |id, index| sets[index] = tracking.Id.parse(id) catch return error.InvalidRequest;
+    return .{
+        .workout_id = tracking.Id.parse(value.workoutId) catch return error.InvalidRequest,
+        .membership_ids = memberships,
+        .set_ids = sets,
+    };
+}
+
+fn instantiationStorage(allocator: std.mem.Allocator) error{OutOfMemory}!workflows.InstantiationStorage {
+    return .{
+        .exercises = allocator.alloc(tracking.ExerciseMembership, workflows.max_template_exercises) catch return error.OutOfMemory,
+        .sets = allocator.alloc(tracking.TrackedSet, workflows.max_template_sets) catch return error.OutOfMemory,
+        .prescription_exercises = allocator.alloc(tracking.PrescribedExercise, workflows.max_template_exercises) catch return error.OutOfMemory,
+        .prescription_sets = allocator.alloc(tracking.PrescribedSet, workflows.max_template_sets) catch return error.OutOfMemory,
+        .metrics = allocator.alloc(tracking.Metric, tracking_workspace_items) catch return error.OutOfMemory,
+    };
+}
+
+fn workflowIssuesToWire(allocator: std.mem.Allocator, values: []const tracking.Issue) error{OutOfMemory}![]const tracking_protocol.Issue {
+    const output = allocator.alloc(tracking_protocol.Issue, values.len) catch return error.OutOfMemory;
+    for (values, 0..) |issue, index| {
+        const related = allocator.alloc([]const u8, issue.related_ids.len) catch return error.OutOfMemory;
+        for (issue.related_ids, 0..) |id, related_index| related[related_index] = id.bytes;
+        output[index] = .{
+            .code = issue.code,
+            .category = tracking_protocol.issueCategoryFromDomain(issue.category),
+            .severity = tracking_protocol.issueSeverityFromDomain(issue.severity),
+            .path = issue.path,
+            .message = issue.message,
+            .relatedIds = related,
+        };
+    }
+    return output;
+}
+
+fn workflowWorkoutToWire(allocator: std.mem.Allocator, workout: tracking.Workout) error{ InvalidRequest, OutOfMemory }!tracking_protocol.TrackedWorkout {
+    const wire = tracking_protocol.snapshotFromDomain(
+        .{ .workouts = &.{workout} },
+        (try wireResultStorage(allocator)).snapshot,
+    ) catch return error.InvalidRequest;
+    return wire.workouts[0];
+}
+
+fn executeRecommendationInstantiation(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) ExecuteError!void {
+    const document = workflows.decodeRecommendationInstantiationDocument(runtime.allocator(), input, .{}) catch |err| return mapTrackingError(err);
+    defer document.deinit();
+    var arena = std.heap.ArenaAllocator.init(runtime.allocator());
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const value = document.value;
+    const result = workflows.instantiateRecommendation(value.recommendationResult, value.catalog, .{
+        .scope = .{
+            .host_scope_key = tracking.Id.parse(value.scope.hostScopeKey) catch return error.InvalidRequest,
+            .athlete_id = if (value.scope.athleteId) |id| tracking.Id.parse(id) catch return error.InvalidRequest else null,
+        },
+        .ids = try parseInstantiationIds(allocator, value.ids),
+        .created_at = tracking.Timestamp.parse(value.createdAt) catch return error.InvalidRequest,
+        .accepted_recommendation_id = tracking.Id.parse(value.acceptedRecommendationId) catch return error.InvalidRequest,
+        .methodology_state_revision = value.methodologyStateRevision,
+        .methodology_state_fingerprint = value.methodologyStateFingerprint,
+    }, try instantiationStorage(allocator), allocator.alloc(tracking.Issue, 16) catch return error.OutOfMemory) catch return error.InvalidRequest;
+    const wire: workflows.InstantiationDocumentResult = .{ .outcome = switch (result) {
+        .accepted => |workout| .{ .accepted = try workflowWorkoutToWire(allocator, workout) },
+        .rejected => |issues| .{ .rejected = try workflowIssuesToWire(allocator, issues) },
+    } };
+    try encodeOwned(runtime, wire, out);
+}
+
+fn executeTemplateInstantiation(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) ExecuteError!void {
+    const document = workflows.decodeTemplateInstantiationDocument(runtime.allocator(), input, .{}) catch |err| return mapTrackingError(err);
+    defer document.deinit();
+    var arena = std.heap.ArenaAllocator.init(runtime.allocator());
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const value = document.value;
+    const template = workflows.templateToDomain(value.template, .{
+        .exercises = allocator.alloc(workflows.TemplateExercise, workflows.max_template_exercises) catch return error.OutOfMemory,
+        .sets = allocator.alloc(workflows.TemplateSet, workflows.max_template_sets) catch return error.OutOfMemory,
+        .metrics = allocator.alloc(tracking.Metric, tracking_workspace_items) catch return error.OutOfMemory,
+        .tags = allocator.alloc(tracking.Id, tracking_workspace_items) catch return error.OutOfMemory,
+    }) catch return error.InvalidRequest;
+    const result = workflows.instantiateTemplate(template, value.catalog, .{
+        .scope = .{
+            .host_scope_key = tracking.Id.parse(value.scope.hostScopeKey) catch return error.InvalidRequest,
+            .athlete_id = if (value.scope.athleteId) |id| tracking.Id.parse(id) catch return error.InvalidRequest else null,
+        },
+        .ids = try parseInstantiationIds(allocator, value.ids),
+        .created_at = tracking.Timestamp.parse(value.createdAt) catch return error.InvalidRequest,
+    }, try instantiationStorage(allocator), allocator.alloc(tracking.Issue, 16) catch return error.OutOfMemory) catch return error.InvalidRequest;
+    const wire: workflows.InstantiationDocumentResult = .{ .outcome = switch (result) {
+        .accepted => |workout| .{ .accepted = try workflowWorkoutToWire(allocator, workout) },
+        .rejected => |issues| .{ .rejected = try workflowIssuesToWire(allocator, issues) },
+    } };
+    try encodeOwned(runtime, wire, out);
+}
+
+fn executeCompletionConversion(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) ExecuteError!void {
+    const document = workflows.decodeCompletionDocument(runtime.allocator(), input, .{}) catch |err| return mapTrackingError(err);
+    defer document.deinit();
+    var arena = std.heap.ArenaAllocator.init(runtime.allocator());
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const snapshot = tracking_protocol.snapshotToDomain(.{ .workouts = &.{document.value.workout} }, try trackingSnapshotStorage(allocator)) catch return error.InvalidRequest;
+    const result = workflows.completeForEvaluation(snapshot.workouts[0], document.value.catalog, .{
+        .exercises = allocator.alloc(canonical.CompletedExercise, workflows.max_template_exercises) catch return error.OutOfMemory,
+        .sets = allocator.alloc(canonical.CompletedSet, workflows.max_template_sets) catch return error.OutOfMemory,
+        .metrics = allocator.alloc(canonical.Metric, tracking_workspace_items) catch return error.OutOfMemory,
+        .amount_bytes = allocator.alloc([64]u8, tracking_workspace_items) catch return error.OutOfMemory,
+        .tags = allocator.alloc([]const u8, tracking_workspace_items) catch return error.OutOfMemory,
+    }, allocator.alloc(tracking.Issue, 16) catch return error.OutOfMemory) catch return error.InvalidRequest;
+    const wire: workflows.CompletionDocumentResult = .{ .outcome = switch (result) {
+        .accepted => |workout| .{ .accepted = workout },
+        .rejected => |issues| .{ .rejected = try workflowIssuesToWire(allocator, issues) },
+    } };
+    try encodeOwned(runtime, wire, out);
 }
 
 fn trackingSnapshotStorage(allocator: std.mem.Allocator) error{OutOfMemory}!tracking_protocol.SnapshotConversionStorage {
@@ -1009,6 +1137,23 @@ test "versioned dispatcher applies canonical tracking command and batch" {
     try std.testing.expect(batch_result.value.applied);
     try std.testing.expectEqual(@as(u64, 2), batch_result.value.snapshot.workouts[0].revision);
     try std.testing.expectEqualStrings("squat", batch_result.value.snapshot.exerciseCatalog[0].exerciseId);
+}
+
+test "versioned dispatcher instantiates a canonical template" {
+    var runtime: Runtime = .{ .debug_allocator = .init };
+    defer _ = runtime.debug_allocator.deinit();
+    var output: OwnedBuffer = .{};
+    defer if (output.data) |data| runtime.allocator().free(data[0..output.capacity]);
+    try executeDispatch(&runtime, @embedFile("../fixtures/operations/template-instantiation-v1.json"), &output);
+    const parsed = try canonical_json.decodeValue(
+        workflows.InstantiationDocumentResult,
+        std.testing.allocator,
+        output.data.?[0..output.len],
+        .{},
+    );
+    defer parsed.deinit();
+    try std.testing.expectEqual(tracking_protocol.WorkoutOrigin.template, parsed.value.outcome.accepted.origin);
+    try std.testing.expectEqual(@as(u64, 7), parsed.value.outcome.accepted.provenance.?.template.templateRevision);
 }
 
 test "C ABI rejects invalid arguments without exposing errors" {

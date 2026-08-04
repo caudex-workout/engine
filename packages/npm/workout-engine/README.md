@@ -44,8 +44,10 @@ missing exports, and runtime creation failures throw
 initialization that prevent safe execution throw `CaudexRuntimeError`.
 
 The deterministic low-level `Caudex` value exposes `recommendSession()`,
-`evaluatePerformance()`, `applyTrackingCommand()`, `applyTrackingBatch()`, and
-`dispose()`. Tracking calls require the complete current snapshot plus explicit
+`evaluatePerformance()`, `applyTrackingCommand()`, `applyTrackingBatch()`,
+`instantiateRecommendation()`, `instantiateTemplate()`,
+`completeForEvaluation()`, and `dispose()`. Tracking and workflow calls require
+the complete current snapshot or programming result plus explicit
 command IDs, revisions, and timestamps. Accepted and rejected command results
 both return the appropriate resulting snapshot, while transport failures throw
 `CaudexRuntimeError`. Linear-memory addresses, allocation functions, result

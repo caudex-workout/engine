@@ -3,11 +3,96 @@
 const std = @import("std");
 const caudex = @import("caudex");
 const tracking = @import("caudex_tracking");
+const tracking_protocol = @import("caudex_tracking_protocol");
 
 pub const template_schema_version: u32 = 1;
 pub const max_template_exercises: usize = 128;
 pub const max_template_sets: usize = 256;
 pub const max_tags: usize = 32;
+pub const workflow_schema_version: u32 = 1;
+
+pub const ScopeDocument = tracking_protocol.Scope;
+
+pub const InstantiationIdsDocument = struct {
+    workoutId: []const u8,
+    membershipIds: []const []const u8,
+    setIds: []const []const u8,
+};
+
+pub const RecommendationInstantiationDocument = struct {
+    schemaVersion: u32,
+    recommendationResult: caudex.canonical.RecommendationResult,
+    catalog: []const caudex.canonical.Exercise,
+    scope: ScopeDocument,
+    ids: InstantiationIdsDocument,
+    createdAt: []const u8,
+    acceptedRecommendationId: []const u8,
+    methodologyStateRevision: ?[]const u8 = null,
+    methodologyStateFingerprint: ?[]const u8 = null,
+};
+
+pub const TemplateInstantiationDocument = struct {
+    schemaVersion: u32,
+    template: WorkoutTemplateDocument,
+    catalog: []const caudex.canonical.Exercise,
+    scope: ScopeDocument,
+    ids: InstantiationIdsDocument,
+    createdAt: []const u8,
+};
+
+pub const CompletionDocument = struct {
+    schemaVersion: u32,
+    workout: tracking_protocol.TrackedWorkout,
+    catalog: []const caudex.canonical.Exercise,
+};
+
+pub const InstantiationDocumentResult = struct {
+    schemaVersion: u32 = workflow_schema_version,
+    outcome: union(enum) {
+        accepted: tracking_protocol.TrackedWorkout,
+        rejected: []const tracking_protocol.Issue,
+    },
+};
+
+pub const CompletionDocumentResult = struct {
+    schemaVersion: u32 = workflow_schema_version,
+    outcome: union(enum) {
+        accepted: caudex.canonical.CompletedWorkout,
+        rejected: []const tracking_protocol.Issue,
+    },
+};
+
+pub const CanonicalWorkflowError = caudex.canonical_json.DecodeError || error{InvalidWorkflowDocument};
+
+pub fn decodeRecommendationInstantiationDocument(allocator: std.mem.Allocator, input: []const u8, limits: caudex.canonical_json.Limits) CanonicalWorkflowError!std.json.Parsed(RecommendationInstantiationDocument) {
+    const parsed = try caudex.canonical_json.decodeValue(RecommendationInstantiationDocument, allocator, input, limits);
+    errdefer parsed.deinit();
+    if (parsed.value.schemaVersion != workflow_schema_version) return error.UnsupportedVersion;
+    try validateInstantiationDocument(parsed.value.ids);
+    return parsed;
+}
+
+pub fn decodeTemplateInstantiationDocument(allocator: std.mem.Allocator, input: []const u8, limits: caudex.canonical_json.Limits) CanonicalWorkflowError!std.json.Parsed(TemplateInstantiationDocument) {
+    const parsed = try caudex.canonical_json.decodeValue(TemplateInstantiationDocument, allocator, input, limits);
+    errdefer parsed.deinit();
+    if (parsed.value.schemaVersion != workflow_schema_version or parsed.value.template.schemaVersion != template_schema_version)
+        return error.UnsupportedVersion;
+    try validateInstantiationDocument(parsed.value.ids);
+    return parsed;
+}
+
+pub fn decodeCompletionDocument(allocator: std.mem.Allocator, input: []const u8, limits: caudex.canonical_json.Limits) CanonicalWorkflowError!std.json.Parsed(CompletionDocument) {
+    const parsed = try caudex.canonical_json.decodeValue(CompletionDocument, allocator, input, limits);
+    errdefer parsed.deinit();
+    if (parsed.value.schemaVersion != workflow_schema_version) return error.UnsupportedVersion;
+    if (parsed.value.workout.exercises.len > max_template_exercises) return error.InvalidWorkflowDocument;
+    return parsed;
+}
+
+fn validateInstantiationDocument(ids: InstantiationIdsDocument) error{InvalidWorkflowDocument}!void {
+    if (ids.membershipIds.len > max_template_exercises or ids.setIds.len > max_template_sets)
+        return error.InvalidWorkflowDocument;
+}
 
 pub const TemplateSet = struct {
     kind: ?tracking.Id = null,
