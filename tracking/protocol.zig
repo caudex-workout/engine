@@ -105,6 +105,12 @@ pub const TrackingSnapshot = struct {
     startReceipts: []const StartReceipt = &.{},
 };
 
+/// Standalone, versioned snapshot document for canonical interchange.
+pub const SnapshotDocument = struct {
+    schemaVersion: u32,
+    snapshot: TrackingSnapshot,
+};
+
 pub const Anchor = union(enum) {
     beginning,
     end,
@@ -294,6 +300,14 @@ pub const DecodeError = caudex.canonical_json.DecodeError || error{
 
 pub fn decodeCommandRequest(allocator: std.mem.Allocator, input: []const u8, limits: Limits) DecodeError!std.json.Parsed(CommandRequest) {
     const parsed = try caudex.canonical_json.decodeValue(CommandRequest, allocator, input, limits.json);
+    errdefer parsed.deinit();
+    if (parsed.value.schemaVersion != schema_version) return error.UnsupportedVersion;
+    try validateSnapshotBounds(parsed.value.snapshot);
+    return parsed;
+}
+
+pub fn decodeSnapshotDocument(allocator: std.mem.Allocator, input: []const u8, limits: Limits) DecodeError!std.json.Parsed(SnapshotDocument) {
+    const parsed = try caudex.canonical_json.decodeValue(SnapshotDocument, allocator, input, limits.json);
     errdefer parsed.deinit();
     if (parsed.value.schemaVersion != schema_version) return error.UnsupportedVersion;
     try validateSnapshotBounds(parsed.value.snapshot);

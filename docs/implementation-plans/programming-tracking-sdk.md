@@ -55,8 +55,8 @@ reinterpret old canonical data.
 Implemented as the `caudex_tracking_protocol` boundary over the allocation-free
 typed reducer. It includes bounded atomic batches, replay-bearing snapshots,
 bidirectional exact-decimal conversions, accepted/rejected result conversion,
-JSON Schemas, and deterministic fixtures. C/WASM/npm exposure remains in their
-later phases.
+standalone versioned snapshot documents, JSON Schemas, and deterministic
+fixtures. C/WASM/npm exposure remains in their later phases.
 
 ### 3. Workflow bridge and provenance
 

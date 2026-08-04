@@ -6,6 +6,8 @@ is `caudex_tracking_protocol`; the reducer remains `caudex_tracking`.
 
 ## Documents
 
+- `SnapshotDocument` carries a standalone versioned tracking snapshot for
+  deterministic interchange and persistence boundaries.
 - `CommandRequest` applies one explicitly discriminated command to a supplied
   snapshot.
 - `AtomicBatchRequest` applies 1–128 commands sequentially as one proposal.

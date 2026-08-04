@@ -15,6 +15,32 @@ test "tracking fixture decodes and re-encodes deterministically" {
     try std.testing.expectEqualStrings(first, second);
 }
 
+test "standalone tracking snapshot is versioned bounded and deterministic" {
+    const fixture = @embedFile("fixtures/tracking/snapshot-v1.json");
+    const parsed = try protocol.decodeSnapshotDocument(std.testing.allocator, fixture, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(u32, protocol.schema_version), parsed.value.schemaVersion);
+    try std.testing.expectEqual(@as(usize, 0), parsed.value.snapshot.workouts.len);
+
+    var output: [256]u8 = undefined;
+    try std.testing.expectEqualStrings(
+        std.mem.trimEnd(u8, fixture, "\r\n"),
+        try protocol.encode(parsed.value, &output),
+    );
+
+    const unsupported =
+        \\{"schemaVersion":2,"snapshot":{"workouts":[],"startReceipts":[]}}
+    ;
+    try std.testing.expectError(
+        error.UnsupportedVersion,
+        protocol.decodeSnapshotDocument(std.testing.allocator, unsupported, .{}),
+    );
+    try std.testing.expectError(
+        error.InputTooLarge,
+        protocol.decodeSnapshotDocument(std.testing.allocator, fixture, .{ .json = .{ .max_input_bytes = 1 } }),
+    );
+}
+
 test "versions batches and transport failures are distinct" {
     const unsupported =
         \\{"schemaVersion":2,"snapshot":{"workouts":[]},"command":{"startWorkout":{"metadata":{"commandId":"c","occurredAt":"2026-08-04T12:00:00Z"},"scope":{"hostScopeKey":"s"},"workoutId":"w","startedAt":"2026-08-04T12:00:00Z"}}}
