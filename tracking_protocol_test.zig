@@ -99,6 +99,73 @@ test "batch and snapshot limits fail before domain execution" {
     );
 }
 
+test "snapshot bounds include replay workouts and prescription tags" {
+    var too_many_sets: [protocol.max_sets_per_exercise + 1]protocol.TrackedSet = undefined;
+    for (&too_many_sets, 0..) |*set, index| {
+        set.* = .{
+            .id = if (index == 0) "set-1" else "set-n",
+            .kind = "working",
+        };
+    }
+    const receipt_workout: protocol.TrackedWorkout = .{
+        .id = "workout-1",
+        .scope = .{ .hostScopeKey = "scope-1" },
+        .revision = 1,
+        .status = .active,
+        .startedAt = "2026-08-04T12:00:00Z",
+        .exercises = &.{.{
+            .id = "membership-1",
+            .exerciseId = "squat",
+            .sets = &too_many_sets,
+        }},
+    };
+    const start: protocol.StartWorkout = .{
+        .metadata = .{ .commandId = "start-1", .occurredAt = "2026-08-04T12:00:00Z" },
+        .scope = receipt_workout.scope,
+        .workoutId = receipt_workout.id,
+        .startedAt = receipt_workout.startedAt,
+    };
+    var receipt_json: [256 * 1024]u8 = undefined;
+    const receipt_document: protocol.SnapshotDocument = .{
+        .schemaVersion = protocol.schema_version,
+        .snapshot = .{ .startReceipts = &.{.{
+            .command = start,
+            .disposition = .applied,
+            .workout = receipt_workout,
+        }} },
+    };
+    const encoded_receipt = try protocol.encode(receipt_document, &receipt_json);
+    try std.testing.expectError(
+        error.SnapshotLimitExceeded,
+        protocol.decodeSnapshotDocument(std.testing.allocator, encoded_receipt, .{}),
+    );
+
+    var too_many_tags: [protocol.max_tags_per_exercise + 1][]const u8 = undefined;
+    @memset(&too_many_tags, "tag");
+    const tagged_workout: protocol.TrackedWorkout = .{
+        .id = "workout-2",
+        .scope = .{ .hostScopeKey = "scope-1" },
+        .revision = 1,
+        .status = .active,
+        .startedAt = "2026-08-04T12:00:00Z",
+        .prescription = &.{.{
+            .membershipId = "membership-1",
+            .exerciseId = "squat",
+            .tags = &too_many_tags,
+        }},
+    };
+    var tag_json: [16 * 1024]u8 = undefined;
+    const tag_document: protocol.SnapshotDocument = .{
+        .schemaVersion = protocol.schema_version,
+        .snapshot = .{ .workouts = &.{tagged_workout} },
+    };
+    const encoded_tags = try protocol.encode(tag_document, &tag_json);
+    try std.testing.expectError(
+        error.SnapshotLimitExceeded,
+        protocol.decodeSnapshotDocument(std.testing.allocator, encoded_tags, .{}),
+    );
+}
+
 test "command conversion preserves exact target metrics and explicit anchors" {
     const command: protocol.Command = .{ .addSet = .{
         .metadata = .{ .commandId = "add-set-1", .occurredAt = "2026-08-04T12:01:00Z" },

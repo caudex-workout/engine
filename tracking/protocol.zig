@@ -14,6 +14,7 @@ pub const max_catalog_entries: usize = 4096;
 pub const max_exercises_per_workout: usize = 128;
 pub const max_sets_per_exercise: usize = 256;
 pub const max_metrics_per_set: usize = 32;
+pub const max_tags_per_exercise: usize = 32;
 pub const max_issues_per_result: usize = 128;
 pub const max_related_ids_per_issue: usize = 32;
 
@@ -380,21 +381,25 @@ fn validateSnapshotBounds(snapshot: TrackingSnapshot) error{SnapshotLimitExceede
     if (snapshot.workouts.len > max_workouts) return error.SnapshotLimitExceeded;
     if (snapshot.startReceipts.len > max_workouts) return error.SnapshotLimitExceeded;
     if (snapshot.exerciseCatalog.len > max_catalog_entries) return error.SnapshotLimitExceeded;
-    for (snapshot.workouts) |workout| {
-        if (workout.exercises.len > max_exercises_per_workout) return error.SnapshotLimitExceeded;
-        if (workout.prescription.len > max_exercises_per_workout) return error.SnapshotLimitExceeded;
-        for (workout.exercises) |exercise| {
-            if (exercise.sets.len > max_sets_per_exercise) return error.SnapshotLimitExceeded;
-            for (exercise.sets) |set| {
-                if (set.targetMetrics.len > max_metrics_per_set or set.actualMetrics.len > max_metrics_per_set)
-                    return error.SnapshotLimitExceeded;
-            }
-        }
-        for (workout.prescription) |exercise| {
-            if (exercise.sets.len > max_sets_per_exercise) return error.SnapshotLimitExceeded;
-            for (exercise.sets) |set| if (set.targetMetrics.len > max_metrics_per_set)
+    for (snapshot.workouts) |workout| try validateWorkoutBounds(workout);
+    for (snapshot.startReceipts) |receipt| try validateWorkoutBounds(receipt.workout);
+}
+
+fn validateWorkoutBounds(workout: TrackedWorkout) error{SnapshotLimitExceeded}!void {
+    if (workout.exercises.len > max_exercises_per_workout) return error.SnapshotLimitExceeded;
+    if (workout.prescription.len > max_exercises_per_workout) return error.SnapshotLimitExceeded;
+    for (workout.exercises) |exercise| {
+        if (exercise.sets.len > max_sets_per_exercise) return error.SnapshotLimitExceeded;
+        for (exercise.sets) |set| {
+            if (set.targetMetrics.len > max_metrics_per_set or set.actualMetrics.len > max_metrics_per_set)
                 return error.SnapshotLimitExceeded;
         }
+    }
+    for (workout.prescription) |exercise| {
+        if (exercise.sets.len > max_sets_per_exercise or exercise.tags.len > max_tags_per_exercise)
+            return error.SnapshotLimitExceeded;
+        for (exercise.sets) |set| if (set.targetMetrics.len > max_metrics_per_set)
+            return error.SnapshotLimitExceeded;
     }
 }
 
