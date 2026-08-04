@@ -111,12 +111,60 @@
       ]
     },
     "command": {
-      "type": "object",
-      "minProperties": 1,
-      "maxProperties": 1,
-      "propertyNames": {
-        "enum": ["startWorkout", "addExercise", "removeExercise", "reorderExercise", "addSet", "completeSet", "skipSet", "reopenSet", "removeSet", "reorderSet", "completeWorkout"]
-      }
+      "oneOf": [
+        { "type": "object", "required": ["startWorkout"], "properties": { "startWorkout": { "$ref": "#/$defs/startWorkout" } }, "additionalProperties": false },
+        { "type": "object", "required": ["addExercise"], "properties": { "addExercise": { "$ref": "#/$defs/addExercise" } }, "additionalProperties": false },
+        { "type": "object", "required": ["removeExercise"], "properties": { "removeExercise": { "$ref": "#/$defs/membershipRevision" } }, "additionalProperties": false },
+        { "type": "object", "required": ["reorderExercise"], "properties": { "reorderExercise": { "$ref": "#/$defs/reorderExercise" } }, "additionalProperties": false },
+        { "type": "object", "required": ["addSet"], "properties": { "addSet": { "$ref": "#/$defs/addSet" } }, "additionalProperties": false },
+        { "type": "object", "required": ["completeSet"], "properties": { "completeSet": { "$ref": "#/$defs/completeSet" } }, "additionalProperties": false },
+        { "type": "object", "required": ["skipSet"], "properties": { "skipSet": { "$ref": "#/$defs/timedSet" } }, "additionalProperties": false },
+        { "type": "object", "required": ["reopenSet"], "properties": { "reopenSet": { "$ref": "#/$defs/setRevision" } }, "additionalProperties": false },
+        { "type": "object", "required": ["removeSet"], "properties": { "removeSet": { "$ref": "#/$defs/setRevision" } }, "additionalProperties": false },
+        { "type": "object", "required": ["reorderSet"], "properties": { "reorderSet": { "$ref": "#/$defs/reorderSet" } }, "additionalProperties": false },
+        { "type": "object", "required": ["completeWorkout"], "properties": { "completeWorkout": { "$ref": "#/$defs/completeWorkout" } }, "additionalProperties": false }
+      ]
+    },
+    "startWorkout": {
+      "type": "object", "required": ["metadata", "scope", "workoutId", "startedAt"],
+      "properties": { "metadata": { "$ref": "#/$defs/metadata" }, "scope": { "$ref": "#/$defs/scope" }, "workoutId": { "$ref": "#/$defs/id" }, "startedAt": { "$ref": "#/$defs/timestamp" } }, "additionalProperties": false
+    },
+    "workoutRevisionProperties": {
+      "type": "object", "required": ["metadata", "scope", "workoutId", "expectedRevision"],
+      "properties": { "metadata": { "$ref": "#/$defs/metadata" }, "scope": { "$ref": "#/$defs/scope" }, "workoutId": { "$ref": "#/$defs/id" }, "expectedRevision": { "type": "integer", "minimum": 0 } }
+    },
+    "membershipRevision": {
+      "allOf": [
+        { "$ref": "#/$defs/workoutRevisionProperties" },
+        { "type": "object", "required": ["membershipId"], "properties": { "membershipId": { "$ref": "#/$defs/id" } }, "additionalProperties": true }
+      ], "unevaluatedProperties": false
+    },
+    "setRevision": {
+      "allOf": [
+        { "$ref": "#/$defs/membershipRevision" },
+        { "type": "object", "required": ["setId"], "properties": { "setId": { "$ref": "#/$defs/id" } }, "additionalProperties": true }
+      ], "unevaluatedProperties": false
+    },
+    "addExercise": {
+      "allOf": [ { "$ref": "#/$defs/membershipRevision" }, { "type": "object", "required": ["exerciseId", "anchor"], "properties": { "exerciseId": { "$ref": "#/$defs/id" }, "anchor": { "$ref": "#/$defs/anchor" } } } ], "unevaluatedProperties": false
+    },
+    "reorderExercise": {
+      "allOf": [ { "$ref": "#/$defs/membershipRevision" }, { "type": "object", "required": ["anchor"], "properties": { "anchor": { "$ref": "#/$defs/anchor" } } } ], "unevaluatedProperties": false
+    },
+    "addSet": {
+      "allOf": [ { "$ref": "#/$defs/setRevision" }, { "type": "object", "required": ["kind", "anchor"], "properties": { "kind": { "$ref": "#/$defs/id" }, "targetMetrics": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/metric" } }, "anchor": { "$ref": "#/$defs/anchor" } } } ], "unevaluatedProperties": false
+    },
+    "completeSet": {
+      "allOf": [ { "$ref": "#/$defs/setRevision" }, { "type": "object", "required": ["actualMetrics", "completedAt"], "properties": { "actualMetrics": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/metric" } }, "status": { "enum": ["completed", "partial", "failed"] }, "completedAt": { "$ref": "#/$defs/timestamp" } } } ], "unevaluatedProperties": false
+    },
+    "timedSet": {
+      "allOf": [ { "$ref": "#/$defs/setRevision" }, { "type": "object", "required": ["at"], "properties": { "at": { "$ref": "#/$defs/timestamp" } } } ], "unevaluatedProperties": false
+    },
+    "reorderSet": {
+      "allOf": [ { "$ref": "#/$defs/setRevision" }, { "type": "object", "required": ["anchor"], "properties": { "anchor": { "$ref": "#/$defs/anchor" } } } ], "unevaluatedProperties": false
+    },
+    "completeWorkout": {
+      "allOf": [ { "$ref": "#/$defs/workoutRevisionProperties" }, { "type": "object", "required": ["completedAt"], "properties": { "completedAt": { "$ref": "#/$defs/timestamp" } } } ], "unevaluatedProperties": false
     },
     "issue": {
       "type": "object",
@@ -132,10 +180,30 @@
       "additionalProperties": false
     },
     "outcome": {
+      "oneOf": [
+        { "type": "object", "required": ["accepted"], "properties": { "accepted": { "$ref": "#/$defs/accepted" } }, "additionalProperties": false },
+        { "type": "object", "required": ["rejected"], "properties": { "rejected": { "$ref": "#/$defs/rejected" } }, "additionalProperties": false }
+      ]
+    },
+    "accepted": {
       "type": "object",
-      "minProperties": 1,
-      "maxProperties": 1,
-      "propertyNames": { "enum": ["accepted", "rejected"] }
+      "required": ["commandId", "disposition", "workout"],
+      "properties": {
+        "commandId": { "$ref": "#/$defs/id" },
+        "disposition": { "enum": ["applied", "replayed"] },
+        "workout": { "$ref": "#/$defs/workout" },
+        "warnings": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/issue" } }
+      },
+      "additionalProperties": false
+    },
+    "rejected": {
+      "type": "object",
+      "required": ["commandId", "issues"],
+      "properties": {
+        "commandId": { "$ref": "#/$defs/id" },
+        "issues": { "type": "array", "minItems": 1, "maxItems": 128, "items": { "$ref": "#/$defs/issue" } }
+      },
+      "additionalProperties": false
     },
     "commandRequest": {
       "type": "object",

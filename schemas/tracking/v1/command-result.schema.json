@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://caudex.dev/schemas/tracking/v1/command-result.schema.json",
+  "$ref": "tracking.schema.json#/$defs/commandResult"
+}
+

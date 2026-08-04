@@ -270,6 +270,22 @@ pub fn decodeAtomicBatchRequest(allocator: std.mem.Allocator, input: []const u8,
     return parsed;
 }
 
+pub fn decodeCommandResult(allocator: std.mem.Allocator, input: []const u8, limits: Limits) DecodeError!std.json.Parsed(CommandResult) {
+    const parsed = try caudex.canonical_json.decodeValue(CommandResult, allocator, input, limits.json);
+    errdefer parsed.deinit();
+    if (parsed.value.schemaVersion != schema_version) return error.UnsupportedVersion;
+    return parsed;
+}
+
+pub fn decodeAtomicBatchResult(allocator: std.mem.Allocator, input: []const u8, limits: Limits) DecodeError!std.json.Parsed(AtomicBatchResult) {
+    const parsed = try caudex.canonical_json.decodeValue(AtomicBatchResult, allocator, input, limits.json);
+    errdefer parsed.deinit();
+    if (parsed.value.schemaVersion != schema_version) return error.UnsupportedVersion;
+    if (parsed.value.outcomes.len > limits.max_commands) return error.BatchLimitExceeded;
+    try validateSnapshotBounds(parsed.value.snapshot);
+    return parsed;
+}
+
 pub fn encode(value: anytype, output: []u8) caudex.canonical_json.EncodeError![]const u8 {
     return caudex.canonical_json.encode(value, output);
 }
@@ -324,20 +340,28 @@ pub const WireSnapshotStorage = struct {
     amountBytes: [][64]u8,
 };
 
+const WireOffsets = struct {
+    exercise: usize = 0,
+    set: usize = 0,
+    metric: usize = 0,
+};
+
 pub fn snapshotFromDomain(value: tracking.LifecycleSnapshot, storage: WireSnapshotStorage) SnapshotConversionError!TrackingSnapshot {
+    var offsets: WireOffsets = .{};
+    return snapshotFromDomainAt(value, storage, &offsets);
+}
+
+fn snapshotFromDomainAt(value: tracking.LifecycleSnapshot, storage: WireSnapshotStorage, offsets: *WireOffsets) SnapshotConversionError!TrackingSnapshot {
     if (value.workouts.len > max_workouts) return error.SnapshotLimitExceeded;
     if (storage.workouts.len < value.workouts.len) return error.WorkoutBufferTooSmall;
     if (storage.receipts.len < value.start_receipts.len) return error.ReceiptBufferTooSmall;
-    var exercise_offset: usize = 0;
-    var set_offset: usize = 0;
-    var metric_offset: usize = 0;
     for (value.workouts, 0..) |workout, index| {
         storage.workouts[index] = try workoutFromDomain(
             workout,
             storage,
-            &exercise_offset,
-            &set_offset,
-            &metric_offset,
+            &offsets.exercise,
+            &offsets.set,
+            &offsets.metric,
         );
     }
     for (value.start_receipts, 0..) |receipt, index| {
@@ -353,6 +377,145 @@ pub fn snapshotFromDomain(value: tracking.LifecycleSnapshot, storage: WireSnapsh
         .workouts = storage.workouts[0..value.workouts.len],
         .startReceipts = storage.receipts[0..value.start_receipts.len],
     };
+}
+
+pub const BatchResultStorage = struct {
+    snapshot: WireSnapshotStorage,
+    outcomes: []CommandOutcome,
+    accepted: []AcceptedCommand,
+    rejected: []RejectedCommand,
+    issues: []Issue,
+    relatedIds: [][]const u8,
+};
+
+pub const ResultConversionError = SnapshotConversionError || error{
+    OutcomeBufferTooSmall,
+    IssueBufferTooSmall,
+    RelatedIdBufferTooSmall,
+};
+
+pub fn batchResultFromDomain(result: tracking.BatchResult, original: tracking.LifecycleSnapshot, storage: BatchResultStorage) ResultConversionError!AtomicBatchResult {
+    var offsets: WireOffsets = .{};
+    var issue_offset: usize = 0;
+    var related_offset: usize = 0;
+    return switch (result) {
+        .accepted => |accepted_batch| blk: {
+            if (storage.outcomes.len < accepted_batch.outcomes.len or storage.accepted.len < accepted_batch.outcomes.len)
+                return error.OutcomeBufferTooSmall;
+            const snapshot = try snapshotFromDomainAt(accepted_batch.snapshot, storage.snapshot, &offsets);
+            for (accepted_batch.outcomes, 0..) |accepted, index| {
+                const workout = try workoutFromDomain(
+                    accepted.workout,
+                    storage.snapshot,
+                    &offsets.exercise,
+                    &offsets.set,
+                    &offsets.metric,
+                );
+                const warnings = try issuesFromDomain(
+                    accepted.issues,
+                    storage,
+                    &issue_offset,
+                    &related_offset,
+                );
+                storage.accepted[index] = .{
+                    .commandId = accepted.command_id.bytes,
+                    .disposition = dispositionFromDomain(accepted.disposition),
+                    .workout = workout,
+                    .warnings = warnings,
+                };
+                storage.outcomes[index] = .{ .accepted = storage.accepted[index] };
+            }
+            break :blk .{
+                .schemaVersion = schema_version,
+                .applied = true,
+                .outcomes = storage.outcomes[0..accepted_batch.outcomes.len],
+                .snapshot = snapshot,
+            };
+        },
+        .rejected => |rejected| blk: {
+            if (storage.outcomes.len == 0 or storage.rejected.len == 0)
+                return error.OutcomeBufferTooSmall;
+            const snapshot = try snapshotFromDomainAt(original, storage.snapshot, &offsets);
+            const issues = try issuesFromDomain(
+                rejected.issues,
+                storage,
+                &issue_offset,
+                &related_offset,
+            );
+            storage.rejected[0] = .{
+                .commandId = rejected.command_id.bytes,
+                .issues = issues,
+            };
+            storage.outcomes[0] = .{ .rejected = storage.rejected[0] };
+            break :blk .{
+                .schemaVersion = schema_version,
+                .applied = false,
+                .outcomes = storage.outcomes[0..1],
+                .snapshot = snapshot,
+                .issues = issues,
+            };
+        },
+    };
+}
+
+pub fn commandResultFromDomain(result: tracking.CommandResult, storage: BatchResultStorage) ResultConversionError!CommandResult {
+    var offsets: WireOffsets = .{};
+    var issue_offset: usize = 0;
+    var related_offset: usize = 0;
+    if (storage.outcomes.len == 0) return error.OutcomeBufferTooSmall;
+    switch (result) {
+        .accepted => |accepted| {
+            if (storage.accepted.len == 0) return error.OutcomeBufferTooSmall;
+            const workout = try workoutFromDomain(
+                accepted.workout,
+                storage.snapshot,
+                &offsets.exercise,
+                &offsets.set,
+                &offsets.metric,
+            );
+            storage.accepted[0] = .{
+                .commandId = accepted.command_id.bytes,
+                .disposition = dispositionFromDomain(accepted.disposition),
+                .workout = workout,
+                .warnings = try issuesFromDomain(accepted.issues, storage, &issue_offset, &related_offset),
+            };
+            storage.outcomes[0] = .{ .accepted = storage.accepted[0] };
+        },
+        .rejected => |rejected| {
+            if (storage.rejected.len == 0) return error.OutcomeBufferTooSmall;
+            storage.rejected[0] = .{
+                .commandId = rejected.command_id.bytes,
+                .issues = try issuesFromDomain(rejected.issues, storage, &issue_offset, &related_offset),
+            };
+            storage.outcomes[0] = .{ .rejected = storage.rejected[0] };
+        },
+    }
+    return .{ .schemaVersion = schema_version, .outcome = storage.outcomes[0] };
+}
+
+fn issuesFromDomain(values: []const tracking.Issue, storage: BatchResultStorage, issue_offset: *usize, related_offset: *usize) ResultConversionError![]const Issue {
+    const issue_end = std.math.add(usize, issue_offset.*, values.len) catch return error.IssueBufferTooSmall;
+    if (issue_end > storage.issues.len) return error.IssueBufferTooSmall;
+    const issue_start = issue_offset.*;
+    for (values, issue_start..) |value, index| {
+        const related_end = std.math.add(usize, related_offset.*, value.related_ids.len) catch return error.RelatedIdBufferTooSmall;
+        if (related_end > storage.relatedIds.len) return error.RelatedIdBufferTooSmall;
+        const related_start = related_offset.*;
+        for (value.related_ids, related_start..) |id, related_index| {
+            storage.relatedIds[related_index] = id.bytes;
+        }
+        storage.issues[index] = .{
+            .code = value.code,
+            .category = issueCategoryFromDomain(value.category),
+            .severity = issueSeverityFromDomain(value.severity),
+            .path = value.path,
+            .message = value.message,
+            .relatedIds = storage.relatedIds[related_start..related_end],
+        };
+        related_offset.* = related_end;
+    }
+    issue_offset.* = issue_end;
+    return storage.issues[issue_start..issue_end];
 }
 
 fn workoutFromDomain(value: tracking.Workout, storage: WireSnapshotStorage, exercise_offset: *usize, set_offset: *usize, metric_offset: *usize) SnapshotConversionError!TrackedWorkout {
@@ -595,6 +758,133 @@ pub fn batchCommandsToDomain(values: []const Command, command_storage: []trackin
         metric_offset = metric_end;
     }
     return command_storage[0..values.len];
+}
+
+pub const CommandFormatStorage = struct {
+    metrics: []caudex.canonical.Metric,
+    amountBytes: [][64]u8,
+};
+
+pub const CommandFormatError = error{ UnsupportedCommand, MetricBufferTooSmall, SnapshotLimitExceeded };
+
+pub fn commandFromDomain(value: tracking.Command, storage: CommandFormatStorage) CommandFormatError!Command {
+    return switch (value) {
+        .start_workout => |command| .{ .startWorkout = startWorkoutFromDomain(command) },
+        .add_exercise => |command| .{ .addExercise = .{
+            .metadata = metadataFromDomain(command.metadata),
+            .scope = scopeFromDomain(command.scope),
+            .workoutId = command.workout_id.bytes,
+            .expectedRevision = command.expected_revision,
+            .membershipId = command.membership_id.bytes,
+            .exerciseId = command.exercise_id.bytes,
+            .anchor = anchorFromExerciseDomain(command.anchor),
+        } },
+        .remove_exercise => |command| .{ .removeExercise = membershipRevisionFromDomain(command) },
+        .reorder_exercise => |command| .{ .reorderExercise = .{
+            .metadata = metadataFromDomain(command.metadata),
+            .scope = scopeFromDomain(command.scope),
+            .workoutId = command.workout_id.bytes,
+            .expectedRevision = command.expected_revision,
+            .membershipId = command.membership_id.bytes,
+            .anchor = anchorFromExerciseDomain(command.anchor),
+        } },
+        .add_set => |command| .{ .addSet = .{
+            .metadata = metadataFromDomain(command.metadata),
+            .scope = scopeFromDomain(command.scope),
+            .workoutId = command.workout_id.bytes,
+            .expectedRevision = command.expected_revision,
+            .membershipId = command.membership_id.bytes,
+            .setId = command.set_id.bytes,
+            .kind = command.kind.bytes,
+            .targetMetrics = try commandMetricsFromDomain(command.target_metrics, storage),
+            .anchor = anchorFromSetDomain(command.anchor),
+        } },
+        .complete_set => |command| .{ .completeSet = .{
+            .metadata = metadataFromDomain(command.metadata),
+            .scope = scopeFromDomain(command.scope),
+            .workoutId = command.workout_id.bytes,
+            .expectedRevision = command.expected_revision,
+            .membershipId = command.membership_id.bytes,
+            .setId = command.set_id.bytes,
+            .actualMetrics = try commandMetricsFromDomain(command.actual_metrics, storage),
+            .status = setStatusFromDomain(command.status),
+            .completedAt = command.completed_at.bytes,
+        } },
+        .skip_set => |command| .{ .skipSet = .{
+            .metadata = metadataFromDomain(command.metadata),
+            .scope = scopeFromDomain(command.scope),
+            .workoutId = command.workout_id.bytes,
+            .expectedRevision = command.expected_revision,
+            .membershipId = command.membership_id.bytes,
+            .setId = command.set_id.bytes,
+            .at = command.skipped_at.bytes,
+        } },
+        .reopen_set => |command| .{ .reopenSet = setRevisionFromDomain(command) },
+        .remove_set => |command| .{ .removeSet = setRevisionFromDomain(command) },
+        .reorder_set => |command| .{ .reorderSet = .{
+            .metadata = metadataFromDomain(command.metadata),
+            .scope = scopeFromDomain(command.scope),
+            .workoutId = command.workout_id.bytes,
+            .expectedRevision = command.expected_revision,
+            .membershipId = command.membership_id.bytes,
+            .setId = command.set_id.bytes,
+            .anchor = anchorFromSetDomain(command.anchor),
+        } },
+        .complete_workout => |command| .{ .completeWorkout = .{
+            .metadata = metadataFromDomain(command.metadata),
+            .scope = scopeFromDomain(command.scope),
+            .workoutId = command.workout_id.bytes,
+            .expectedRevision = command.expected_revision,
+            .completedAt = command.completed_at.bytes,
+        } },
+        .log_set, .cancel_workout => error.UnsupportedCommand,
+    };
+}
+
+fn commandMetricsFromDomain(values: []const tracking.Metric, storage: CommandFormatStorage) CommandFormatError![]const caudex.canonical.Metric {
+    var offset: usize = 0;
+    const wire_storage: WireSnapshotStorage = .{
+        .workouts = &.{},
+        .receipts = &.{},
+        .exercises = &.{},
+        .sets = &.{},
+        .metrics = storage.metrics,
+        .amountBytes = storage.amountBytes,
+    };
+    return metricsFromDomain(values, wire_storage, &offset) catch |err| switch (err) {
+        error.MetricBufferTooSmall => error.MetricBufferTooSmall,
+        else => error.SnapshotLimitExceeded,
+    };
+}
+
+fn metadataFromDomain(value: tracking.CommandMetadata) CommandMetadata {
+    return .{ .commandId = value.command_id.bytes, .occurredAt = value.occurred_at.bytes };
+}
+
+fn membershipRevisionFromDomain(value: tracking.RemoveExerciseCommand) MembershipRevision {
+    return .{ .metadata = metadataFromDomain(value.metadata), .scope = scopeFromDomain(value.scope), .workoutId = value.workout_id.bytes, .expectedRevision = value.expected_revision, .membershipId = value.membership_id.bytes };
+}
+
+fn setRevisionFromDomain(value: tracking.ReopenSetCommand) SetRevision {
+    return .{ .metadata = metadataFromDomain(value.metadata), .scope = scopeFromDomain(value.scope), .workoutId = value.workout_id.bytes, .expectedRevision = value.expected_revision, .membershipId = value.membership_id.bytes, .setId = value.set_id.bytes };
+}
+
+fn anchorFromExerciseDomain(value: tracking.ExerciseAnchor) Anchor {
+    return switch (value) {
+        .beginning => .beginning,
+        .end => .end,
+        .before => |id| .{ .before = id.bytes },
+        .after => |id| .{ .after = id.bytes },
+    };
+}
+
+fn anchorFromSetDomain(value: tracking.SetAnchor) Anchor {
+    return switch (value) {
+        .beginning => .beginning,
+        .end => .end,
+        .before => |id| .{ .before = id.bytes },
+        .after => |id| .{ .after = id.bytes },
+    };
 }
 
 fn commandMetricCount(command: Command) usize {

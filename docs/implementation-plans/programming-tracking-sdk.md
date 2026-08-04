@@ -45,10 +45,18 @@ reinterpret old canonical data.
 
 ### 2. Canonical tracking
 
+**Status:** Completed at `HEAD` after baseline commits
+
 - Bounded versioned schemas and Zig boundary types cover snapshots, all public
   commands, atomic batches, replay, revisions, issues, and warnings.
 - Malformed transport differs from domain rejection; independent enums have
   exhaustive conversions; deterministic direct-Zig fixtures pass.
+
+Implemented as the `caudex_tracking_protocol` boundary over the allocation-free
+typed reducer. It includes bounded atomic batches, replay-bearing snapshots,
+bidirectional exact-decimal conversions, accepted/rejected result conversion,
+JSON Schemas, and deterministic fixtures. C/WASM/npm exposure remains in their
+later phases.
 
 ### 3. Workflow bridge and provenance
 

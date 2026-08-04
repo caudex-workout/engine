@@ -21,10 +21,28 @@ test "versions batches and transport failures are distinct" {
     ;
     try std.testing.expectError(error.UnsupportedVersion, protocol.decodeCommandRequest(std.testing.allocator, unsupported, .{}));
     try std.testing.expectError(error.MalformedJson, protocol.decodeCommandRequest(std.testing.allocator, "{", .{}));
+    const unknown_operation =
+        \\{"schemaVersion":1,"snapshot":{"workouts":[]},"command":{"teleportWorkout":{}}}
+    ;
+    try std.testing.expectError(
+        error.MalformedJson,
+        protocol.decodeCommandRequest(std.testing.allocator, unknown_operation, .{}),
+    );
     const empty_batch =
         \\{"schemaVersion":1,"snapshot":{"workouts":[]},"commands":[]}
     ;
     try std.testing.expectError(error.EmptyBatch, protocol.decodeAtomicBatchRequest(std.testing.allocator, empty_batch, .{}));
+}
+
+test "canonical rejected result fixture has stable bytes" {
+    const fixture = @embedFile("fixtures/tracking/rejected-batch-v1.json");
+    const parsed = try protocol.decodeAtomicBatchResult(std.testing.allocator, fixture, .{});
+    defer parsed.deinit();
+    var storage: [4096]u8 = undefined;
+    try std.testing.expectEqualStrings(
+        std.mem.trimEnd(u8, fixture, "\r\n"),
+        try protocol.encode(parsed.value, &storage),
+    );
 }
 
 test "start command conversion validates and preserves typed values" {
@@ -76,6 +94,11 @@ test "command conversion preserves exact target metrics and explicit anchors" {
     try std.testing.expectEqual(@as(i64, 18500), typed.add_set.target_metrics[0].value.value.mantissa);
     try std.testing.expectEqual(@as(u8, 2), typed.add_set.target_metrics[0].value.value.scale);
     try std.testing.expectEqual(tracking.SetAnchor.end, typed.add_set.anchor);
+    var wire_metrics: [1]@import("caudex").canonical.Metric = undefined;
+    var amounts: [1][64]u8 = undefined;
+    const round_trip = try protocol.commandFromDomain(typed, .{ .metrics = &wire_metrics, .amountBytes = &amounts });
+    try std.testing.expectEqualStrings("185.00", round_trip.addSet.targetMetrics[0].value.amount);
+    try std.testing.expectEqual(protocol.Anchor.end, round_trip.addSet.anchor);
 }
 
 test "canonical snapshots preserve exact metrics and replay receipts" {
@@ -171,4 +194,105 @@ test "canonical atomic batch executes through the typed reducer" {
         .{ .workouts = &workouts, .start_receipts = &receipts, .exercises = &exercises, .sets = &sets, .issues = &issues, .outcomes = &outcomes },
     );
     try std.testing.expectEqual(@as(u64, 2), result.accepted.snapshot.workouts[0].revision);
+
+    var wire_workouts: [2]protocol.TrackedWorkout = undefined;
+    var wire_receipts: [2]protocol.StartReceipt = undefined;
+    var wire_exercises: [8]protocol.ExerciseMembership = undefined;
+    var wire_sets: [8]protocol.TrackedSet = undefined;
+    var wire_metrics: [8]@import("caudex").canonical.Metric = undefined;
+    var amounts: [8][64]u8 = undefined;
+    var wire_outcomes: [commands.len]protocol.CommandOutcome = undefined;
+    var wire_accepted: [commands.len]protocol.AcceptedCommand = undefined;
+    var wire_rejected: [1]protocol.RejectedCommand = undefined;
+    var wire_issues: [commands.len]protocol.Issue = undefined;
+    var related_ids: [commands.len][]const u8 = undefined;
+    const wire_result = try protocol.batchResultFromDomain(result, .{}, .{
+        .snapshot = .{
+            .workouts = &wire_workouts,
+            .receipts = &wire_receipts,
+            .exercises = &wire_exercises,
+            .sets = &wire_sets,
+            .metrics = &wire_metrics,
+            .amountBytes = &amounts,
+        },
+        .outcomes = &wire_outcomes,
+        .accepted = &wire_accepted,
+        .rejected = &wire_rejected,
+        .issues = &wire_issues,
+        .relatedIds = &related_ids,
+    });
+    try std.testing.expect(wire_result.applied);
+    try std.testing.expectEqual(@as(usize, 2), wire_result.outcomes.len);
+    try std.testing.expectEqualStrings("add-exercise-1", wire_result.outcomes[1].accepted.commandId);
+    try std.testing.expectEqual(@as(u64, 2), wire_result.snapshot.workouts[0].revision);
+    var encoded_a: [8192]u8 = undefined;
+    var encoded_b: [8192]u8 = undefined;
+    const encoded = try protocol.encode(wire_result, &encoded_a);
+    try std.testing.expectEqualStrings(encoded, try protocol.encode(wire_result, &encoded_b));
+    const decoded = try protocol.decodeAtomicBatchResult(std.testing.allocator, encoded, .{});
+    defer decoded.deinit();
+    try std.testing.expect(decoded.value.applied);
+    try std.testing.expectEqualStrings("add-exercise-1", decoded.value.outcomes[1].accepted.commandId);
+}
+
+test "canonical rejected batch returns original snapshot and structured issue" {
+    const active: tracking.Workout = .{
+        .id = .{ .bytes = "workout-1" },
+        .scope = .{ .host_scope_key = .{ .bytes = "scope-1" } },
+        .revision = 1,
+        .status = .active,
+        .started_at = .{ .bytes = "2026-08-04T12:00:00Z" },
+    };
+    const original: tracking.LifecycleSnapshot = .{ .workouts = &.{active} };
+    const commands = [_]tracking.Command{.{ .complete_workout = .{
+        .metadata = .{ .command_id = .{ .bytes = "complete-1" }, .occurred_at = .{ .bytes = "2026-08-04T12:01:00Z" } },
+        .scope = active.scope,
+        .workout_id = active.id,
+        .expected_revision = 99,
+        .completed_at = .{ .bytes = "2026-08-04T12:01:00Z" },
+    } }};
+    var workouts: [1]tracking.Workout = undefined;
+    var receipts: [1]tracking.StartReceipt = undefined;
+    var exercises: [1]tracking.ExerciseMembership = undefined;
+    var sets: [1]tracking.TrackedSet = undefined;
+    var issues: [1]tracking.Issue = undefined;
+    var outcomes: [1]tracking.AcceptedCommand = undefined;
+    const result = try tracking.applyAtomicBatch(original, &commands, .{
+        .workouts = &workouts,
+        .start_receipts = &receipts,
+        .exercises = &exercises,
+        .sets = &sets,
+        .issues = &issues,
+        .outcomes = &outcomes,
+    });
+    var wire_workouts: [1]protocol.TrackedWorkout = undefined;
+    var wire_receipts: [1]protocol.StartReceipt = undefined;
+    var wire_exercises: [1]protocol.ExerciseMembership = undefined;
+    var wire_sets: [1]protocol.TrackedSet = undefined;
+    var wire_metrics: [1]@import("caudex").canonical.Metric = undefined;
+    var amounts: [1][64]u8 = undefined;
+    var wire_outcomes: [1]protocol.CommandOutcome = undefined;
+    var wire_accepted: [1]protocol.AcceptedCommand = undefined;
+    var wire_rejected: [1]protocol.RejectedCommand = undefined;
+    var wire_issues: [1]protocol.Issue = undefined;
+    var related_ids: [1][]const u8 = undefined;
+    const wire_result = try protocol.batchResultFromDomain(result, original, .{
+        .snapshot = .{ .workouts = &wire_workouts, .receipts = &wire_receipts, .exercises = &wire_exercises, .sets = &wire_sets, .metrics = &wire_metrics, .amountBytes = &amounts },
+        .outcomes = &wire_outcomes,
+        .accepted = &wire_accepted,
+        .rejected = &wire_rejected,
+        .issues = &wire_issues,
+        .relatedIds = &related_ids,
+    });
+    try std.testing.expect(!wire_result.applied);
+    try std.testing.expectEqual(@as(u64, 1), wire_result.snapshot.workouts[0].revision);
+    try std.testing.expectEqualStrings(tracking.issue_codes.revision_conflict, wire_result.issues[0].code);
+    var encoded: [4096]u8 = undefined;
+    const decoded = try protocol.decodeAtomicBatchResult(
+        std.testing.allocator,
+        try protocol.encode(wire_result, &encoded),
+        .{},
+    );
+    defer decoded.deinit();
+    try std.testing.expectEqualStrings(tracking.issue_codes.revision_conflict, decoded.value.outcomes[0].rejected.issues[0].code);
 }
