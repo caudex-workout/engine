@@ -15,6 +15,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "caudex", .module = caudex.module("caudex") },
+                .{ .name = "caudex_exercise_catalog", .module = caudex.module("caudex_exercise_catalog") },
                 .{
                     .name = "caudex_persistence",
                     .module = caudex.module("caudex_persistence"),

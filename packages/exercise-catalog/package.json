@@ -1,0 +1,17 @@
+{
+  "name": "@caudex-workout/exercise-catalog",
+  "version": "0.1.0-dev",
+  "description": "Optional pinned first-party exercise catalog for Caudex applications",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./catalog.json": "./data/catalog.json",
+    "./source-manifest.json": "./data/source-manifest.json"
+  },
+  "files": ["dist/", "data/", "THIRD_PARTY_LICENSES/", "README.md", "LICENSE", "NOTICE"],
+  "engines": { "node": ">=22" },
+  "publishConfig": { "access": "public", "provenance": true },
+  "scripts": { "build": "node scripts/build-package.mjs" }
+}

@@ -1,6 +1,7 @@
 const std = @import("std");
 const caudex = @import("caudex");
 const caudex_persistence = @import("caudex_persistence");
+const caudex_exercise_catalog = @import("caudex_exercise_catalog");
 const caudex_sqlite = @import("caudex_sqlite");
 const caudex_tracking = @import("caudex_tracking");
 
@@ -85,6 +86,9 @@ pub fn main() !void {
     const database_metadata = try database.metadata();
     if (database_metadata.schema_version != caudex_sqlite.schema_version)
         return error.UnexpectedSqliteSchema;
+    const catalog = try caudex_exercise_catalog.load(std.heap.page_allocator);
+    defer catalog.deinit();
+    if (catalog.value.records.len != 873) return error.UnexpectedCatalog;
 
     const registry = caudex.methodology.Registry.initComptime(
         &.{simple_methodology},
@@ -114,12 +118,13 @@ pub fn main() !void {
     if (output.recommendations != 1) return error.UnexpectedOutput;
 
     std.debug.print(
-        "{s} registered; persistence contract v{d}, tracking contract v{d}, and SQLite schema v{d} imported\n",
+        "{s} registered; persistence contract v{d}, tracking contract v{d}, SQLite schema v{d}, and catalog {s} imported\n",
         .{
             implementation.metadata.id.bytes,
             caudex_persistence.contract_version,
             caudex_tracking.contract_version,
             database_metadata.schema_version,
+            catalog.value.fingerprint,
         },
     );
 }

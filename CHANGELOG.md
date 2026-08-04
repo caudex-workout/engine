@@ -44,6 +44,10 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Public methodology discovery now lists/describes compiled methodologies,
   reports operation capabilities and UI-neutral field metadata, and validates
   configuration/state through the same Zig registry across C, WASM, and npm.
+- Added the optional `caudex_exercise_catalog` Zig module and
+  `@caudex-workout/exercise-catalog` npm package, generated offline from pinned
+  free-exercise-db commit `b0eed061e1c832b3ed815fbaa4b45b3cdc14df49`.
+  The 873-record textual artifact excludes all upstream image data.
 
 ## [0.1.0] - 2026-07-26
 

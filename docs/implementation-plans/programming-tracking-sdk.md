@@ -161,10 +161,18 @@ boundary failures.
 
 ### 10. Optional exercise catalog
 
+**Status:** Completed
+
 - A manifest pins free-exercise-db commit/license/schema/tool/fingerprint.
 - Checked-in text is deterministic and requires no fetch; images and unverified
   URLs are excluded; mapping, projection, overrides, notices, drift, and clean
   Zig/npm consumer tests pass.
+
+The pinned commit contains 873 records. The generated artifact fingerprint is
+`bc747f833ab3e31e2cad8e45ade4d42c12dfd73fbba86192a4dd87f201cbda3c`.
+The optional `caudex_exercise_catalog` Zig module and
+`@caudex-workout/exercise-catalog` npm package provide deterministic search,
+projection, and host override helpers. All upstream image data is excluded.
 
 ### 11. Portable import/export
 

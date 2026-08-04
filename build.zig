@@ -86,6 +86,57 @@ pub fn build(b: *std.Build) void {
             .{ .name = "caudex_tracking_protocol", .module = tracking_protocol_module },
         },
     });
+    const exercise_catalog_module = b.addModule("caudex_exercise_catalog", .{
+        .root_source_file = b.path("catalog/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "caudex", .module = module }},
+    });
+    const exercise_catalog_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("catalog/catalog_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "caudex", .module = module },
+                .{ .name = "caudex_exercise_catalog", .module = exercise_catalog_module },
+            },
+        }),
+    });
+    const run_exercise_catalog_tests = b.addRunArtifact(exercise_catalog_tests);
+    const verify_exercise_catalog = b.addSystemCommand(&.{ "node", "catalog/tools/generate.mjs", "--check" });
+    const exercise_catalog_generator_tests = b.addSystemCommand(&.{ "node", "tests/exercise_catalog_generator_test.mjs" });
+    const exercise_catalog_types = b.addSystemCommand(&.{
+        "node",
+        "packages/npm/workout-engine/node_modules/typescript/bin/tsc",
+        "--noEmit",
+        "--strict",
+        "--allowImportingTsExtensions",
+        "--resolveJsonModule",
+        "--target",
+        "ES2022",
+        "--module",
+        "NodeNext",
+        "--moduleResolution",
+        "NodeNext",
+        "tests/exercise_catalog_test.ts",
+    });
+    const exercise_catalog_runtime = b.addSystemCommand(&.{ "node", "--experimental-strip-types", "--disable-warning=ExperimentalWarning", "tests/exercise_catalog_test.ts" });
+    exercise_catalog_runtime.step.dependOn(&exercise_catalog_types.step);
+    const exercise_catalog_package = b.addSystemCommand(&.{ "node", "packages/exercise-catalog/scripts/build-package.mjs" });
+    const exercise_catalog_clean = b.addSystemCommand(&.{ "node", "tests/exercise_catalog_clean_smoke.mjs" });
+    exercise_catalog_clean.step.dependOn(&exercise_catalog_package.step);
+    const exercise_catalog_step = b.step("test-exercise-catalog", "Verify and test the pinned optional exercise catalog");
+    exercise_catalog_step.dependOn(&run_exercise_catalog_tests.step);
+    exercise_catalog_step.dependOn(&verify_exercise_catalog.step);
+    exercise_catalog_step.dependOn(&exercise_catalog_generator_tests.step);
+    exercise_catalog_step.dependOn(&exercise_catalog_runtime.step);
+    exercise_catalog_step.dependOn(&exercise_catalog_clean.step);
+
+    const catalog_commit = b.option([]const u8, "catalog-commit", "Exact free-exercise-db commit for the explicit network update command") orelse "missing-commit";
+    const update_exercise_catalog = b.addSystemCommand(&.{ "node", "catalog/tools/update.mjs", catalog_commit });
+    const update_exercise_catalog_step = b.step("update-exercise-catalog", "Fetch and regenerate the catalog from -Dcatalog-commit=<40-hex-sha>");
+    update_exercise_catalog_step.dependOn(&update_exercise_catalog.step);
     const c_api_module = b.createModule(.{
         .root_source_file = b.path("src/c_api.zig"),
         .target = target,
@@ -1036,6 +1087,11 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_tracking_architecture_tests.step);
     test_step.dependOn(&run_workflow_tests.step);
     test_step.dependOn(&run_workflow_architecture_tests.step);
+    test_step.dependOn(&run_exercise_catalog_tests.step);
+    test_step.dependOn(&verify_exercise_catalog.step);
+    test_step.dependOn(&exercise_catalog_generator_tests.step);
+    test_step.dependOn(&exercise_catalog_runtime.step);
+    test_step.dependOn(&exercise_catalog_clean.step);
     test_step.dependOn(&run_persistence_tests.step);
     test_step.dependOn(&run_persistence_contract_kit_tests.step);
     test_step.dependOn(&persistence_typescript_test.step);

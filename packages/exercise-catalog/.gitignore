@@ -1,0 +1,7 @@
+dist/
+data/
+LICENSE
+NOTICE
+THIRD_PARTY_LICENSES/
+*.tgz
+node_modules/

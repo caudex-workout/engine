@@ -72,6 +72,9 @@ Direct Zig consumers can add a tagged source archive with `zig fetch --save`
 and import `@import("caudex")` plus the optional database-independent
 `@import("caudex_persistence")` and host-owned `@import("caudex_tracking")`
 contracts, plus the optional `@import("caudex_sqlite")` adapter. The
+optional `@import("caudex_exercise_catalog")` module supplies the pinned
+first-party textual catalog without making it a core dependency. npm hosts can
+install the equivalent `@caudex-workout/exercise-catalog` package. The
 [Zig package guide](docs/zig-package.md) documents dependency wiring, public
 modules, persistence ownership/error/compatibility semantics, the Zig 0.16.x
 support policy, and the checked-in consumer. `zig build test-zig-package`

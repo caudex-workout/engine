@@ -56,6 +56,12 @@ application metadata that materially affects selection may go in the documented
 catalog fields or `attributes`; database revisions, ORM objects, authorization
 data, and UI state should remain outside the request.
 
+Applications that do not already own a catalog may use the optional pinned
+first-party data package. Its exact source, stable-ID, taxonomy, null handling,
+projection, override, and media-exclusion rules are documented in the
+[free-exercise-db catalog guide](catalog/free-exercise-db.md). The core remains
+independent of that package.
+
 ## Map workout history
 
 An existing workout record becomes a `CompletedWorkout`. Exact measurements use
@@ -174,4 +180,3 @@ The engine never:
 This boundary keeps calculation semantics identical for applications using
 SQLite, PostgreSQL, IndexedDB, remote APIs, custom repositories, or no
 persistence at all.
-

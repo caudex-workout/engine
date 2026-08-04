@@ -52,6 +52,9 @@ try {
   if (!result.stderr.includes("SQLite schema v8")) {
     throw new Error(`SQLite package was not exercised: ${result.stderr}`);
   }
+  if (!result.stderr.includes("catalog bc747f833ab3e31e2cad8e45ade4d42c12dfd73fbba86192a4dd87f201cbda3c")) {
+    throw new Error(`exercise catalog package was not exercised: ${result.stderr}`);
+  }
   console.log("caudex clean Zig package consumer passed");
 } finally {
   await rm(temporary, { recursive: true, force: true });
