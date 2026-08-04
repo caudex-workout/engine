@@ -115,10 +115,11 @@ test "atomic batch publishes only the final sequential snapshot" {
     var exercises: [8]tracking.ExerciseMembership = undefined;
     var sets: [8]tracking.TrackedSet = undefined;
     var issues: [commands.len]tracking.Issue = undefined;
+    var outcomes: [commands.len]tracking.AcceptedCommand = undefined;
     const result = try tracking.applyAtomicBatch(
         .{ .exercise_catalog = &.{.{ .exercise_id = .{ .bytes = "squat" }, .availability = .active }} },
         &commands,
-        .{ .workouts = &workouts, .start_receipts = &receipts, .exercises = &exercises, .sets = &sets, .issues = &issues },
+        .{ .workouts = &workouts, .start_receipts = &receipts, .exercises = &exercises, .sets = &sets, .issues = &issues, .outcomes = &outcomes },
     );
     try std.testing.expectEqual(@as(u16, 3), result.accepted.applied_commands);
     try std.testing.expectEqual(@as(u64, 3), result.accepted.snapshot.workouts[0].revision);
@@ -143,6 +144,7 @@ test "atomic batch rejection does not expose partial workspace state" {
     var exercises: [2]tracking.ExerciseMembership = undefined;
     var sets: [2]tracking.TrackedSet = undefined;
     var issues: [commands.len]tracking.Issue = undefined;
+    var outcomes: [commands.len]tracking.AcceptedCommand = undefined;
     const original: tracking.LifecycleSnapshot = .{
         .exercise_catalog = &.{.{ .exercise_id = .{ .bytes = "squat" }, .availability = .active }},
     };
@@ -152,6 +154,7 @@ test "atomic batch rejection does not expose partial workspace state" {
         .exercises = &exercises,
         .sets = &sets,
         .issues = &issues,
+        .outcomes = &outcomes,
     });
     try std.testing.expectEqualStrings(tracking.issue_codes.revision_conflict, result.rejected.issues[0].code);
     try std.testing.expectEqual(@as(usize, 0), original.workouts.len);

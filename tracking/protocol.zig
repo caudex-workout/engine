@@ -315,6 +315,110 @@ pub const SnapshotConversionStorage = struct {
     metrics: []tracking.Metric,
 };
 
+pub const WireSnapshotStorage = struct {
+    workouts: []TrackedWorkout,
+    receipts: []StartReceipt,
+    exercises: []ExerciseMembership,
+    sets: []TrackedSet,
+    metrics: []caudex.canonical.Metric,
+    amountBytes: [][64]u8,
+};
+
+pub fn snapshotFromDomain(value: tracking.LifecycleSnapshot, storage: WireSnapshotStorage) SnapshotConversionError!TrackingSnapshot {
+    if (value.workouts.len > max_workouts) return error.SnapshotLimitExceeded;
+    if (storage.workouts.len < value.workouts.len) return error.WorkoutBufferTooSmall;
+    if (storage.receipts.len < value.start_receipts.len) return error.ReceiptBufferTooSmall;
+    var exercise_offset: usize = 0;
+    var set_offset: usize = 0;
+    var metric_offset: usize = 0;
+    for (value.workouts, 0..) |workout, index| {
+        storage.workouts[index] = try workoutFromDomain(
+            workout,
+            storage,
+            &exercise_offset,
+            &set_offset,
+            &metric_offset,
+        );
+    }
+    for (value.start_receipts, 0..) |receipt, index| {
+        const workout_index = findDomainWorkout(value.workouts, receipt.accepted.workout.id, receipt.accepted.workout.scope) orelse
+            return error.SnapshotLimitExceeded;
+        storage.receipts[index] = .{
+            .command = startWorkoutFromDomain(receipt.command),
+            .disposition = dispositionFromDomain(receipt.accepted.disposition),
+            .workout = storage.workouts[workout_index],
+        };
+    }
+    return .{
+        .workouts = storage.workouts[0..value.workouts.len],
+        .startReceipts = storage.receipts[0..value.start_receipts.len],
+    };
+}
+
+fn workoutFromDomain(value: tracking.Workout, storage: WireSnapshotStorage, exercise_offset: *usize, set_offset: *usize, metric_offset: *usize) SnapshotConversionError!TrackedWorkout {
+    const exercise_end = std.math.add(usize, exercise_offset.*, value.exercises.len) catch return error.SnapshotLimitExceeded;
+    if (exercise_end > storage.exercises.len) return error.ExerciseBufferTooSmall;
+    const exercise_start = exercise_offset.*;
+    for (value.exercises, exercise_start..) |exercise, exercise_index| {
+        const set_end = std.math.add(usize, set_offset.*, exercise.sets.len) catch return error.SnapshotLimitExceeded;
+        if (set_end > storage.sets.len) return error.SetBufferTooSmall;
+        const set_start = set_offset.*;
+        for (exercise.sets, set_start..) |set, set_index| {
+            const targets = try metricsFromDomain(set.target_metrics, storage, metric_offset);
+            const actuals = try metricsFromDomain(set.actual_metrics, storage, metric_offset);
+            storage.sets[set_index] = .{
+                .id = set.id.bytes,
+                .kind = set.kind.bytes,
+                .targetMetrics = targets,
+                .actualMetrics = actuals,
+                .status = setStatusFromDomain(set.status),
+                .recordedAt = if (set.recorded_at) |at| at.bytes else null,
+            };
+        }
+        storage.exercises[exercise_index] = .{
+            .id = exercise.id.bytes,
+            .exerciseId = exercise.exercise_id.bytes,
+            .sets = storage.sets[set_start..set_end],
+        };
+        set_offset.* = set_end;
+    }
+    exercise_offset.* = exercise_end;
+    return .{
+        .id = value.id.bytes,
+        .scope = scopeFromDomain(value.scope),
+        .revision = value.revision,
+        .status = workoutStatusFromDomain(value.status),
+        .startedAt = value.started_at.bytes,
+        .completedAt = if (value.completed_at) |at| at.bytes else null,
+        .exercises = storage.exercises[exercise_start..exercise_end],
+    };
+}
+
+fn metricsFromDomain(values: []const tracking.Metric, storage: WireSnapshotStorage, offset: *usize) SnapshotConversionError![]const caudex.canonical.Metric {
+    const end = std.math.add(usize, offset.*, values.len) catch return error.SnapshotLimitExceeded;
+    if (end > storage.metrics.len or end > storage.amountBytes.len) return error.MetricBufferTooSmall;
+    const start = offset.*;
+    for (values, start..) |metric, index| {
+        const amount = metric.value.value.format(&storage.amountBytes[index]) catch return error.MetricBufferTooSmall;
+        storage.metrics[index] = .{
+            .code = metric.code.bytes,
+            .value = .{ .amount = amount, .unit = metric.value.unit.code() },
+        };
+    }
+    offset.* = end;
+    return storage.metrics[start..end];
+}
+
+fn findDomainWorkout(workouts: []const tracking.Workout, id: tracking.Id, scope: tracking.Scope) ?usize {
+    for (workouts, 0..) |workout, index| {
+        if (workout.id.eql(id) and workout.scope.host_scope_key.eql(scope.host_scope_key) and
+            ((workout.scope.athlete_id == null and scope.athlete_id == null) or
+                (workout.scope.athlete_id != null and scope.athlete_id != null and workout.scope.athlete_id.?.eql(scope.athlete_id.?))))
+            return index;
+    }
+    return null;
+}
+
 pub fn snapshotToDomain(value: TrackingSnapshot, storage: SnapshotConversionStorage) SnapshotConversionError!tracking.LifecycleSnapshot {
     try validateSnapshotBounds(value);
     if (storage.workouts.len < value.workouts.len) return error.WorkoutBufferTooSmall;

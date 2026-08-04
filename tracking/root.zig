@@ -498,11 +498,13 @@ pub const BatchWorkspace = struct {
     exercises: []ExerciseMembership,
     sets: []TrackedSet,
     issues: []Issue,
+    outcomes: []AcceptedCommand,
 };
 
 pub const AcceptedBatch = struct {
     snapshot: LifecycleSnapshot,
     applied_commands: u16,
+    outcomes: []const AcceptedCommand,
 };
 
 pub const BatchResult = union(enum) {
@@ -515,6 +517,7 @@ pub const BatchError = DecisionError || error{
     BatchLimitExceeded,
     WorkoutBufferTooSmall,
     ReceiptBufferTooSmall,
+    OutcomeBufferTooSmall,
 };
 
 pub const max_batch_commands: usize = 128;
@@ -536,6 +539,7 @@ pub fn applyAtomicBatch(
     if (workspace.start_receipts.len < snapshot.start_receipts.len + countStarts(commands))
         return error.ReceiptBufferTooSmall;
     if (workspace.issues.len < commands.len) return error.IssueBufferTooSmall;
+    if (workspace.outcomes.len < commands.len) return error.OutcomeBufferTooSmall;
 
     @memcpy(workspace.workouts[0..snapshot.workouts.len], snapshot.workouts);
     @memcpy(workspace.start_receipts[0..snapshot.start_receipts.len], snapshot.start_receipts);
@@ -560,6 +564,7 @@ pub fn applyAtomicBatch(
         switch (result) {
             .rejected => |rejected| return .{ .rejected = rejected },
             .accepted => |accepted| {
+                workspace.outcomes[command_index] = accepted;
                 const existing = findWorkoutIndex(
                     workspace.workouts[0..workout_len],
                     accepted.workout.scope,
@@ -608,6 +613,7 @@ pub fn applyAtomicBatch(
             .exercise_catalog = snapshot.exercise_catalog,
         },
         .applied_commands = @intCast(commands.len),
+        .outcomes = workspace.outcomes[0..commands.len],
     } };
 }
 

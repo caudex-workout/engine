@@ -119,6 +119,23 @@ test "canonical snapshots preserve exact metrics and replay receipts" {
     });
     try std.testing.expectEqual(@as(i64, 18500), typed.workouts[0].exercises[0].sets[0].target_metrics[0].value.value.mantissa);
     try std.testing.expectEqual(tracking.CommandDisposition.applied, typed.start_receipts[0].accepted.disposition);
+
+    var wire_workouts: [1]protocol.TrackedWorkout = undefined;
+    var wire_receipts: [1]protocol.StartReceipt = undefined;
+    var wire_exercises: [1]protocol.ExerciseMembership = undefined;
+    var wire_sets: [1]protocol.TrackedSet = undefined;
+    var wire_metrics: [1]@import("caudex").canonical.Metric = undefined;
+    var amounts: [1][64]u8 = undefined;
+    const round_trip = try protocol.snapshotFromDomain(typed, .{
+        .workouts = &wire_workouts,
+        .receipts = &wire_receipts,
+        .exercises = &wire_exercises,
+        .sets = &wire_sets,
+        .metrics = &wire_metrics,
+        .amountBytes = &amounts,
+    });
+    try std.testing.expectEqualStrings("185.00", round_trip.workouts[0].exercises[0].sets[0].targetMetrics[0].value.amount);
+    try std.testing.expectEqualStrings("start-1", round_trip.startReceipts[0].command.metadata.commandId);
 }
 
 test "canonical atomic batch executes through the typed reducer" {
@@ -147,10 +164,11 @@ test "canonical atomic batch executes through the typed reducer" {
     var exercises: [2]tracking.ExerciseMembership = undefined;
     var sets: [2]tracking.TrackedSet = undefined;
     var issues: [commands.len]tracking.Issue = undefined;
+    var outcomes: [commands.len]tracking.AcceptedCommand = undefined;
     const result = try tracking.applyAtomicBatch(
         .{ .exercise_catalog = &.{.{ .exercise_id = .{ .bytes = "squat" }, .availability = .active }} },
         converted,
-        .{ .workouts = &workouts, .start_receipts = &receipts, .exercises = &exercises, .sets = &sets, .issues = &issues },
+        .{ .workouts = &workouts, .start_receipts = &receipts, .exercises = &exercises, .sets = &sets, .issues = &issues, .outcomes = &outcomes },
     );
     try std.testing.expectEqual(@as(u64, 2), result.accepted.snapshot.workouts[0].revision);
 }

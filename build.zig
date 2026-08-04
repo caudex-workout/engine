@@ -130,6 +130,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "caudex_tracking_protocol", .module = tracking_protocol_module },
                 .{ .name = "caudex_tracking", .module = tracking_module },
+                .{ .name = "caudex", .module = module },
             },
         }),
     });
