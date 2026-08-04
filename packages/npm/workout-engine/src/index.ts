@@ -1,5 +1,6 @@
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
+export type JsonObject = { [key: string]: JsonValue };
 
 export interface Measurement {
   amount: string;
@@ -229,6 +230,96 @@ export interface EvaluationResult {
   metadata: ResultMetadata;
 }
 
+export type TrackingWorkoutStatus = "active" | "completed" | "cancelled";
+export type TrackingSetStatus = "open" | "completed" | "partial" | "failed" | "skipped";
+export type TrackingAvailability = "active" | "archived";
+
+export interface TrackingIssue {
+  code: string;
+  category: "validation" | "not_found" | "conflict";
+  severity: "warning" | "error";
+  path?: string;
+  message: string;
+  relatedIds?: string[];
+}
+
+export interface TrackedSet {
+  id: string;
+  kind: string;
+  targetMetrics?: Metric[];
+  actualMetrics?: Metric[];
+  status: TrackingSetStatus;
+  recordedAt?: string;
+}
+
+export interface ExerciseMembership {
+  id: string;
+  exerciseId: string;
+  sets?: TrackedSet[];
+}
+
+export interface TrackedWorkout {
+  id: string;
+  scope: { hostScopeKey: string; athleteId?: string };
+  revision: number;
+  status: TrackingWorkoutStatus;
+  startedAt: string;
+  completedAt?: string;
+  exercises?: ExerciseMembership[];
+  origin?: "manual" | "template" | "recommendation";
+  provenance?: JsonValue;
+  prescription?: JsonValue[];
+}
+
+export interface TrackingSnapshot {
+  workouts?: TrackedWorkout[];
+  startReceipts?: JsonValue[];
+  exerciseCatalog?: Array<{ exerciseId: string; availability: TrackingAvailability }>;
+}
+
+export type TrackingCommand =
+  | { startWorkout: JsonObject }
+  | { addExercise: JsonObject }
+  | { removeExercise: JsonObject }
+  | { reorderExercise: JsonObject }
+  | { addSet: JsonObject }
+  | { completeSet: JsonObject }
+  | { skipSet: JsonObject }
+  | { reopenSet: JsonObject }
+  | { removeSet: JsonObject }
+  | { reorderSet: JsonObject }
+  | { completeWorkout: JsonObject };
+
+export interface TrackingCommandRequest {
+  schemaVersion: 1;
+  snapshot: TrackingSnapshot;
+  command: TrackingCommand;
+}
+
+export interface TrackingBatchRequest {
+  schemaVersion: 1;
+  snapshot: TrackingSnapshot;
+  commands: TrackingCommand[];
+}
+
+export type TrackingCommandOutcome =
+  | { accepted: { commandId: string; disposition: "applied" | "replayed"; workout: TrackedWorkout; warnings?: TrackingIssue[] } }
+  | { rejected: { commandId: string; issues: TrackingIssue[] } };
+
+export interface TrackingCommandResult {
+  schemaVersion: 1;
+  outcome: TrackingCommandOutcome;
+  snapshot: TrackingSnapshot;
+}
+
+export interface TrackingBatchResult {
+  schemaVersion: 1;
+  applied: boolean;
+  outcomes: TrackingCommandOutcome[];
+  snapshot: TrackingSnapshot;
+  issues?: TrackingIssue[];
+}
+
 export type InitializationErrorCode =
   | "wasm_load_failed"
   | "wasm_compile_failed"
@@ -267,6 +358,8 @@ export interface CreateCaudexOptions {
 export interface Caudex {
   recommendSession(request: RecommendationRequest): RecommendationResult;
   evaluatePerformance(request: EvaluationRequest): EvaluationResult;
+  applyTrackingCommand(request: TrackingCommandRequest): TrackingCommandResult;
+  applyTrackingBatch(request: TrackingBatchRequest): TrackingBatchResult;
   dispose(): void;
 }
 
@@ -411,12 +504,10 @@ function requireExports(raw: WebAssembly.Exports): WasmExports {
 
 function createFacade(exports: WasmExports, runtime: number): Caudex {
   let disposed = false;
-  const execute = <
-    Request extends RecommendationRequest | EvaluationRequest,
-    Result extends RecommendationResult | EvaluationResult,
-  >(
+  const execute = <Request, Result>(
     request: Request,
-    operation: "recommend" | "evaluate",
+    operation: "recommend" | "evaluate" | "applyTrackingCommand" | "applyTrackingBatch",
+    programmingResult: boolean,
   ): Result => {
     if (disposed) {
       throw new CaudexRuntimeError("The Caudex runtime has been disposed.");
@@ -425,11 +516,12 @@ function createFacade(exports: WasmExports, runtime: number): Caudex {
     try {
       requestBytes = new TextEncoder().encode(JSON.stringify({ schemaVersion: 1, operation, payload: request }));
     } catch {
-      return invalidResult<Result>(
-        request,
+      if (programmingResult) return invalidResult(
+        request as RecommendationRequest | EvaluationRequest,
         "protocol.invalid_request",
         "The request is not JSON serializable.",
-      );
+      ) as Result;
+      throw new CaudexRuntimeError("The tracking request is not JSON serializable.", STATUS_INVALID_REQUEST);
     }
 
     const requestPointer = exports.caudex_wasm_alloc(requestBytes.length);
@@ -457,7 +549,11 @@ function createFacade(exports: WasmExports, runtime: number): Caudex {
         requiredPointer,
       );
       if (sizingStatus !== STATUS_INSUFFICIENT_OUTPUT) {
-        return statusResult<Result>(request, sizingStatus);
+        if (programmingResult) return statusResult(
+          request as RecommendationRequest | EvaluationRequest,
+          sizingStatus,
+        ) as Result;
+        throw new CaudexRuntimeError("The canonical tracking request was rejected by the runtime boundary.", sizingStatus);
       }
       const resultLength = new DataView(exports.memory.buffer).getUint32(requiredPointer, true);
       const resultPointer = exports.caudex_wasm_alloc(resultLength);
@@ -465,7 +561,11 @@ function createFacade(exports: WasmExports, runtime: number): Caudex {
       const status = exports.caudex_runtime_execute(runtime, requestPointer, requestBytes.length, resultPointer, resultLength, requiredPointer);
       if (status !== 0) {
         exports.caudex_wasm_free(resultPointer, resultLength);
-        return statusResult<Result>(request, status);
+        if (programmingResult) return statusResult(
+          request as RecommendationRequest | EvaluationRequest,
+          status,
+        ) as Result;
+        throw new CaudexRuntimeError("The canonical tracking request was rejected by the runtime boundary.", status);
       }
       const resultBytes = new Uint8Array(
         exports.memory.buffer,
@@ -492,13 +592,21 @@ function createFacade(exports: WasmExports, runtime: number): Caudex {
       return execute<RecommendationRequest, RecommendationResult>(
         request,
         "recommend",
+        true,
       );
     },
     evaluatePerformance(request) {
       return execute<EvaluationRequest, EvaluationResult>(
         request,
         "evaluate",
+        true,
       );
+    },
+    applyTrackingCommand(request) {
+      return execute<TrackingCommandRequest, TrackingCommandResult>(request, "applyTrackingCommand", false);
+    },
+    applyTrackingBatch(request) {
+      return execute<TrackingBatchRequest, TrackingBatchResult>(request, "applyTrackingBatch", false);
     },
     dispose() {
       if (!disposed) {

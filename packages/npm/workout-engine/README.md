@@ -43,10 +43,13 @@ missing exports, and runtime creation failures throw
 `CaudexInitializationError` with a typed `code`. Failures after successful
 initialization that prevent safe execution throw `CaudexRuntimeError`.
 
-The public `Caudex` value exposes `recommendSession()`,
-`evaluatePerformance()`, and `dispose()`. Linear-memory addresses, allocation
-functions, result descriptors, and runtime handles remain private to the
-loader.
+The deterministic low-level `Caudex` value exposes `recommendSession()`,
+`evaluatePerformance()`, `applyTrackingCommand()`, `applyTrackingBatch()`, and
+`dispose()`. Tracking calls require the complete current snapshot plus explicit
+command IDs, revisions, and timestamps. Accepted and rejected command results
+both return the appropriate resulting snapshot, while transport failures throw
+`CaudexRuntimeError`. Linear-memory addresses, allocation functions, result
+descriptors, and runtime handles remain private to the loader.
 
 The v0.1 npm evaluation boundary supports double progression. Requests for
 other methodology implementations return the same structured unsupported

@@ -1,5 +1,6 @@
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
+export type JsonObject = { [key: string]: JsonValue };
 
 export interface Measurement {
   amount: string;
@@ -205,6 +206,67 @@ export interface EvaluationResult {
   metadata: ResultMetadata;
 }
 
+export type TrackingWorkoutStatus = "active" | "completed" | "cancelled";
+export type TrackingSetStatus = "open" | "completed" | "partial" | "failed" | "skipped";
+export type TrackingAvailability = "active" | "archived";
+export interface TrackingIssue {
+  code: string;
+  category: "validation" | "not_found" | "conflict";
+  severity: "warning" | "error";
+  path?: string;
+  message: string;
+  relatedIds?: string[];
+}
+export interface TrackedSet {
+  id: string;
+  kind: string;
+  targetMetrics?: Metric[];
+  actualMetrics?: Metric[];
+  status: TrackingSetStatus;
+  recordedAt?: string;
+}
+export interface ExerciseMembership {
+  id: string;
+  exerciseId: string;
+  sets?: TrackedSet[];
+}
+export interface TrackedWorkout {
+  id: string;
+  scope: { hostScopeKey: string; athleteId?: string };
+  revision: number;
+  status: TrackingWorkoutStatus;
+  startedAt: string;
+  completedAt?: string;
+  exercises?: ExerciseMembership[];
+  origin?: "manual" | "template" | "recommendation";
+  provenance?: JsonValue;
+  prescription?: JsonValue[];
+}
+export interface TrackingSnapshot {
+  workouts?: TrackedWorkout[];
+  startReceipts?: JsonValue[];
+  exerciseCatalog?: Array<{ exerciseId: string; availability: TrackingAvailability }>;
+}
+export type TrackingCommand =
+  | { startWorkout: JsonObject }
+  | { addExercise: JsonObject }
+  | { removeExercise: JsonObject }
+  | { reorderExercise: JsonObject }
+  | { addSet: JsonObject }
+  | { completeSet: JsonObject }
+  | { skipSet: JsonObject }
+  | { reopenSet: JsonObject }
+  | { removeSet: JsonObject }
+  | { reorderSet: JsonObject }
+  | { completeWorkout: JsonObject };
+export interface TrackingCommandRequest { schemaVersion: 1; snapshot: TrackingSnapshot; command: TrackingCommand }
+export interface TrackingBatchRequest { schemaVersion: 1; snapshot: TrackingSnapshot; commands: TrackingCommand[] }
+export type TrackingCommandOutcome =
+  | { accepted: { commandId: string; disposition: "applied" | "replayed"; workout: TrackedWorkout; warnings?: TrackingIssue[] } }
+  | { rejected: { commandId: string; issues: TrackingIssue[] } };
+export interface TrackingCommandResult { schemaVersion: 1; outcome: TrackingCommandOutcome; snapshot: TrackingSnapshot }
+export interface TrackingBatchResult { schemaVersion: 1; applied: boolean; outcomes: TrackingCommandOutcome[]; snapshot: TrackingSnapshot; issues?: TrackingIssue[] }
+
 export type InitializationErrorCode =
   | "wasm_load_failed"
   | "wasm_compile_failed"
@@ -232,6 +294,8 @@ export interface CreateCaudexOptions {
 export interface Caudex {
   recommendSession(request: RecommendationRequest): RecommendationResult;
   evaluatePerformance(request: EvaluationRequest): EvaluationResult;
+  applyTrackingCommand(request: TrackingCommandRequest): TrackingCommandResult;
+  applyTrackingBatch(request: TrackingBatchRequest): TrackingBatchResult;
   dispose(): void;
 }
 

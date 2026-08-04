@@ -125,6 +125,9 @@ test "command conversion preserves exact target metrics and explicit anchors" {
     const round_trip = try protocol.commandFromDomain(typed, .{ .metrics = &wire_metrics, .amountBytes = &amounts });
     try std.testing.expectEqualStrings("185.00", round_trip.addSet.targetMetrics[0].value.amount);
     try std.testing.expectEqual(protocol.Anchor.end, round_trip.addSet.anchor);
+    var encoded_storage: [1024]u8 = undefined;
+    const encoded = try protocol.encode(round_trip, &encoded_storage);
+    try std.testing.expect(std.mem.indexOf(u8, encoded, "\"anchor\":{\"end\":{}}") != null);
 }
 
 test "canonical snapshots preserve exact metrics and replay receipts" {
@@ -168,6 +171,7 @@ test "canonical snapshots preserve exact metrics and replay receipts" {
     const snapshot: protocol.TrackingSnapshot = .{
         .workouts = &.{workout},
         .startReceipts = &.{.{ .command = start, .disposition = .applied, .workout = workout }},
+        .exerciseCatalog = &.{.{ .exerciseId = "squat", .availability = .active }},
     };
     var workouts: [1]tracking.Workout = undefined;
     var receipts: [1]tracking.StartReceipt = undefined;
@@ -177,6 +181,7 @@ test "canonical snapshots preserve exact metrics and replay receipts" {
     var typed_prescribed_exercises: [1]tracking.PrescribedExercise = undefined;
     var typed_prescribed_sets: [1]tracking.PrescribedSet = undefined;
     var typed_tags: [1]tracking.Id = undefined;
+    var typed_catalog: [1]tracking.ExerciseCatalogEntry = undefined;
     const typed = try protocol.snapshotToDomain(snapshot, .{
         .workouts = &workouts,
         .receipts = &receipts,
@@ -186,11 +191,13 @@ test "canonical snapshots preserve exact metrics and replay receipts" {
         .prescription_exercises = &typed_prescribed_exercises,
         .prescription_sets = &typed_prescribed_sets,
         .tags = &typed_tags,
+        .catalog = &typed_catalog,
     });
     try std.testing.expectEqual(@as(i64, 18500), typed.workouts[0].exercises[0].sets[0].target_metrics[0].value.value.mantissa);
     try std.testing.expectEqual(tracking.CommandDisposition.applied, typed.start_receipts[0].accepted.disposition);
     try std.testing.expectEqual(tracking.WorkoutOrigin.recommendation, typed.workouts[0].origin);
     try std.testing.expectEqualStrings("result-fingerprint", typed.workouts[0].provenance.?.recommendation.result_fingerprint);
+    try std.testing.expectEqual(tracking.ExerciseAvailability.active, typed.exercise_catalog[0].availability);
 
     var wire_workouts: [1]protocol.TrackedWorkout = undefined;
     var wire_receipts: [1]protocol.StartReceipt = undefined;
@@ -201,6 +208,7 @@ test "canonical snapshots preserve exact metrics and replay receipts" {
     var wire_prescribed_exercises: [1]protocol.PrescribedExercise = undefined;
     var wire_prescribed_sets: [1]protocol.PrescribedSet = undefined;
     var wire_tags: [1][]const u8 = undefined;
+    var wire_catalog: [1]protocol.ExerciseCatalogEntry = undefined;
     const round_trip = try protocol.snapshotFromDomain(typed, .{
         .workouts = &wire_workouts,
         .receipts = &wire_receipts,
@@ -211,11 +219,13 @@ test "canonical snapshots preserve exact metrics and replay receipts" {
         .prescription_exercises = &wire_prescribed_exercises,
         .prescription_sets = &wire_prescribed_sets,
         .tags = &wire_tags,
+        .catalog = &wire_catalog,
     });
     try std.testing.expectEqualStrings("185.00", round_trip.workouts[0].exercises[0].sets[0].targetMetrics[0].value.amount);
     try std.testing.expectEqualStrings("start-1", round_trip.startReceipts[0].command.metadata.commandId);
     try std.testing.expectEqualStrings("accepted-1", round_trip.workouts[0].provenance.?.recommendation.acceptedRecommendationId);
     try std.testing.expectEqualStrings("185.00", round_trip.workouts[0].prescription[0].sets[0].targetMetrics[0].value.amount);
+    try std.testing.expectEqualStrings("squat", round_trip.exerciseCatalog[0].exerciseId);
 }
 
 test "canonical atomic batch executes through the typed reducer" {
@@ -261,6 +271,7 @@ test "canonical atomic batch executes through the typed reducer" {
     var wire_prescribed_exercises: [8]protocol.PrescribedExercise = undefined;
     var wire_prescribed_sets: [8]protocol.PrescribedSet = undefined;
     var wire_tags: [8][]const u8 = undefined;
+    var wire_catalog: [1]protocol.ExerciseCatalogEntry = undefined;
     var wire_outcomes: [commands.len]protocol.CommandOutcome = undefined;
     var wire_accepted: [commands.len]protocol.AcceptedCommand = undefined;
     var wire_rejected: [1]protocol.RejectedCommand = undefined;
@@ -277,6 +288,7 @@ test "canonical atomic batch executes through the typed reducer" {
             .prescription_exercises = &wire_prescribed_exercises,
             .prescription_sets = &wire_prescribed_sets,
             .tags = &wire_tags,
+            .catalog = &wire_catalog,
         },
         .outcomes = &wire_outcomes,
         .accepted = &wire_accepted,
@@ -288,6 +300,7 @@ test "canonical atomic batch executes through the typed reducer" {
     try std.testing.expectEqual(@as(usize, 2), wire_result.outcomes.len);
     try std.testing.expectEqualStrings("add-exercise-1", wire_result.outcomes[1].accepted.commandId);
     try std.testing.expectEqual(@as(u64, 2), wire_result.snapshot.workouts[0].revision);
+    try std.testing.expectEqualStrings("squat", wire_result.snapshot.exerciseCatalog[0].exerciseId);
     var encoded_a: [8192]u8 = undefined;
     var encoded_b: [8192]u8 = undefined;
     const encoded = try protocol.encode(wire_result, &encoded_a);

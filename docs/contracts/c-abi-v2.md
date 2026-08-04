@@ -33,10 +33,11 @@ The request is a canonical execution envelope:
 {"schemaVersion":1,"operation":"recommend","payload":{}}
 ```
 
-The operation discriminator is explicit. The current checkpoint routes
-`recommend` and `evaluate` through this single entry point; tracking, workflow,
-discovery, and portable-data operations will extend the same versioned registry
-rather than add methodology-specific C functions.
+The operation discriminator is explicit. The current dispatcher routes
+`recommend`, `evaluate`, `applyTrackingCommand`, and `applyTrackingBatch`
+through this single entry point. Workflow, discovery, and portable-data
+operations will extend the same versioned registry rather than add
+methodology-specific C functions.
 
 Call with null output and zero capacity. A valid request returns
 `CAUDEX_STATUS_INSUFFICIENT_OUTPUT` and the exact required byte count. Allocate

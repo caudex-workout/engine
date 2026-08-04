@@ -5,6 +5,8 @@ import {
   CaudexRuntimeError,
   createCaudex,
   type RecommendationRequest,
+  type TrackingBatchRequest,
+  type TrackingCommandRequest,
 } from "../packages/npm/workout-engine/src/index.ts";
 
 const [wasmPath, fixturePath] = process.argv.slice(2);
@@ -28,6 +30,46 @@ if (
 }
 if ("memory" in caudex || "alloc" in caudex || "execute" in caudex) {
   throw new Error("the public facade exposes raw WebAssembly ownership");
+}
+
+const startRequest: TrackingCommandRequest = {
+  schemaVersion: 1,
+  snapshot: { workouts: [], startReceipts: [], exerciseCatalog: [] },
+  command: { startWorkout: {
+    metadata: { commandId: "start-1", occurredAt: "2026-08-04T12:00:00Z" },
+    scope: { hostScopeKey: "scope-1" },
+    workoutId: "workout-1",
+    startedAt: "2026-08-04T12:00:00Z",
+  } },
+};
+const started = caudex.applyTrackingCommand(startRequest);
+if (!("accepted" in started.outcome) || started.outcome.accepted.workout.revision !== 1 || started.snapshot.startReceipts?.length !== 1) {
+  throw new Error("tracking command did not return its resulting replay-bearing snapshot");
+}
+const replayed = caudex.applyTrackingCommand({ ...startRequest, snapshot: started.snapshot });
+if (!("accepted" in replayed.outcome) || replayed.outcome.accepted.disposition !== "replayed") {
+  throw new Error("tracking command retry was not idempotent");
+}
+
+const batchRequest: TrackingBatchRequest = {
+  schemaVersion: 1,
+  snapshot: { workouts: [], startReceipts: [], exerciseCatalog: [{ exerciseId: "squat", availability: "active" }] },
+  commands: [
+    startRequest.command,
+    { addExercise: {
+      metadata: { commandId: "add-exercise-1", occurredAt: "2026-08-04T12:01:00Z" },
+      scope: { hostScopeKey: "scope-1" },
+      workoutId: "workout-1",
+      expectedRevision: 1,
+      membershipId: "membership-1",
+      exerciseId: "squat",
+      anchor: { end: {} },
+    } },
+  ],
+};
+const batch = caudex.applyTrackingBatch(batchRequest);
+if (!batch.applied || batch.snapshot.workouts?.[0]?.revision !== 2) {
+  throw new Error("atomic tracking batch did not return the final snapshot");
 }
 
 const invalid = caudex.recommendSession({

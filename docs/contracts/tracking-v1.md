@@ -21,10 +21,16 @@ Schema version 1 rejects unknown versions. The JSON schemas are under
 
 ## Determinism and ownership
 
-Snapshots contain workouts and start-command replay receipts. IDs, timestamps,
+Snapshots contain workouts, start-command replay receipts, and the explicit
+active/archived exercise-catalog projection needed to validate membership
+changes. IDs, timestamps,
 revisions, command IDs, ordering, target values, actual values, and units are
 explicit. Decimal amounts are canonical base-10 strings and never pass through
 floating point.
+
+Every single-command result includes the resulting snapshot. A rejection
+returns the unchanged snapshot; an accepted start includes its replay receipt,
+so the next deterministic call can retry the same command idempotently.
 
 Recommendation/template origin, provenance, and the immutable original
 prescription are also snapshot data. Live edits never overwrite prescription

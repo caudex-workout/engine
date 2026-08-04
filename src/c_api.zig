@@ -1,15 +1,19 @@
 const std = @import("std");
-const canonical = @import("canonical.zig");
-const canonical_json = @import("canonical_json.zig");
-const double_progression = @import("double_progression.zig");
-const engine = @import("engine.zig");
-const methodology = @import("methodology.zig");
-const primitives = @import("primitives.zig");
-const rpe_top_set_backoff = @import("rpe_top_set_backoff.zig");
-const training = @import("training.zig");
+const caudex = @import("caudex");
+const canonical = caudex.canonical;
+const canonical_json = caudex.canonical_json;
+const double_progression = caudex.double_progression;
+const engine = caudex.engine;
+const methodology = caudex.methodology;
+const primitives = caudex.primitives;
+const rpe_top_set_backoff = caudex.rpe_top_set_backoff;
+const training = caudex.training;
+const tracking = @import("caudex_tracking");
+const tracking_protocol = @import("caudex_tracking_protocol");
 
 pub const abi_version: u32 = 2;
 const max_result_bytes: usize = 1024 * 1024;
+const tracking_workspace_items: usize = 4096;
 
 pub const Status = enum(c_int) {
     ok = 0,
@@ -94,6 +98,8 @@ const ExecuteError = canonical_json.DecodeError || engine.RecommendError ||
 const Operation = enum {
     recommend,
     evaluate,
+    applyTrackingCommand,
+    applyTrackingBatch,
 };
 
 const ExecutionRequest = struct {
@@ -113,6 +119,117 @@ fn executeDispatch(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) Exec
     return switch (document.value.operation) {
         .recommend => executeRecommendation(runtime, writer.buffered(), out),
         .evaluate => executeEvaluation(runtime, writer.buffered(), out),
+        .applyTrackingCommand => executeTrackingCommand(runtime, writer.buffered(), out),
+        .applyTrackingBatch => executeTrackingBatch(runtime, writer.buffered(), out),
+    };
+}
+
+fn trackingSnapshotStorage(allocator: std.mem.Allocator) error{OutOfMemory}!tracking_protocol.SnapshotConversionStorage {
+    return .{
+        .workouts = allocator.alloc(tracking.Workout, tracking_protocol.max_workouts) catch return error.OutOfMemory,
+        .receipts = allocator.alloc(tracking.StartReceipt, tracking_protocol.max_workouts) catch return error.OutOfMemory,
+        .exercises = allocator.alloc(tracking.ExerciseMembership, tracking_workspace_items) catch return error.OutOfMemory,
+        .sets = allocator.alloc(tracking.TrackedSet, tracking_workspace_items) catch return error.OutOfMemory,
+        .metrics = allocator.alloc(tracking.Metric, tracking_workspace_items) catch return error.OutOfMemory,
+        .prescription_exercises = allocator.alloc(tracking.PrescribedExercise, tracking_workspace_items) catch return error.OutOfMemory,
+        .prescription_sets = allocator.alloc(tracking.PrescribedSet, tracking_workspace_items) catch return error.OutOfMemory,
+        .tags = allocator.alloc(tracking.Id, tracking_workspace_items) catch return error.OutOfMemory,
+        .catalog = allocator.alloc(tracking.ExerciseCatalogEntry, tracking_protocol.max_catalog_entries) catch return error.OutOfMemory,
+    };
+}
+
+fn wireResultStorage(allocator: std.mem.Allocator) error{OutOfMemory}!tracking_protocol.BatchResultStorage {
+    return .{
+        .snapshot = .{
+            .workouts = allocator.alloc(tracking_protocol.TrackedWorkout, tracking_protocol.max_workouts + tracking_protocol.max_commands_per_batch) catch return error.OutOfMemory,
+            .receipts = allocator.alloc(tracking_protocol.StartReceipt, tracking_protocol.max_workouts + tracking_protocol.max_commands_per_batch) catch return error.OutOfMemory,
+            .exercises = allocator.alloc(tracking_protocol.ExerciseMembership, tracking_workspace_items) catch return error.OutOfMemory,
+            .sets = allocator.alloc(tracking_protocol.TrackedSet, tracking_workspace_items) catch return error.OutOfMemory,
+            .metrics = allocator.alloc(canonical.Metric, tracking_workspace_items) catch return error.OutOfMemory,
+            .amountBytes = allocator.alloc([64]u8, tracking_workspace_items) catch return error.OutOfMemory,
+            .prescription_exercises = allocator.alloc(tracking_protocol.PrescribedExercise, tracking_workspace_items) catch return error.OutOfMemory,
+            .prescription_sets = allocator.alloc(tracking_protocol.PrescribedSet, tracking_workspace_items) catch return error.OutOfMemory,
+            .tags = allocator.alloc([]const u8, tracking_workspace_items) catch return error.OutOfMemory,
+            .catalog = allocator.alloc(tracking_protocol.ExerciseCatalogEntry, tracking_protocol.max_catalog_entries) catch return error.OutOfMemory,
+        },
+        .outcomes = allocator.alloc(tracking_protocol.CommandOutcome, tracking_protocol.max_commands_per_batch) catch return error.OutOfMemory,
+        .accepted = allocator.alloc(tracking_protocol.AcceptedCommand, tracking_protocol.max_commands_per_batch) catch return error.OutOfMemory,
+        .rejected = allocator.alloc(tracking_protocol.RejectedCommand, 1) catch return error.OutOfMemory,
+        .issues = allocator.alloc(tracking_protocol.Issue, tracking_protocol.max_commands_per_batch) catch return error.OutOfMemory,
+        .relatedIds = allocator.alloc([]const u8, tracking_workspace_items) catch return error.OutOfMemory,
+    };
+}
+
+fn encodeOwned(runtime: *Runtime, value: anytype, out: *OwnedBuffer) ExecuteError!void {
+    const bytes = runtime.allocator().alloc(u8, max_result_bytes) catch return error.OutOfMemory;
+    errdefer runtime.allocator().free(bytes);
+    const encoded = tracking_protocol.encode(value, bytes) catch return error.OutputLimitReached;
+    out.* = .{ .data = bytes.ptr, .len = encoded.len, .capacity = bytes.len };
+}
+
+fn executeTrackingCommand(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) ExecuteError!void {
+    const document = tracking_protocol.decodeCommandRequest(runtime.allocator(), input, .{}) catch |err| return mapTrackingError(err);
+    defer document.deinit();
+    var arena = std.heap.ArenaAllocator.init(runtime.allocator());
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const snapshot = tracking_protocol.snapshotToDomain(document.value.snapshot, try trackingSnapshotStorage(allocator)) catch return error.InvalidRequest;
+    const metric_storage = allocator.alloc(tracking.Metric, tracking_protocol.max_metrics_per_set) catch return error.OutOfMemory;
+    const command = tracking_protocol.commandToDomain(document.value.command, metric_storage) catch return error.InvalidRequest;
+    const batch = tracking.applyAtomicBatch(snapshot, &.{command}, .{
+        .workouts = allocator.alloc(tracking.Workout, tracking_protocol.max_workouts + 1) catch return error.OutOfMemory,
+        .start_receipts = allocator.alloc(tracking.StartReceipt, tracking_protocol.max_workouts + 1) catch return error.OutOfMemory,
+        .exercises = allocator.alloc(tracking.ExerciseMembership, tracking_workspace_items) catch return error.OutOfMemory,
+        .sets = allocator.alloc(tracking.TrackedSet, tracking_workspace_items) catch return error.OutOfMemory,
+        .issues = allocator.alloc(tracking.Issue, 1) catch return error.OutOfMemory,
+        .outcomes = allocator.alloc(tracking.AcceptedCommand, 1) catch return error.OutOfMemory,
+    }) catch return error.InvalidRequest;
+    const result: tracking.CommandResult = switch (batch) {
+        .accepted => |accepted| .{ .accepted = accepted.outcomes[0] },
+        .rejected => |rejected| .{ .rejected = rejected },
+    };
+    const next_snapshot = switch (batch) {
+        .accepted => |accepted| accepted.snapshot,
+        .rejected => snapshot,
+    };
+    const wire = tracking_protocol.commandResultFromDomain(result, next_snapshot, try wireResultStorage(allocator)) catch return error.InvalidRequest;
+    try encodeOwned(runtime, wire, out);
+}
+
+fn executeTrackingBatch(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) ExecuteError!void {
+    const document = tracking_protocol.decodeAtomicBatchRequest(runtime.allocator(), input, .{}) catch |err| return mapTrackingError(err);
+    defer document.deinit();
+    var arena = std.heap.ArenaAllocator.init(runtime.allocator());
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const snapshot = tracking_protocol.snapshotToDomain(document.value.snapshot, try trackingSnapshotStorage(allocator)) catch return error.InvalidRequest;
+    const commands = allocator.alloc(tracking.Command, document.value.commands.len) catch return error.OutOfMemory;
+    const metrics = allocator.alloc(tracking.Metric, tracking_workspace_items) catch return error.OutOfMemory;
+    const converted = tracking_protocol.batchCommandsToDomain(document.value.commands, commands, metrics) catch return error.InvalidRequest;
+    const result = tracking.applyAtomicBatch(snapshot, converted, .{
+        .workouts = allocator.alloc(tracking.Workout, tracking_protocol.max_workouts + tracking_protocol.max_commands_per_batch) catch return error.OutOfMemory,
+        .start_receipts = allocator.alloc(tracking.StartReceipt, tracking_protocol.max_workouts + tracking_protocol.max_commands_per_batch) catch return error.OutOfMemory,
+        .exercises = allocator.alloc(tracking.ExerciseMembership, tracking_workspace_items) catch return error.OutOfMemory,
+        .sets = allocator.alloc(tracking.TrackedSet, tracking_workspace_items) catch return error.OutOfMemory,
+        .issues = allocator.alloc(tracking.Issue, tracking_protocol.max_commands_per_batch) catch return error.OutOfMemory,
+        .outcomes = allocator.alloc(tracking.AcceptedCommand, tracking_protocol.max_commands_per_batch) catch return error.OutOfMemory,
+    }) catch return error.InvalidRequest;
+    const wire = tracking_protocol.batchResultFromDomain(result, snapshot, try wireResultStorage(allocator)) catch return error.InvalidRequest;
+    try encodeOwned(runtime, wire, out);
+}
+
+fn mapTrackingError(err: anyerror) ExecuteError {
+    return switch (err) {
+        error.OutOfMemory => error.OutOfMemory,
+        error.UnsupportedVersion => error.UnsupportedVersion,
+        error.InputTooLarge => error.InputTooLarge,
+        error.InvalidUtf8 => error.InvalidUtf8,
+        error.MalformedJson => error.MalformedJson,
+        error.NestingLimitExceeded => error.NestingLimitExceeded,
+        error.CollectionLimitExceeded => error.CollectionLimitExceeded,
+        error.ValueTooLarge => error.ValueTooLarge,
+        error.InvalidDecimal => error.InvalidDecimal,
+        else => error.InvalidRequest,
     };
 }
 
@@ -863,6 +980,35 @@ test "versioned dispatcher accepts recommendation envelope" {
         &output,
     );
     try std.testing.expect(output.len != 0);
+}
+
+test "versioned dispatcher applies canonical tracking command and batch" {
+    var runtime: Runtime = .{ .debug_allocator = .init };
+    defer _ = runtime.debug_allocator.deinit();
+
+    var command_output: OwnedBuffer = .{};
+    defer if (command_output.data) |data| runtime.allocator().free(data[0..command_output.capacity]);
+    try executeDispatch(&runtime, @embedFile("../fixtures/operations/tracking-command-v1.json"), &command_output);
+    const command_result = try tracking_protocol.decodeCommandResult(
+        std.testing.allocator,
+        command_output.data.?[0..command_output.len],
+        .{},
+    );
+    defer command_result.deinit();
+    try std.testing.expectEqual(@as(u64, 1), command_result.value.outcome.accepted.workout.revision);
+
+    var batch_output: OwnedBuffer = .{};
+    defer if (batch_output.data) |data| runtime.allocator().free(data[0..batch_output.capacity]);
+    try executeDispatch(&runtime, @embedFile("../fixtures/operations/tracking-batch-v1.json"), &batch_output);
+    const batch_result = try tracking_protocol.decodeAtomicBatchResult(
+        std.testing.allocator,
+        batch_output.data.?[0..batch_output.len],
+        .{},
+    );
+    defer batch_result.deinit();
+    try std.testing.expect(batch_result.value.applied);
+    try std.testing.expectEqual(@as(u64, 2), batch_result.value.snapshot.workouts[0].revision);
+    try std.testing.expectEqualStrings("squat", batch_result.value.snapshot.exerciseCatalog[0].exerciseId);
 }
 
 test "C ABI rejects invalid arguments without exposing errors" {

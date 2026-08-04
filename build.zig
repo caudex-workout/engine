@@ -16,17 +16,6 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(library);
 
-    const c_library = b.addLibrary(.{
-        .name = "caudex_c",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/c_api.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-    });
-    c_library.installHeader(b.path("include/caudex.h"), "caudex.h");
-    b.installArtifact(c_library);
-
     const library_tests = b.addTest(.{
         .root_module = module,
     });
@@ -96,12 +85,26 @@ pub fn build(b: *std.Build) void {
             .{ .name = "caudex_tracking", .module = tracking_module },
         },
     });
+    const c_api_module = b.createModule(.{
+        .root_source_file = b.path("src/c_api.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "caudex", .module = module },
+            .{ .name = "caudex_tracking", .module = tracking_module },
+            .{ .name = "caudex_tracking_protocol", .module = tracking_protocol_module },
+        },
+    });
+    const c_library = b.addLibrary(.{ .name = "caudex_c", .root_module = c_api_module });
+    c_library.installHeader(b.path("include/caudex.h"), "caudex.h");
+    b.installArtifact(c_library);
     const tracking_contract_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("tracking_contract_test.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
+                .{ .name = "caudex", .module = module },
                 .{ .name = "caudex_tracking", .module = tracking_module },
             },
         }),
@@ -113,6 +116,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
+                .{ .name = "caudex", .module = module },
                 .{ .name = "caudex_tracking", .module = tracking_module },
             },
         }),
@@ -257,9 +261,16 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("c_api_test.zig"),
             .target = target,
             .optimize = optimize,
+            .imports = &.{
+                .{ .name = "caudex", .module = module },
+                .{ .name = "caudex_tracking", .module = tracking_module },
+                .{ .name = "caudex_tracking_protocol", .module = tracking_protocol_module },
+            },
         }),
     });
     const run_c_api_tests = b.addRunArtifact(c_api_tests);
+    const test_c_api_step = b.step("test-c-api", "Test the native C ABI execution boundary");
+    test_c_api_step.dependOn(&run_c_api_tests.step);
 
     const c_header_test = b.addObject(.{
         .name = "caudex_c_header_test",
@@ -334,6 +345,11 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/wasm_api.zig"),
             .target = wasm_target,
             .optimize = .ReleaseSmall,
+            .imports = &.{
+                .{ .name = "caudex", .module = module },
+                .{ .name = "caudex_tracking", .module = tracking_module },
+                .{ .name = "caudex_tracking_protocol", .module = tracking_protocol_module },
+            },
         }),
     });
     wasm_runtime.entry = .disabled;

@@ -10,9 +10,12 @@ const tracking = @import("caudex_tracking");
 pub const schema_version: u32 = 1;
 pub const max_commands_per_batch: usize = 128;
 pub const max_workouts: usize = 256;
+pub const max_catalog_entries: usize = 4096;
 pub const max_exercises_per_workout: usize = 128;
 pub const max_sets_per_exercise: usize = 256;
 pub const max_metrics_per_set: usize = 32;
+pub const max_issues_per_result: usize = 128;
+pub const max_related_ids_per_issue: usize = 32;
 
 pub const Limits = struct {
     json: caudex.canonical_json.Limits = .{},
@@ -48,6 +51,13 @@ pub const ExerciseMembership = struct {
     id: []const u8,
     exerciseId: []const u8,
     sets: []const TrackedSet = &.{},
+};
+
+pub const ExerciseAvailability = enum { active, archived };
+
+pub const ExerciseCatalogEntry = struct {
+    exerciseId: []const u8,
+    availability: ExerciseAvailability,
 };
 
 pub const WorkoutOrigin = enum { manual, template, recommendation };
@@ -103,6 +113,7 @@ pub const TrackedWorkout = struct {
 pub const TrackingSnapshot = struct {
     workouts: []const TrackedWorkout = &.{},
     startReceipts: []const StartReceipt = &.{},
+    exerciseCatalog: []const ExerciseCatalogEntry = &.{},
 };
 
 /// Standalone, versioned snapshot document for canonical interchange.
@@ -282,6 +293,7 @@ pub const CommandOutcome = union(enum) {
 pub const CommandResult = struct {
     schemaVersion: u32,
     outcome: CommandOutcome,
+    snapshot: TrackingSnapshot,
 };
 
 pub const AtomicBatchResult = struct {
@@ -328,6 +340,8 @@ pub fn decodeCommandResult(allocator: std.mem.Allocator, input: []const u8, limi
     const parsed = try caudex.canonical_json.decodeValue(CommandResult, allocator, input, limits.json);
     errdefer parsed.deinit();
     if (parsed.value.schemaVersion != schema_version) return error.UnsupportedVersion;
+    try validateSnapshotBounds(parsed.value.snapshot);
+    try validateOutcomeBounds(parsed.value.outcome);
     return parsed;
 }
 
@@ -337,7 +351,25 @@ pub fn decodeAtomicBatchResult(allocator: std.mem.Allocator, input: []const u8, 
     if (parsed.value.schemaVersion != schema_version) return error.UnsupportedVersion;
     if (parsed.value.outcomes.len > limits.max_commands) return error.BatchLimitExceeded;
     try validateSnapshotBounds(parsed.value.snapshot);
+    for (parsed.value.outcomes) |outcome| try validateOutcomeBounds(outcome);
+    try validateIssuesBounds(parsed.value.issues);
     return parsed;
+}
+
+fn validateOutcomeBounds(outcome: CommandOutcome) error{SnapshotLimitExceeded}!void {
+    switch (outcome) {
+        .accepted => |accepted| {
+            try validateSnapshotBounds(.{ .workouts = &.{accepted.workout} });
+            try validateIssuesBounds(accepted.warnings);
+        },
+        .rejected => |rejected| try validateIssuesBounds(rejected.issues),
+    }
+}
+
+fn validateIssuesBounds(issues: []const Issue) error{SnapshotLimitExceeded}!void {
+    if (issues.len > max_issues_per_result) return error.SnapshotLimitExceeded;
+    for (issues) |issue| if (issue.relatedIds.len > max_related_ids_per_issue)
+        return error.SnapshotLimitExceeded;
 }
 
 pub fn encode(value: anytype, output: []u8) caudex.canonical_json.EncodeError![]const u8 {
@@ -347,6 +379,7 @@ pub fn encode(value: anytype, output: []u8) caudex.canonical_json.EncodeError![]
 fn validateSnapshotBounds(snapshot: TrackingSnapshot) error{SnapshotLimitExceeded}!void {
     if (snapshot.workouts.len > max_workouts) return error.SnapshotLimitExceeded;
     if (snapshot.startReceipts.len > max_workouts) return error.SnapshotLimitExceeded;
+    if (snapshot.exerciseCatalog.len > max_catalog_entries) return error.SnapshotLimitExceeded;
     for (snapshot.workouts) |workout| {
         if (workout.exercises.len > max_exercises_per_workout) return error.SnapshotLimitExceeded;
         if (workout.prescription.len > max_exercises_per_workout) return error.SnapshotLimitExceeded;
@@ -392,6 +425,7 @@ pub const SnapshotConversionStorage = struct {
     prescription_exercises: []tracking.PrescribedExercise,
     prescription_sets: []tracking.PrescribedSet,
     tags: []tracking.Id,
+    catalog: []tracking.ExerciseCatalogEntry = &.{},
 };
 
 pub const WireSnapshotStorage = struct {
@@ -404,6 +438,7 @@ pub const WireSnapshotStorage = struct {
     prescription_exercises: []PrescribedExercise,
     prescription_sets: []PrescribedSet,
     tags: [][]const u8,
+    catalog: []ExerciseCatalogEntry = &.{},
 };
 
 const WireOffsets = struct {
@@ -424,6 +459,7 @@ fn snapshotFromDomainAt(value: tracking.LifecycleSnapshot, storage: WireSnapshot
     if (value.workouts.len > max_workouts) return error.SnapshotLimitExceeded;
     if (storage.workouts.len < value.workouts.len) return error.WorkoutBufferTooSmall;
     if (storage.receipts.len < value.start_receipts.len) return error.ReceiptBufferTooSmall;
+    if (storage.catalog.len < value.exercise_catalog.len) return error.ExerciseBufferTooSmall;
     for (value.workouts, 0..) |workout, index| {
         storage.workouts[index] = try workoutFromDomain(
             workout,
@@ -445,9 +481,16 @@ fn snapshotFromDomainAt(value: tracking.LifecycleSnapshot, storage: WireSnapshot
             .workout = storage.workouts[workout_index],
         };
     }
+    for (value.exercise_catalog, 0..) |entry, index| {
+        storage.catalog[index] = .{
+            .exerciseId = entry.exercise_id.bytes,
+            .availability = availabilityFromDomain(entry.availability),
+        };
+    }
     return .{
         .workouts = storage.workouts[0..value.workouts.len],
         .startReceipts = storage.receipts[0..value.start_receipts.len],
+        .exerciseCatalog = storage.catalog[0..value.exercise_catalog.len],
     };
 }
 
@@ -533,7 +576,7 @@ pub fn batchResultFromDomain(result: tracking.BatchResult, original: tracking.Li
     };
 }
 
-pub fn commandResultFromDomain(result: tracking.CommandResult, storage: BatchResultStorage) ResultConversionError!CommandResult {
+pub fn commandResultFromDomain(result: tracking.CommandResult, snapshot: tracking.LifecycleSnapshot, storage: BatchResultStorage) ResultConversionError!CommandResult {
     var offsets: WireOffsets = .{};
     var issue_offset: usize = 0;
     var related_offset: usize = 0;
@@ -568,7 +611,11 @@ pub fn commandResultFromDomain(result: tracking.CommandResult, storage: BatchRes
             storage.outcomes[0] = .{ .rejected = storage.rejected[0] };
         },
     }
-    return .{ .schemaVersion = schema_version, .outcome = storage.outcomes[0] };
+    return .{
+        .schemaVersion = schema_version,
+        .outcome = storage.outcomes[0],
+        .snapshot = try snapshotFromDomainAt(snapshot, storage.snapshot, &offsets),
+    };
 }
 
 fn issuesFromDomain(values: []const tracking.Issue, storage: BatchResultStorage, issue_offset: *usize, related_offset: *usize) ResultConversionError![]const Issue {
@@ -696,6 +743,7 @@ pub fn snapshotToDomain(value: TrackingSnapshot, storage: SnapshotConversionStor
     try validateSnapshotBounds(value);
     if (storage.workouts.len < value.workouts.len) return error.WorkoutBufferTooSmall;
     if (storage.receipts.len < value.startReceipts.len) return error.ReceiptBufferTooSmall;
+    if (storage.catalog.len < value.exerciseCatalog.len) return error.ExerciseBufferTooSmall;
     var exercise_offset: usize = 0;
     var set_offset: usize = 0;
     var metric_offset: usize = 0;
@@ -727,9 +775,16 @@ pub fn snapshotToDomain(value: TrackingSnapshot, storage: SnapshotConversionStor
             },
         };
     }
+    for (value.exerciseCatalog, 0..) |entry, index| {
+        storage.catalog[index] = .{
+            .exercise_id = try tracking.Id.parse(entry.exerciseId),
+            .availability = availabilityToDomain(entry.availability),
+        };
+    }
     return .{
         .workouts = storage.workouts[0..value.workouts.len],
         .start_receipts = storage.receipts[0..value.startReceipts.len],
+        .exercise_catalog = storage.catalog[0..value.exerciseCatalog.len],
     };
 }
 
@@ -1222,6 +1277,20 @@ pub fn dispositionToDomain(value: CommandDisposition) tracking.CommandDispositio
     };
 }
 
+pub fn availabilityFromDomain(value: tracking.ExerciseAvailability) ExerciseAvailability {
+    return switch (value) {
+        .active => .active,
+        .archived => .archived,
+    };
+}
+
+pub fn availabilityToDomain(value: ExerciseAvailability) tracking.ExerciseAvailability {
+    return switch (value) {
+        .active => .active,
+        .archived => .archived,
+    };
+}
+
 fn originFromDomain(value: tracking.WorkoutOrigin) WorkoutOrigin {
     return switch (value) {
         .manual => .manual,
@@ -1282,5 +1351,8 @@ test "independent enums map explicitly in both directions" {
     }
     inline for (std.meta.tags(SetStatus)) |status| {
         try std.testing.expectEqual(status, setStatusFromDomain(setStatusToDomain(status)));
+    }
+    inline for (std.meta.tags(ExerciseAvailability)) |availability| {
+        try std.testing.expectEqual(availability, availabilityFromDomain(availabilityToDomain(availability)));
     }
 }

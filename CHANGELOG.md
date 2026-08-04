@@ -24,6 +24,8 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   size reporting; the pre-release v1 `caudex_buffer` disposal API was removed.
 - Recommendation and evaluation now use one versioned, explicitly
   discriminated C/WASM execution envelope.
+- Canonical tracking snapshots now carry their explicit catalog projection and
+  single-command results carry the resulting replay-bearing snapshot.
 
 ## [0.1.0] - 2026-07-26
 

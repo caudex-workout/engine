@@ -72,6 +72,15 @@
       },
       "additionalProperties": false
     },
+    "catalogEntry": {
+      "type": "object",
+      "required": ["exerciseId", "availability"],
+      "properties": {
+        "exerciseId": { "$ref": "#/$defs/id" },
+        "availability": { "enum": ["active", "archived"] }
+      },
+      "additionalProperties": false
+    },
     "workout": {
       "type": "object",
       "required": ["id", "scope", "revision", "status", "startedAt"],
@@ -143,7 +152,8 @@
       "type": "object",
       "properties": {
         "workouts": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/workout" } },
-        "startReceipts": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/startReceipt" } }
+        "startReceipts": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/startReceipt" } },
+        "exerciseCatalog": { "type": "array", "maxItems": 4096, "items": { "$ref": "#/$defs/catalogEntry" } }
       },
       "additionalProperties": false
     },
@@ -159,7 +169,8 @@
     },
     "anchor": {
       "oneOf": [
-        { "type": "string", "enum": ["beginning", "end"] },
+        { "type": "object", "required": ["beginning"], "properties": { "beginning": { "type": "object", "maxProperties": 0 } }, "additionalProperties": false },
+        { "type": "object", "required": ["end"], "properties": { "end": { "type": "object", "maxProperties": 0 } }, "additionalProperties": false },
         { "type": "object", "required": ["before"], "properties": { "before": { "$ref": "#/$defs/id" } }, "additionalProperties": false },
         { "type": "object", "required": ["after"], "properties": { "after": { "$ref": "#/$defs/id" } }, "additionalProperties": false }
       ]
@@ -290,10 +301,11 @@
     },
     "commandResult": {
       "type": "object",
-      "required": ["schemaVersion", "outcome"],
+      "required": ["schemaVersion", "outcome", "snapshot"],
       "properties": {
         "schemaVersion": { "const": 1 },
-        "outcome": { "$ref": "#/$defs/outcome" }
+        "outcome": { "$ref": "#/$defs/outcome" },
+        "snapshot": { "$ref": "#/$defs/snapshot" }
       },
       "additionalProperties": false
     },
