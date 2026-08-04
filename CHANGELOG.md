@@ -38,6 +38,9 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   revision-aware workout templates, and workflow recovery records. Databases at
   supported schema versions migrate forward automatically; newer schemas remain
   rejected.
+- The npm workflow facade can assemble recommendation/evaluation requests from
+  optional persistence capabilities and journal resumable recommendation-start
+  and workout-completion workflows with explicit idempotency keys.
 
 ## [0.1.0] - 2026-07-26
 

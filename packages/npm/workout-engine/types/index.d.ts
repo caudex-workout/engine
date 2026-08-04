@@ -321,6 +321,24 @@ export interface ActiveWorkoutPersistence {
 export interface MethodologyStateAcceptancePersistence {
   compareAndSetState(change: { key: { hostScopeKey: string; methodologyId: string }; expectedRevision: string | null; methodologyVersion: string; nextState: MethodologyState; updatedAt: string }): Promise<unknown>;
 }
+export interface OrchestrationPersistence {
+  loadCatalog(input: { hostScopeKey: string; asOf: string }): Promise<readonly Exercise[]>;
+  loadHistory(input: { hostScopeKey: string; through: string }): Promise<{ workouts: readonly CompletedWorkout[]; summaries?: JsonValue }>;
+  loadState(input: { hostScopeKey: string; methodologyId: string }): Promise<{ state: MethodologyState; revision: string } | null>;
+  appendAcceptedRecommendation(record: { id: string; hostScopeKey: string; acceptedAt: string; result: RecommendationResult }): Promise<void>;
+  appendCompletedWorkout(hostScopeKey: string, workout: CompletedWorkout): Promise<void>;
+  loadWorkflowRecovery(hostScopeKey: string, workflowId: string): Promise<WorkflowRecoveryRecord | null>;
+  saveWorkflowRecovery(record: WorkflowRecoveryRecord): Promise<void>;
+}
+export interface WorkflowRecoveryRecord {
+  hostScopeKey: string;
+  workflowId: string;
+  kind: string;
+  status: "pending" | "completed";
+  idempotencyKey: string;
+  payload: JsonValue;
+  updatedAt: string;
+}
 
 export interface CreateCaudexOptions {
   wasm?: WebAssembly.Module | BufferSource;
@@ -328,7 +346,7 @@ export interface CreateCaudexOptions {
   fetch?: typeof globalThis.fetch;
   clock?: ClockProvider;
   ids?: IdProvider;
-  persistence?: Partial<ActiveWorkoutPersistence & MethodologyStateAcceptancePersistence>;
+  persistence?: Partial<ActiveWorkoutPersistence & MethodologyStateAcceptancePersistence & OrchestrationPersistence>;
 }
 export interface ActiveWorkout {
   readonly snapshot: TrackingSnapshot;
@@ -338,10 +356,12 @@ export interface ActiveWorkout {
 }
 export interface WorkflowFacade {
   recommend(request: RecommendationRequest): RecommendationResult;
+  recommendFromPersistence(input: Omit<RecommendationRequest, "catalog" | "history" | "methodologyState"> & { hostScopeKey: string }): Promise<RecommendationResult>;
   startRecommendation(result: RecommendationResult, input: { catalog: Exercise[]; scope: { hostScopeKey: string; athleteId?: string }; acceptedRecommendationId?: string; methodologyStateRevision?: string; methodologyStateFingerprint?: string }): Promise<ActiveWorkout>;
   startTemplate(template: WorkoutTemplateDocument, input: { catalog: Exercise[]; scope: { hostScopeKey: string; athleteId?: string } }): Promise<ActiveWorkout>;
   reloadActiveWorkout(input: { hostScopeKey: string; workoutId: string; catalog: Exercise[] }): Promise<ActiveWorkout | null>;
   evaluateCompletion(request: EvaluationRequest): EvaluationResult;
+  evaluateCompletionFromPersistence(input: Omit<EvaluationRequest, "catalog" | "history" | "methodologyState"> & { hostScopeKey: string }): Promise<EvaluationResult>;
   acceptProposedState(evaluation: EvaluationResult, input: { hostScopeKey: string; expectedRevision: string | null }): Promise<unknown>;
 }
 

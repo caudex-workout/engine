@@ -422,13 +422,44 @@ export interface MethodologyStateAcceptancePersistence {
   }): Promise<unknown>;
 }
 
+export interface OrchestrationPersistence {
+  loadCatalog(input: { hostScopeKey: string; asOf: string }): Promise<readonly Exercise[]>;
+  loadHistory(input: { hostScopeKey: string; through: string }): Promise<{
+    workouts: readonly CompletedWorkout[];
+    summaries?: JsonValue;
+  }>;
+  loadState(input: { hostScopeKey: string; methodologyId: string }): Promise<{
+    state: MethodologyState;
+    revision: string;
+  } | null>;
+  appendAcceptedRecommendation(record: {
+    id: string;
+    hostScopeKey: string;
+    acceptedAt: string;
+    result: RecommendationResult;
+  }): Promise<void>;
+  appendCompletedWorkout(hostScopeKey: string, workout: CompletedWorkout): Promise<void>;
+  loadWorkflowRecovery(hostScopeKey: string, workflowId: string): Promise<WorkflowRecoveryRecord | null>;
+  saveWorkflowRecovery(record: WorkflowRecoveryRecord): Promise<void>;
+}
+
+export interface WorkflowRecoveryRecord {
+  hostScopeKey: string;
+  workflowId: string;
+  kind: string;
+  status: "pending" | "completed";
+  idempotencyKey: string;
+  payload: JsonValue;
+  updatedAt: string;
+}
+
 export interface CreateCaudexOptions {
   wasm?: WebAssembly.Module | BufferSource;
   wasmUrl?: string | URL;
   fetch?: typeof globalThis.fetch;
   clock?: ClockProvider;
   ids?: IdProvider;
-  persistence?: Partial<ActiveWorkoutPersistence & MethodologyStateAcceptancePersistence>;
+  persistence?: Partial<ActiveWorkoutPersistence & MethodologyStateAcceptancePersistence & OrchestrationPersistence>;
 }
 
 export interface ActiveWorkout {
@@ -440,6 +471,9 @@ export interface ActiveWorkout {
 
 export interface WorkflowFacade {
   recommend(request: RecommendationRequest): RecommendationResult;
+  recommendFromPersistence(input: Omit<RecommendationRequest, "catalog" | "history" | "methodologyState"> & {
+    hostScopeKey: string;
+  }): Promise<RecommendationResult>;
   startRecommendation(result: RecommendationResult, input: {
     catalog: Exercise[]; scope: { hostScopeKey: string; athleteId?: string };
     acceptedRecommendationId?: string; methodologyStateRevision?: string; methodologyStateFingerprint?: string;
@@ -449,6 +483,9 @@ export interface WorkflowFacade {
   }): Promise<ActiveWorkout>;
   reloadActiveWorkout(input: { hostScopeKey: string; workoutId: string; catalog: Exercise[] }): Promise<ActiveWorkout | null>;
   evaluateCompletion(request: EvaluationRequest): EvaluationResult;
+  evaluateCompletionFromPersistence(input: Omit<EvaluationRequest, "catalog" | "history" | "methodologyState"> & {
+    hostScopeKey: string;
+  }): Promise<EvaluationResult>;
   acceptProposedState(evaluation: EvaluationResult, input: { hostScopeKey: string; expectedRevision: string | null }): Promise<unknown>;
 }
 
@@ -733,20 +770,38 @@ function createFacade(exports: WasmExports, runtime: number, options: CreateCaud
       },
       async complete() {
         const workout = currentWorkout();
-        await apply({ completeWorkout: {
-          metadata: { commandId: ids.next("command"), occurredAt: clock.now() },
-          scope: workout.scope,
-          workoutId,
-          expectedRevision: workout.revision,
-          completedAt: clock.now(),
-        } });
+        if (workout.status !== "completed") {
+          await apply({ completeWorkout: {
+            metadata: { commandId: ids.next("command"), occurredAt: clock.now() },
+            scope: workout.scope,
+            workoutId,
+            expectedRevision: workout.revision,
+            completedAt: clock.now(),
+          } });
+        }
         const converted = execute<CompletionConversionRequest, CompletionConversionResult>(
           { schemaVersion: 1, workout: currentWorkout(), catalog },
           "completeForEvaluation",
           false,
         );
         if ("rejected" in converted.outcome) throw new CaudexTrackingRejectedError(converted.outcome.rejected);
-        return converted.outcome.accepted;
+        const completed = converted.outcome.accepted;
+        if (persistence?.appendCompletedWorkout || persistence?.saveWorkflowRecovery) {
+          const workflowId = `completion:${workoutId}`;
+          const recovery: WorkflowRecoveryRecord = {
+            hostScopeKey: workout.scope.hostScopeKey,
+            workflowId,
+            kind: "workout_completion",
+            status: "pending",
+            idempotencyKey: workoutId,
+            payload: completed as unknown as JsonValue,
+            updatedAt: clock.now(),
+          };
+          await persistence.saveWorkflowRecovery?.(recovery);
+          await persistence.appendCompletedWorkout?.(workout.scope.hostScopeKey, completed);
+          await persistence.saveWorkflowRecovery?.({ ...recovery, status: "completed", updatedAt: clock.now() });
+        }
+        return completed;
       },
     };
   };
@@ -784,7 +839,44 @@ function createFacade(exports: WasmExports, runtime: number, options: CreateCaud
       recommend(request) {
         return execute<RecommendationRequest, RecommendationResult>(request, "recommend", true);
       },
+      async recommendFromPersistence(input) {
+        if (!persistence?.loadCatalog || !persistence.loadHistory) {
+          throw new CaudexRuntimeError("Catalog and history persistence capabilities are required.");
+        }
+        const [catalog, history, stateRecord] = await Promise.all([
+          persistence.loadCatalog({ hostScopeKey: input.hostScopeKey, asOf: input.asOf }),
+          persistence.loadHistory({ hostScopeKey: input.hostScopeKey, through: input.asOf }),
+          persistence.loadState?.({
+            hostScopeKey: input.hostScopeKey,
+            methodologyId: input.methodology.id,
+          }) ?? Promise.resolve(null),
+        ]);
+        const { hostScopeKey: _, ...request } = input;
+        return execute<RecommendationRequest, RecommendationResult>({
+          ...request,
+          catalog: [...catalog],
+          history: { ...history, workouts: [...history.workouts] },
+          methodologyState: stateRecord?.state,
+        }, "recommend", true);
+      },
       async startRecommendation(result, input) {
+        const acceptedRecommendationId = input.acceptedRecommendationId ?? ids.next("acceptedRecommendation");
+        const workflowId = `recommendation:${acceptedRecommendationId}`;
+        const existing = await persistence?.loadWorkflowRecovery?.(input.scope.hostScopeKey, workflowId);
+        if (existing) {
+          const recovered = parseInstantiationRecovery(existing);
+          if (existing.status === "pending") {
+            await persistence?.appendAcceptedRecommendation?.({
+              id: acceptedRecommendationId,
+              hostScopeKey: input.scope.hostScopeKey,
+              acceptedAt: recovered.workout.startedAt,
+              result,
+            });
+            await persistSnapshot(input.scope.hostScopeKey, recovered.workout.id, recovered.snapshot, null);
+            await persistence?.saveWorkflowRecovery?.({ ...existing, status: "completed", updatedAt: clock.now() });
+          }
+          return activeWorkout(recovered.snapshot, recovered.workout.id, input.catalog);
+        }
         const recommendation = result.recommendation;
         const membershipIds = recommendation?.exercises.map(() => ids.next("membership")) ?? [];
         const setIds = recommendation?.exercises.flatMap((exercise) => exercise.sets.map(() => ids.next("set"))) ?? [];
@@ -795,7 +887,7 @@ function createFacade(exports: WasmExports, runtime: number, options: CreateCaud
           scope: input.scope,
           ids: { workoutId: ids.next("workout"), membershipIds, setIds },
           createdAt: clock.now(),
-          acceptedRecommendationId: input.acceptedRecommendationId ?? ids.next("acceptedRecommendation"),
+          acceptedRecommendationId,
           methodologyStateRevision: input.methodologyStateRevision,
           methodologyStateFingerprint: input.methodologyStateFingerprint,
         }, "instantiateRecommendation", false);
@@ -805,7 +897,24 @@ function createFacade(exports: WasmExports, runtime: number, options: CreateCaud
           startReceipts: [],
           exerciseCatalog: input.catalog.map((exercise) => ({ exerciseId: exercise.id, availability: "active" })),
         };
+        const recovery: WorkflowRecoveryRecord = {
+          hostScopeKey: input.scope.hostScopeKey,
+          workflowId,
+          kind: "recommendation_instantiation",
+          status: "pending",
+          idempotencyKey: acceptedRecommendationId,
+          payload: { workout: instantiated.outcome.accepted, snapshot } as unknown as JsonValue,
+          updatedAt: clock.now(),
+        };
+        await persistence?.saveWorkflowRecovery?.(recovery);
+        await persistence?.appendAcceptedRecommendation?.({
+          id: acceptedRecommendationId,
+          hostScopeKey: input.scope.hostScopeKey,
+          acceptedAt: instantiated.outcome.accepted.startedAt,
+          result,
+        });
         await persistSnapshot(input.scope.hostScopeKey, instantiated.outcome.accepted.id, snapshot, null);
+        await persistence?.saveWorkflowRecovery?.({ ...recovery, status: "completed", updatedAt: clock.now() });
         return activeWorkout(snapshot, instantiated.outcome.accepted.id, input.catalog);
       },
       async startTemplate(template, input) {
@@ -837,6 +946,26 @@ function createFacade(exports: WasmExports, runtime: number, options: CreateCaud
       evaluateCompletion(request) {
         return execute<EvaluationRequest, EvaluationResult>(request, "evaluate", true);
       },
+      async evaluateCompletionFromPersistence(input) {
+        if (!persistence?.loadCatalog || !persistence.loadHistory) {
+          throw new CaudexRuntimeError("Catalog and history persistence capabilities are required.");
+        }
+        const [catalog, history, stateRecord] = await Promise.all([
+          persistence.loadCatalog({ hostScopeKey: input.hostScopeKey, asOf: input.asOf }),
+          persistence.loadHistory({ hostScopeKey: input.hostScopeKey, through: input.asOf }),
+          persistence.loadState?.({
+            hostScopeKey: input.hostScopeKey,
+            methodologyId: input.methodology.id,
+          }) ?? Promise.resolve(null),
+        ]);
+        const { hostScopeKey: _, ...request } = input;
+        return execute<EvaluationRequest, EvaluationResult>({
+          ...request,
+          catalog: [...catalog],
+          history: { ...history, workouts: [...history.workouts] },
+          methodologyState: stateRecord?.state,
+        }, "evaluate", true);
+      },
       async acceptProposedState(evaluation, input) {
         if (!evaluation.ok || !evaluation.nextMethodologyState) {
           throw new CaudexRuntimeError("The evaluation has no methodology-state proposal to accept.");
@@ -867,6 +996,27 @@ function secureRandomId(): string {
   const crypto = globalThis.crypto;
   if (!crypto?.randomUUID) throw new CaudexRuntimeError("Secure platform randomness is unavailable; inject an ID provider.");
   return crypto.randomUUID();
+}
+
+function parseInstantiationRecovery(record: WorkflowRecoveryRecord): {
+  workout: TrackedWorkout;
+  snapshot: TrackingSnapshot;
+} {
+  if (record.kind !== "recommendation_instantiation") {
+    throw new CaudexRuntimeError("The workflow recovery record has an unexpected kind.");
+  }
+  try {
+    const value = record.payload as {
+      workout?: TrackedWorkout;
+      snapshot?: TrackingSnapshot;
+    };
+    if (!value.workout?.id || !Array.isArray(value.snapshot?.workouts)) {
+      throw new Error("missing workout snapshot");
+    }
+    return { workout: value.workout, snapshot: value.snapshot };
+  } catch {
+    throw new CaudexRuntimeError("The workflow recovery record is malformed.");
+  }
 }
 
 function statusResult<Result extends RecommendationResult | EvaluationResult>(

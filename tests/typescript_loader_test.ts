@@ -9,6 +9,7 @@ import {
   type TrackingCommandRequest,
   type TemplateInstantiationRequest,
   type ActiveWorkoutRecord,
+  type WorkflowRecoveryRecord,
 } from "../packages/npm/workout-engine/src/index.ts";
 
 const [wasmPath, fixturePath] = process.argv.slice(2);
@@ -21,6 +22,9 @@ const request = JSON.parse(
 
 let idSequence = 0;
 const activeRecords = new Map<string, ActiveWorkoutRecord>();
+const recoveryRecords = new Map<string, WorkflowRecoveryRecord>();
+const acceptedRecommendationIds: string[] = [];
+const completedWorkoutIds: string[] = [];
 const caudex = await createCaudex({
   wasm,
   clock: { now: () => "2026-08-04T12:00:00Z" },
@@ -36,6 +40,23 @@ const caudex = await createCaudex({
       if (actual !== expectedRevision) throw new Error(`revision conflict: expected ${expectedRevision}, actual ${actual}`);
       activeRecords.set(key, structuredClone(record));
     },
+    async loadCatalog() { return structuredClone(request.catalog); },
+    async loadHistory() { return structuredClone(request.history ?? {}); },
+    async loadState() {
+      return request.methodologyState ? { state: structuredClone(request.methodologyState), revision: "state-1" } : null;
+    },
+    async appendAcceptedRecommendation(record) {
+      if (!acceptedRecommendationIds.includes(record.id)) acceptedRecommendationIds.push(record.id);
+    },
+    async appendCompletedWorkout(_hostScopeKey, workout) {
+      if (!completedWorkoutIds.includes(workout.id)) completedWorkoutIds.push(workout.id);
+    },
+    async loadWorkflowRecovery(hostScopeKey, workflowId) {
+      return recoveryRecords.get(`${hostScopeKey}/${workflowId}`) ?? null;
+    },
+    async saveWorkflowRecovery(record) {
+      recoveryRecords.set(`${record.hostScopeKey}/${record.workflowId}`, structuredClone(record));
+    },
   },
 });
 const result = caudex.recommendSession(request);
@@ -48,12 +69,39 @@ if (
 ) {
   throw new Error("TypeScript facade fingerprint differs from core fixtures");
 }
+const {
+  catalog: ignoredCatalog,
+  history: ignoredHistory,
+  methodologyState: ignoredState,
+  ...requestWithoutSources
+} = request;
+void ignoredCatalog;
+void ignoredHistory;
+void ignoredState;
+const assembled = await caudex.workflows.recommendFromPersistence({
+  ...requestWithoutSources,
+  hostScopeKey: "scope-high-level",
+});
+if (assembled.metadata.resultFingerprint !== result.metadata.resultFingerprint) {
+  throw new Error("persistence orchestration assembled a different recommendation request");
+}
 
 const highLevel = await caudex.workflows.startRecommendation(result, {
   catalog: request.catalog,
   scope: { hostScopeKey: "scope-high-level" },
   acceptedRecommendationId: "accepted-high-level",
 });
+const retriedHighLevel = await caudex.workflows.startRecommendation(result, {
+  catalog: request.catalog,
+  scope: { hostScopeKey: "scope-high-level" },
+  acceptedRecommendationId: "accepted-high-level",
+});
+if (retriedHighLevel.workout.id !== highLevel.workout.id || acceptedRecommendationIds.length !== 1) {
+  throw new Error("recommendation instantiation recovery was not idempotent");
+}
+if (recoveryRecords.get("scope-high-level/recommendation:accepted-high-level")?.status !== "completed") {
+  throw new Error("recommendation instantiation did not complete its recovery record");
+}
 const firstMembership = highLevel.workout.exercises?.[0];
 const firstSet = firstMembership?.sets?.[0];
 if (!firstMembership || !firstSet) throw new Error("high-level workflow did not instantiate prescribed IDs");
@@ -69,6 +117,35 @@ const reloaded = await caudex.workflows.reloadActiveWorkout({
 });
 if (!reloaded || reloaded.workout.revision !== 2) {
   throw new Error("high-level active workout did not persist and reload with its revision");
+}
+for (const membership of reloaded.workout.exercises ?? []) {
+  for (const set of membership.sets ?? []) {
+    if (set.status !== "open") continue;
+    await reloaded.completeSet({
+      membershipId: membership.id,
+      setId: set.id,
+      actual: set.targetMetrics ?? [],
+    });
+  }
+}
+const completion = await reloaded.complete();
+const retriedCompletion = await reloaded.complete();
+if (retriedCompletion.id !== completion.id || completedWorkoutIds.length !== 1) {
+  throw new Error("completed-workout persistence was not idempotently resumable");
+}
+if (recoveryRecords.get(`scope-high-level/completion:${completion.id}`)?.status !== "completed") {
+  throw new Error("workout completion did not complete its recovery record");
+}
+const evaluatedCompletion = await caudex.workflows.evaluateCompletionFromPersistence({
+  schemaVersion: 1,
+  hostScopeKey: "scope-high-level",
+  asOf: request.asOf,
+  methodology: request.methodology,
+  athlete: request.athlete,
+  completedWorkout: completion,
+});
+if (evaluatedCompletion.metadata.methodology.id !== request.methodology.id) {
+  throw new Error("persistence orchestration did not evaluate the completion");
 }
 if ("memory" in caudex || "alloc" in caudex || "execute" in caudex) {
   throw new Error("the public facade exposes raw WebAssembly ownership");

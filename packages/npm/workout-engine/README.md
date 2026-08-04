@@ -89,6 +89,15 @@ the optional persistence capability across reloads. Methodology state is never
 accepted automatically: `acceptProposedState()` must be called explicitly and
 requires a compare-and-set capability.
 
+Hosts can also call `recommendFromPersistence()` and
+`evaluateCompletionFromPersistence()` to assemble canonical requests from
+narrow catalog, history, and optional methodology-state loaders. When recovery
+and journal/sink capabilities are supplied, recommendation starts and workout
+completions write `pending` then `completed` recovery records. The accepted
+recommendation ID and workout ID are the respective idempotency keys. This is a
+recoverable multi-step protocol, not a claim that unrelated host services share
+one transaction; see the repository's workflow-orchestration persistence guide.
+
 ## Methodology factories
 
 The package exports typed factories for both first-party configurations:

@@ -117,8 +117,16 @@ requires an explicit compare-and-set call to accept methodology state.
 
 ### 7. Optional orchestration
 
+**Status:** Completed for the npm application-facing facade
+
 - Narrow capabilities compose catalog/history/state/recommendation/tracking and
   recovery outside the core, with honest atomicity and explicit idempotency keys.
+
+The facade assembles recommendation and evaluation requests from optional
+catalog/history/state sources, journals accepted recommendations, persists
+active and completed workouts, and records resumable pending/completed workflow
+steps. Accepted-recommendation IDs and workout IDs are the portable idempotency
+keys; unrelated host services are explicitly not presented as one transaction.
 
 ### 8. Persistence expansion
 
