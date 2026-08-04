@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://caudex.dev/schemas/operations/v1/execution-request.schema.json",
+  "title": "Caudex canonical execution request v1",
+  "type": "object",
+  "required": ["schemaVersion", "operation", "payload"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "operation": { "enum": ["recommend", "evaluate"] },
+    "payload": { "type": "object" }
+  },
+  "additionalProperties": false
+}

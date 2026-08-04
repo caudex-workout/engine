@@ -94,7 +94,9 @@ introducing persistence into this pure phase.
 
 ABI v2 removed caller-mutable allocator metadata and result disposal. Native C,
 WASM, and npm now use required-size discovery plus exact caller-owned output.
-The unified multi-operation dispatcher remains to complete this phase.
+Recommendation and evaluation share one versioned operation dispatcher;
+tracking, workflow, discovery, and portable-data operations remain to complete
+this phase.
 
 ### 6. npm APIs
 

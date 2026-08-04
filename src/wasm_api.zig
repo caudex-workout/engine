@@ -6,7 +6,6 @@ comptime {
     _ = c_api.caudex_runtime_create;
     _ = c_api.caudex_runtime_destroy;
     _ = c_api.caudex_runtime_execute;
-    _ = c_api.runtimeEvaluate;
 }
 
 /// Allocates host-visible linear memory. Zero is returned on failure.
@@ -34,32 +33,4 @@ pub export fn caudex_wasm_runtime_create() usize {
 pub export fn caudex_wasm_runtime_destroy(runtime: usize) void {
     if (runtime == 0) return;
     c_api.caudex_runtime_destroy(@ptrFromInt(runtime));
-}
-
-/// Evaluates a canonical completed-workout request through the active runtime.
-pub export fn caudex_wasm_runtime_evaluate(
-    runtime: usize,
-    request_pointer: usize,
-    request_len: usize,
-    output_pointer: usize,
-    output_capacity: usize,
-    required_pointer: usize,
-) c_api.Status {
-    const request: ?[*]const u8 = if (request_pointer == 0)
-        null
-    else
-        @ptrFromInt(request_pointer);
-    const output: ?[*]u8 = if (output_pointer == 0)
-        null
-    else
-        @ptrFromInt(output_pointer);
-    const required: ?*usize = if (required_pointer == 0) null else @ptrFromInt(required_pointer);
-    return c_api.runtimeEvaluate(
-        if (runtime == 0) null else @ptrFromInt(runtime),
-        request,
-        request_len,
-        output,
-        output_capacity,
-        required,
-    );
 }

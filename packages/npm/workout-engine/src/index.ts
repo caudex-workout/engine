@@ -281,14 +281,6 @@ interface WasmExports extends WebAssembly.Exports {
     outputCapacity: number,
     requiredPointer: number,
   ): number;
-  caudex_wasm_runtime_evaluate(
-    runtime: number,
-    requestPointer: number,
-    requestLength: number,
-    outputPointer: number,
-    outputCapacity: number,
-    requiredPointer: number,
-  ): number;
   caudex_wasm_alloc(length: number): number;
   caudex_wasm_free(pointer: number, length: number): void;
   caudex_wasm_runtime_create(): number;
@@ -299,7 +291,6 @@ const REQUIRED_EXPORTS = [
   "memory",
   "caudex_abi_version",
   "caudex_runtime_execute",
-  "caudex_wasm_runtime_evaluate",
   "caudex_wasm_alloc",
   "caudex_wasm_free",
   "caudex_wasm_runtime_create",
@@ -425,14 +416,14 @@ function createFacade(exports: WasmExports, runtime: number): Caudex {
     Result extends RecommendationResult | EvaluationResult,
   >(
     request: Request,
-    operation: WasmExports["caudex_runtime_execute"],
+    operation: "recommend" | "evaluate",
   ): Result => {
     if (disposed) {
       throw new CaudexRuntimeError("The Caudex runtime has been disposed.");
     }
     let requestBytes: Uint8Array;
     try {
-      requestBytes = new TextEncoder().encode(JSON.stringify(request));
+      requestBytes = new TextEncoder().encode(JSON.stringify({ schemaVersion: 1, operation, payload: request }));
     } catch {
       return invalidResult<Result>(
         request,
@@ -457,7 +448,7 @@ function createFacade(exports: WasmExports, runtime: number): Caudex {
         requestBytes.length,
       ).set(requestBytes);
       new Uint8Array(exports.memory.buffer, requiredPointer, 4).fill(0);
-      const sizingStatus = operation(
+      const sizingStatus = exports.caudex_runtime_execute(
         runtime,
         requestPointer,
         requestBytes.length,
@@ -471,7 +462,7 @@ function createFacade(exports: WasmExports, runtime: number): Caudex {
       const resultLength = new DataView(exports.memory.buffer).getUint32(requiredPointer, true);
       const resultPointer = exports.caudex_wasm_alloc(resultLength);
       if (resultPointer === 0) throw new CaudexRuntimeError("WebAssembly result allocation failed.");
-      const status = operation(runtime, requestPointer, requestBytes.length, resultPointer, resultLength, requiredPointer);
+      const status = exports.caudex_runtime_execute(runtime, requestPointer, requestBytes.length, resultPointer, resultLength, requiredPointer);
       if (status !== 0) {
         exports.caudex_wasm_free(resultPointer, resultLength);
         return statusResult<Result>(request, status);
@@ -500,13 +491,13 @@ function createFacade(exports: WasmExports, runtime: number): Caudex {
     recommendSession(request) {
       return execute<RecommendationRequest, RecommendationResult>(
         request,
-        exports.caudex_runtime_execute,
+        "recommend",
       );
     },
     evaluatePerformance(request) {
       return execute<EvaluationRequest, EvaluationResult>(
         request,
-        exports.caudex_wasm_runtime_evaluate,
+        "evaluate",
       );
     },
     dispose() {

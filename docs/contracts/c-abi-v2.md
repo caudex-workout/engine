@@ -27,6 +27,17 @@ caudex_status caudex_runtime_execute(
     size_t *out_required);
 ```
 
+The request is a canonical execution envelope:
+
+```json
+{"schemaVersion":1,"operation":"recommend","payload":{}}
+```
+
+The operation discriminator is explicit. The current checkpoint routes
+`recommend` and `evaluate` through this single entry point; tracking, workflow,
+discovery, and portable-data operations will extend the same versioned registry
+rather than add methodology-specific C functions.
+
 Call with null output and zero capacity. A valid request returns
 `CAUDEX_STATUS_INSUFFICIENT_OUTPUT` and the exact required byte count. Allocate
 that many bytes and call again. Exact capacity succeeds. Insufficient capacity
@@ -44,4 +55,3 @@ length-delimited and need no NUL terminator. Malformed UTF-8/JSON returns
 - Query size, allocate host-owned bytes, execute again, then use the host
   allocator to release the result.
 - Results no longer depend on runtime lifetime.
-

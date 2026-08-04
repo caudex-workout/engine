@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "operation": "recommend",
+  "payload": {
+    "schemaVersion": 1,
+    "asOf": "2026-07-25T14:00:00Z",
+    "methodology": {
+      "id": "caudex.double-progression",
+      "versionRequirement": "^0.1.0",
+      "configVersion": 1,
+      "config": {
+        "repRange": { "min": 8, "max": 12 },
+        "workingSets": 3,
+        "advancementCriteria": { "minimumSuccessfulSets": 3, "minimumRepetitions": 12 },
+        "initialLoad": { "amount": "45", "unit": "lb" },
+        "loadIncrement": { "amount": "5", "unit": "lb" },
+        "failurePolicy": { "onPartial": "hold", "onFailure": "regress", "regressionAmount": { "amount": "5", "unit": "lb" } },
+        "rounding": { "mode": "nearest", "quantum": { "amount": "2.5", "unit": "lb" } }
+      }
+    },
+    "methodologyState": { "schemaVersion": 1, "data": { "exercises": { "incline-dumbbell-press": { "load": { "amount": "65", "unit": "lb" } } } } },
+    "catalog": [{
+      "id": "incline-dumbbell-press",
+      "name": "Incline Dumbbell Press",
+      "equipmentIds": ["dumbbell", "adjustable-bench"],
+      "movementTags": ["horizontal-push"],
+      "muscleContributions": [
+        { "muscleId": "pectoralis-major", "role": "primary" },
+        { "muscleId": "triceps", "role": "secondary" }
+      ]
+    }],
+    "athlete": { "preferences": { "preferredExerciseIds": ["incline-dumbbell-press"] } },
+    "history": { "workouts": [{
+      "id": "workout-103",
+      "startedAt": "2026-07-22T13:00:00Z",
+      "completedAt": "2026-07-22T13:40:00Z",
+      "exercises": [{
+        "exerciseId": "incline-dumbbell-press",
+        "sets": [{
+          "id": "set-1",
+          "kind": "working",
+          "actualMetrics": [
+            { "code": "load", "value": { "amount": "65", "unit": "lb" } },
+            { "code": "repetitions", "value": { "amount": "12", "unit": "count" } }
+          ],
+          "status": "completed"
+        }]
+      }]
+    }] },
+    "session": {
+      "availableMinutes": 35,
+      "availableEquipmentIds": ["dumbbell", "adjustable-bench"],
+      "goals": ["hypertrophy"],
+      "maxExercises": 4
+    },
+    "alternativeLimit": 1
+  }
+}

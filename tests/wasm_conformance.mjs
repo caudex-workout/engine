@@ -17,7 +17,6 @@ const requiredExports = [
   "memory",
   "caudex_abi_version",
   "caudex_runtime_execute",
-  "caudex_wasm_runtime_evaluate",
   "caudex_wasm_alloc",
   "caudex_wasm_free",
   "caudex_wasm_runtime_create",

@@ -128,7 +128,7 @@ function buildLibrary(target, linkage, output, importLibrary) {
 }
 
 async function testLinks(entry, directory, names, execute) {
-  const fixture = resolve("fixtures/requests/recommendation.json");
+  const fixture = resolve("fixtures/operations/recommendation-v1.json");
   const include = join(directory, "include");
   const library = join(directory, "lib");
   for (const linkage of ["static", "shared"]) {

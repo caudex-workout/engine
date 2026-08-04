@@ -43,7 +43,7 @@ try {
   if (!result.stderr.includes("vendor.simple-progression registered")) {
     throw new Error(`unexpected Zig consumer output: ${result.stderr}`);
   }
-  if (!result.stderr.includes("persistence contract v1")) {
+  if (!result.stderr.includes("persistence contract v2")) {
     throw new Error(`persistence package was not imported: ${result.stderr}`);
   }
   if (!result.stderr.includes("tracking contract v6")) {

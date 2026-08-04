@@ -302,7 +302,7 @@ pub fn build(b: *std.Build) void {
     c_conformance.root_module.linkLibrary(c_library);
     c_conformance.root_module.link_libc = true;
     const run_c_conformance = b.addRunArtifact(c_conformance);
-    run_c_conformance.addFileArg(b.path("fixtures/requests/recommendation.json"));
+    run_c_conformance.addFileArg(b.path("fixtures/operations/recommendation-v1.json"));
     const c_example_step = b.step(
         "example-c",
         "Run the C canonical-request conformance example",
@@ -343,7 +343,7 @@ pub fn build(b: *std.Build) void {
 
     const wasm_conformance = b.addSystemCommand(&.{ "node", "tests/wasm_conformance.mjs" });
     wasm_conformance.addArtifactArg(wasm_runtime);
-    wasm_conformance.addFileArg(b.path("fixtures/requests/recommendation.json"));
+    wasm_conformance.addFileArg(b.path("fixtures/operations/recommendation-v1.json"));
     const wasm_step = b.step(
         "wasm",
         "Build and test the freestanding release WebAssembly runtime",
@@ -623,7 +623,7 @@ pub fn build(b: *std.Build) void {
     const cli_version = b.addRunArtifact(cli);
     cli_version.addArg("version");
     cli_version.expectStdOutEqual(
-        "caudex 0.1.0\nengine: 0.1.0 (schema 1)\npersistence contract: 1\n" ++
+        "caudex 0.1.0\nengine: 0.1.0 (schema 1)\npersistence contract: 2\n" ++
             "tracking contract: 6\nsqlite adapter: 0.1.0 (schema 1-7)\n",
     );
 
