@@ -289,6 +289,21 @@ export interface TemplateInstantiationRequest {
 export interface CompletionConversionRequest { schemaVersion: 1; workout: TrackedWorkout; catalog: Exercise[] }
 export type InstantiationResult = { schemaVersion: 1; outcome: { accepted: TrackedWorkout } | { rejected: TrackingIssue[] } };
 export type CompletionConversionResult = { schemaVersion: 1; outcome: { accepted: CompletedWorkout } | { rejected: TrackingIssue[] } };
+export type MethodologyOperation = "recommend" | "evaluate" | "validateConfig" | "validateState";
+export type MethodologyFieldType = "integer" | "exactDecimal" | "measurement" | "enumeration" | "object" | "array" | "identifier";
+export interface MethodologyFieldDescriptor {
+  name: string; description: string; fieldType: MethodologyFieldType; required: boolean;
+  defaultJson?: string; minimum?: string; maximum?: string; exactDecimal?: boolean;
+  unitDimension?: string; enumChoices?: string[]; deprecated?: boolean;
+}
+export interface MethodologyDescriptor {
+  id: string; displayName: string; description: string; methodologyVersion: string;
+  configurationSchemaVersion: number; stateSchemaVersion: number;
+  supportedOperations: MethodologyOperation[]; fields: MethodologyFieldDescriptor[];
+  configurationSchemaRef: string; stateSchemaRef: string; deprecated?: boolean;
+}
+export interface DiscoveryRegistry { schemaVersion: 1; methodologies: MethodologyDescriptor[]; supportedOperations: string[] }
+export interface MethodologyValidationResult { schemaVersion: 1; valid: boolean; issues: ValidationIssue[] }
 
 export type InitializationErrorCode =
   | "wasm_load_failed"
@@ -373,6 +388,11 @@ export interface Caudex {
   instantiateRecommendation(request: RecommendationInstantiationRequest): InstantiationResult;
   instantiateTemplate(request: TemplateInstantiationRequest): InstantiationResult;
   completeForEvaluation(request: CompletionConversionRequest): CompletionConversionResult;
+  listMethodologies(): DiscoveryRegistry;
+  describeMethodology(id: string): MethodologyDescriptor;
+  listCapabilities(): DiscoveryRegistry;
+  validateMethodologyConfiguration(input: { methodologyId: string; configurationSchemaVersion: number; config: JsonValue }): MethodologyValidationResult;
+  validateMethodologyState(input: { methodologyId: string; configurationSchemaVersion: number; config: JsonValue; state: MethodologyState }): MethodologyValidationResult;
   readonly workflows: WorkflowFacade;
   dispose(): void;
 }

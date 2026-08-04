@@ -133,6 +133,14 @@ normalized canonical methodology reference. Invalid configuration throws
 `MethodologyConfigError` with structured `methodology.config_invalid` issues.
 Factories contain no recommendation or progression calculations.
 
+Runtime discovery is available through `listMethodologies()`,
+`describeMethodology()`, `listCapabilities()`,
+`validateMethodologyConfiguration()`, and `validateMethodologyState()`.
+Descriptors include UI-neutral field types, exact-decimal and unit requirements,
+bounds, choices, versions, and schema references. The metadata originates in
+the Zig/WASM registry; TypeScript declarations describe its shape without
+maintaining a second copy of the values.
+
 The default WASM URL is `../wasm/caudex.wasm` relative to the distributed
 JavaScript module. Packaging and final asset placement belong to CWE-063.
 

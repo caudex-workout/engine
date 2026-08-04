@@ -52,12 +52,14 @@ try {
     `import { readFile } from "node:fs/promises";
 import { createCaudex, methodologies } from "@caudex-workout/engine";
 import canonicalSchema from "@caudex-workout/engine/schema/canonical" with { type: "json" };
+import discoverySchema from "@caudex-workout/engine/schema/discovery" with { type: "json" };
 
 const request = JSON.parse(await readFile(new URL("./request.json", import.meta.url)));
 request.methodology = methodologies.doubleProgression(request.methodology.config);
 const caudex = await createCaudex();
 const result = caudex.recommendSession(request);
 const invalid = caudex.recommendSession({ ...request, schemaVersion: 2 });
+const discovered = caudex.listMethodologies();
 caudex.dispose();
 if (!result.ok || result.metadata.resultFingerprint !==
   "83481330a812bb41384d958c104038d230bf93ceee163fd47b7c62a41361fd6f") {
@@ -68,6 +70,9 @@ if (invalid.ok || invalid.issues?.[0]?.code !== "protocol.unsupported_version") 
 }
 if (canonicalSchema.$id !== "https://caudex.dev/schemas/v0/canonical.schema.json") {
   throw new Error("schema subpath export failed");
+}
+if (discoverySchema.$id !== "https://caudex.dev/schemas/discovery/v1/discovery.schema.json" || discovered.methodologies.length !== 2) {
+  throw new Error("discovery schema or runtime metadata export failed");
 }
 `,
   );
@@ -95,6 +100,12 @@ const methodology = methodologies.doubleProgression({
   },
   rounding: { mode: "nearest", quantum: { amount: "2.5", unit: "lb" } },
 });
+async function discover(): Promise<string> {
+  const engine = await createCaudex();
+  try { return engine.describeMethodology("caudex.double-progression").displayName; }
+  finally { engine.dispose(); }
+}
+void discover;
 const request: RecommendationRequest = {
   schemaVersion: 1,
   asOf: "2026-07-25T14:00:00Z",

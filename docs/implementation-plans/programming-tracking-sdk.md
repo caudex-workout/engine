@@ -148,8 +148,16 @@ their owning phases.
 
 ### 9. Methodology discovery
 
+**Status:** Completed
+
 - Zig/C/WASM/npm expose list, describe, config/state validation, and capabilities
   with UI-neutral field metadata and cross-representation conformance.
+
+`caudex.discovery` is the descriptor source of truth. The canonical execution
+dispatcher serializes it for C and WASM, and npm calls those operations rather
+than embedding another metadata copy. Typed validators return stable structured
+issues, while unsupported schema versions and methodology IDs remain distinct
+boundary failures.
 
 ### 10. Optional exercise catalog
 

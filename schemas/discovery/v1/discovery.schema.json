@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://caudex.dev/schemas/discovery/v1/discovery.schema.json",
+  "title": "Caudex methodology discovery protocol v1",
+  "oneOf": [
+    { "$ref": "#/$defs/registry" },
+    { "$ref": "#/$defs/description" },
+    { "$ref": "#/$defs/validationResult" }
+  ],
+  "$defs": {
+    "field": {
+      "type": "object",
+      "required": ["name", "description", "fieldType", "required"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "fieldType": { "enum": ["integer", "exactDecimal", "measurement", "enumeration", "object", "array", "identifier"] },
+        "required": { "type": "boolean" },
+        "defaultJson": { "type": "string", "maxLength": 4096 },
+        "minimum": { "type": "string", "maxLength": 100 },
+        "maximum": { "type": "string", "maxLength": 100 },
+        "exactDecimal": { "type": "boolean" },
+        "unitDimension": { "type": "string", "maxLength": 100 },
+        "enumChoices": { "type": "array", "maxItems": 128, "items": { "type": "string", "maxLength": 200 } },
+        "deprecated": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "methodology": {
+      "type": "object",
+      "required": ["id", "displayName", "description", "methodologyVersion", "configurationSchemaVersion", "stateSchemaVersion", "supportedOperations", "fields", "configurationSchemaRef", "stateSchemaRef"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "methodologyVersion": { "type": "string", "maxLength": 100 },
+        "configurationSchemaVersion": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "stateSchemaVersion": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "supportedOperations": { "type": "array", "maxItems": 16, "items": { "enum": ["recommend", "evaluate", "validateConfig", "validateState"] } },
+        "fields": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/field" } },
+        "configurationSchemaRef": { "type": "string", "maxLength": 500 },
+        "stateSchemaRef": { "type": "string", "maxLength": 500 },
+        "deprecated": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "registry": {
+      "type": "object",
+      "required": ["schemaVersion", "methodologies", "supportedOperations"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "methodologies": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/methodology" } },
+        "supportedOperations": { "type": "array", "maxItems": 64, "items": { "type": "string", "maxLength": 100 } }
+      },
+      "additionalProperties": false
+    },
+    "description": {
+      "type": "object",
+      "required": ["schemaVersion", "methodology"],
+      "properties": { "schemaVersion": { "const": 1 }, "methodology": { "$ref": "#/$defs/methodology" } },
+      "additionalProperties": false
+    },
+    "issue": {
+      "type": "object",
+      "required": ["code", "path", "message", "severity"],
+      "properties": {
+        "code": { "type": "string", "maxLength": 200 },
+        "path": { "type": "string", "maxLength": 1000 },
+        "message": { "type": "string", "maxLength": 2000 },
+        "severity": { "enum": ["info", "warning", "error"] },
+        "suggestion": { "type": "string", "maxLength": 2000 }
+      },
+      "additionalProperties": true
+    },
+    "validationResult": {
+      "type": "object",
+      "required": ["schemaVersion", "valid", "issues"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "valid": { "type": "boolean" },
+        "issues": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/issue" } }
+      },
+      "additionalProperties": false
+    }
+  }
+}

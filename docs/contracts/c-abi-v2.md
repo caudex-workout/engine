@@ -37,8 +37,11 @@ The operation discriminator is explicit. The current dispatcher routes
 `recommend`, `evaluate`, `applyTrackingCommand`, and `applyTrackingBatch`
 through this single entry point. `instantiateRecommendation`,
 `instantiateTemplate`, and `completeForEvaluation` expose the pure workflow
-bridge through the same executor. Discovery and portable-data operations will
-extend this registry rather than add methodology-specific C functions.
+bridge through the same executor. Further operation families extend this
+registry rather than add methodology-specific C functions.
+`listMethodologies`, `describeMethodology`, `validateMethodologyConfig`,
+`validateMethodologyState`, and `listCapabilities` are now registry-backed
+discovery operations. Portable-data operations remain the next extension.
 
 Call with null output and zero capacity. A valid request returns
 `CAUDEX_STATUS_INSUFFICIENT_OUTPUT` and the exact required byte count. Allocate

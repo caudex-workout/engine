@@ -10,6 +10,7 @@ import {
   type TemplateInstantiationRequest,
   type ActiveWorkoutRecord,
   type WorkflowRecoveryRecord,
+  type JsonValue,
 } from "../packages/npm/workout-engine/src/index.ts";
 
 const [wasmPath, fixturePath] = process.argv.slice(2);
@@ -69,6 +70,35 @@ if (
 ) {
   throw new Error("TypeScript facade fingerprint differs from core fixtures");
 }
+const registry = caudex.listMethodologies();
+if (registry.methodologies.length !== 2 || !registry.supportedOperations.includes("applyTrackingCommand")) {
+  throw new Error("methodology discovery did not expose registry capabilities");
+}
+const descriptor = caudex.describeMethodology("caudex.double-progression");
+if (!descriptor.fields.some((field) => field.name === "initialLoad" && field.exactDecimal)) {
+  throw new Error("methodology discovery omitted exact-decimal field metadata");
+}
+const validConfig = caudex.validateMethodologyConfiguration({
+  methodologyId: request.methodology.id,
+  configurationSchemaVersion: request.methodology.configVersion,
+  config: request.methodology.config as JsonValue,
+});
+if (!validConfig.valid) throw new Error("valid methodology configuration was rejected by discovery validation");
+const invalidConfig = caudex.validateMethodologyConfiguration({
+  methodologyId: request.methodology.id,
+  configurationSchemaVersion: request.methodology.configVersion,
+  config: {},
+});
+if (invalidConfig.valid || invalidConfig.issues[0]?.code !== "methodology.config_invalid") {
+  throw new Error("invalid methodology configuration did not return structured issues");
+}
+const validState = caudex.validateMethodologyState({
+  methodologyId: request.methodology.id,
+  configurationSchemaVersion: request.methodology.configVersion,
+  config: request.methodology.config as JsonValue,
+  state: { schemaVersion: 1, data: { exercises: [] } },
+});
+if (!validState.valid) throw new Error("valid methodology state was rejected by discovery validation");
 const {
   catalog: ignoredCatalog,
   history: ignoredHistory,

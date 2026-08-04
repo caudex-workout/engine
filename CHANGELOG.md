@@ -41,6 +41,9 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The npm workflow facade can assemble recommendation/evaluation requests from
   optional persistence capabilities and journal resumable recommendation-start
   and workout-completion workflows with explicit idempotency keys.
+- Public methodology discovery now lists/describes compiled methodologies,
+  reports operation capabilities and UI-neutral field metadata, and validates
+  configuration/state through the same Zig registry across C, WASM, and npm.
 
 ## [0.1.0] - 2026-07-26
 

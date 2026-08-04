@@ -3,6 +3,7 @@ const caudex = @import("caudex");
 const canonical = caudex.canonical;
 const canonical_json = caudex.canonical_json;
 const double_progression = caudex.double_progression;
+const discovery = caudex.discovery;
 const engine = caudex.engine;
 const methodology = caudex.methodology;
 const primitives = caudex.primitives;
@@ -104,6 +105,11 @@ const Operation = enum {
     instantiateRecommendation,
     instantiateTemplate,
     completeForEvaluation,
+    listMethodologies,
+    describeMethodology,
+    validateMethodologyConfig,
+    validateMethodologyState,
+    listCapabilities,
 };
 
 const ExecutionRequest = struct {
@@ -128,7 +134,91 @@ fn executeDispatch(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) Exec
         .instantiateRecommendation => executeRecommendationInstantiation(runtime, writer.buffered(), out),
         .instantiateTemplate => executeTemplateInstantiation(runtime, writer.buffered(), out),
         .completeForEvaluation => executeCompletionConversion(runtime, writer.buffered(), out),
+        .listMethodologies => executeListMethodologies(runtime, writer.buffered(), out),
+        .describeMethodology => executeDescribeMethodology(runtime, writer.buffered(), out),
+        .validateMethodologyConfig => executeMethodologyValidation(runtime, writer.buffered(), false, out),
+        .validateMethodologyState => executeMethodologyValidation(runtime, writer.buffered(), true, out),
+        .listCapabilities => executeListCapabilities(runtime, writer.buffered(), out),
     };
+}
+
+const DiscoveryRequest = struct { schemaVersion: u32 };
+const DescribeMethodologyRequest = struct { schemaVersion: u32, id: []const u8 };
+const ValidationRequest = struct {
+    schemaVersion: u32,
+    methodologyId: []const u8,
+    configurationSchemaVersion: u32,
+    config: std.json.Value,
+    state: ?canonical.MethodologyState = null,
+};
+const DescribeMethodologyResult = struct {
+    schemaVersion: u32 = discovery.schema_version,
+    methodology: discovery.MethodologyDescriptor,
+};
+const ValidationResult = struct {
+    schemaVersion: u32 = discovery.schema_version,
+    valid: bool,
+    issues: []const canonical.ValidationIssue,
+};
+
+fn executeListMethodologies(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) ExecuteError!void {
+    const request = try canonical_json.decodeValue(DiscoveryRequest, runtime.allocator(), input, .{});
+    defer request.deinit();
+    if (request.value.schemaVersion != discovery.schema_version) return error.UnsupportedVersion;
+    return encodeOwned(runtime, discovery.registry(), out);
+}
+
+fn executeListCapabilities(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) ExecuteError!void {
+    return executeListMethodologies(runtime, input, out);
+}
+
+fn executeDescribeMethodology(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) ExecuteError!void {
+    const request = try canonical_json.decodeValue(DescribeMethodologyRequest, runtime.allocator(), input, .{});
+    defer request.deinit();
+    if (request.value.schemaVersion != discovery.schema_version) return error.UnsupportedVersion;
+    const descriptor = discovery.find(request.value.id) orelse return error.UnsupportedMethodology;
+    return encodeOwned(runtime, DescribeMethodologyResult{ .methodology = descriptor.* }, out);
+}
+
+fn executeMethodologyValidation(runtime: *Runtime, input: []const u8, include_state: bool, out: *OwnedBuffer) ExecuteError!void {
+    const request = try canonical_json.decodeValue(ValidationRequest, runtime.allocator(), input, .{});
+    defer request.deinit();
+    if (request.value.schemaVersion != discovery.schema_version) return error.UnsupportedVersion;
+    const descriptor = discovery.find(request.value.methodologyId) orelse return error.UnsupportedMethodology;
+    if (request.value.configurationSchemaVersion != descriptor.configurationSchemaVersion) return error.UnsupportedVersion;
+    var arena = std.heap.ArenaAllocator.init(runtime.allocator());
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const issue_storage = allocator.alloc(canonical.ValidationIssue, discovery.max_validation_issues) catch return error.OutOfMemory;
+    const issues = if (std.mem.eql(u8, request.value.methodologyId, double_progression.methodology_id)) blk: {
+        const config = std.json.parseFromValueLeaky(double_progression.Config, allocator, request.value.config, .{ .ignore_unknown_fields = false }) catch
+            break :blk invalidDiscoveryValue(issue_storage, "methodology.config_invalid", "/config", "The double-progression configuration is malformed.");
+        if (!include_state) break :blk discovery.validateConfig(.{ .doubleProgression = config }, issue_storage) catch return error.OutputLimitReached;
+        const state = request.value.state orelse break :blk invalidDiscoveryValue(issue_storage, "methodology.state_invalid", "/state", "Methodology state is required.");
+        const data = std.json.parseFromValueLeaky(double_progression.StateData, allocator, state.data, .{ .ignore_unknown_fields = false }) catch
+            break :blk invalidDiscoveryValue(issue_storage, "methodology.state_invalid", "/state/data", "The double-progression state is malformed.");
+        break :blk discovery.validateState(.{ .doubleProgression = .{ .config = config, .state = .{ .schemaVersion = state.schemaVersion, .data = data } } }, issue_storage) catch return error.OutputLimitReached;
+    } else if (std.mem.eql(u8, request.value.methodologyId, rpe_top_set_backoff.methodology_id)) blk: {
+        const config = std.json.parseFromValueLeaky(rpe_top_set_backoff.Config, allocator, request.value.config, .{ .ignore_unknown_fields = false }) catch
+            break :blk invalidDiscoveryValue(issue_storage, "methodology.config_invalid", "/config", "The RPE top-set/backoff configuration is malformed.");
+        if (!include_state) break :blk discovery.validateConfig(.{ .rpeTopSetBackoff = config }, issue_storage) catch return error.OutputLimitReached;
+        const state = request.value.state orelse break :blk invalidDiscoveryValue(issue_storage, "methodology.state_invalid", "/state", "Methodology state is required.");
+        const data = std.json.parseFromValueLeaky(rpe_top_set_backoff.StateData, allocator, state.data, .{ .ignore_unknown_fields = false }) catch
+            break :blk invalidDiscoveryValue(issue_storage, "methodology.state_invalid", "/state/data", "The RPE top-set/backoff state is malformed.");
+        break :blk discovery.validateState(.{ .rpeTopSetBackoff = .{ .config = config, .state = .{ .schemaVersion = state.schemaVersion, .data = data } } }, issue_storage) catch return error.OutputLimitReached;
+    } else return error.UnsupportedMethodology;
+    return encodeOwned(runtime, ValidationResult{ .valid = issues.len == 0, .issues = issues }, out);
+}
+
+fn invalidDiscoveryValue(storage: []canonical.ValidationIssue, code: []const u8, path: []const u8, message: []const u8) []const canonical.ValidationIssue {
+    std.debug.assert(storage.len != 0);
+    storage[0] = .{
+        .code = code,
+        .path = path,
+        .message = message,
+        .severity = .@"error",
+    };
+    return storage[0..1];
 }
 
 fn parseInstantiationIds(allocator: std.mem.Allocator, value: workflows.InstantiationIdsDocument) error{ InvalidRequest, OutOfMemory }!workflows.InstantiationIds {
@@ -1154,6 +1244,36 @@ test "versioned dispatcher instantiates a canonical template" {
     defer parsed.deinit();
     try std.testing.expectEqual(tracking_protocol.WorkoutOrigin.template, parsed.value.outcome.accepted.origin);
     try std.testing.expectEqual(@as(u64, 7), parsed.value.outcome.accepted.provenance.?.template.templateRevision);
+}
+
+test "versioned dispatcher discovers and validates methodologies" {
+    var runtime: Runtime = .{ .debug_allocator = .init };
+    defer _ = runtime.debug_allocator.deinit();
+    var list_output: OwnedBuffer = .{};
+    defer if (list_output.data) |data| runtime.allocator().free(data[0..list_output.capacity]);
+    try executeDispatch(&runtime, @embedFile("../fixtures/operations/discovery-list-v1.json"), &list_output);
+    const listed = try canonical_json.decodeValue(
+        discovery.RegistryDescriptor,
+        std.testing.allocator,
+        list_output.data.?[0..list_output.len],
+        .{},
+    );
+    defer listed.deinit();
+    try std.testing.expectEqual(@as(usize, 2), listed.value.methodologies.len);
+    try std.testing.expectEqualStrings(double_progression.methodology_id, listed.value.methodologies[0].id);
+
+    var validation_output: OwnedBuffer = .{};
+    defer if (validation_output.data) |data| runtime.allocator().free(data[0..validation_output.capacity]);
+    try executeDispatch(&runtime, @embedFile("../fixtures/operations/discovery-validate-invalid-v1.json"), &validation_output);
+    const validation = try canonical_json.decodeValue(
+        ValidationResult,
+        std.testing.allocator,
+        validation_output.data.?[0..validation_output.len],
+        .{},
+    );
+    defer validation.deinit();
+    try std.testing.expect(!validation.value.valid);
+    try std.testing.expectEqualStrings("methodology.config_invalid", validation.value.issues[0].code);
 }
 
 test "C ABI rejects invalid arguments without exposing errors" {

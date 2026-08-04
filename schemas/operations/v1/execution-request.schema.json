@@ -6,7 +6,7 @@
   "required": ["schemaVersion", "operation", "payload"],
   "properties": {
     "schemaVersion": { "const": 1 },
-    "operation": { "enum": ["recommend", "evaluate", "applyTrackingCommand", "applyTrackingBatch", "instantiateRecommendation", "instantiateTemplate", "completeForEvaluation"] },
+    "operation": { "enum": ["recommend", "evaluate", "applyTrackingCommand", "applyTrackingBatch", "instantiateRecommendation", "instantiateTemplate", "completeForEvaluation", "listMethodologies", "describeMethodology", "validateMethodologyConfig", "validateMethodologyState", "listCapabilities"] },
     "payload": { "type": "object" }
   },
   "additionalProperties": false

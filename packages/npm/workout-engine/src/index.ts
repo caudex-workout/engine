@@ -367,6 +367,45 @@ export interface CompletionConversionRequest {
 export type InstantiationResult = { schemaVersion: 1; outcome: { accepted: TrackedWorkout } | { rejected: TrackingIssue[] } };
 export type CompletionConversionResult = { schemaVersion: 1; outcome: { accepted: CompletedWorkout } | { rejected: TrackingIssue[] } };
 
+export type MethodologyOperation = "recommend" | "evaluate" | "validateConfig" | "validateState";
+export type MethodologyFieldType = "integer" | "exactDecimal" | "measurement" | "enumeration" | "object" | "array" | "identifier";
+export interface MethodologyFieldDescriptor {
+  name: string;
+  description: string;
+  fieldType: MethodologyFieldType;
+  required: boolean;
+  defaultJson?: string;
+  minimum?: string;
+  maximum?: string;
+  exactDecimal?: boolean;
+  unitDimension?: string;
+  enumChoices?: string[];
+  deprecated?: boolean;
+}
+export interface MethodologyDescriptor {
+  id: string;
+  displayName: string;
+  description: string;
+  methodologyVersion: string;
+  configurationSchemaVersion: number;
+  stateSchemaVersion: number;
+  supportedOperations: MethodologyOperation[];
+  fields: MethodologyFieldDescriptor[];
+  configurationSchemaRef: string;
+  stateSchemaRef: string;
+  deprecated?: boolean;
+}
+export interface DiscoveryRegistry {
+  schemaVersion: 1;
+  methodologies: MethodologyDescriptor[];
+  supportedOperations: string[];
+}
+export interface MethodologyValidationResult {
+  schemaVersion: 1;
+  valid: boolean;
+  issues: ValidationIssue[];
+}
+
 export type InitializationErrorCode =
   | "wasm_load_failed"
   | "wasm_compile_failed"
@@ -497,6 +536,11 @@ export interface Caudex {
   instantiateRecommendation(request: RecommendationInstantiationRequest): InstantiationResult;
   instantiateTemplate(request: TemplateInstantiationRequest): InstantiationResult;
   completeForEvaluation(request: CompletionConversionRequest): CompletionConversionResult;
+  listMethodologies(): DiscoveryRegistry;
+  describeMethodology(id: string): MethodologyDescriptor;
+  listCapabilities(): DiscoveryRegistry;
+  validateMethodologyConfiguration(input: { methodologyId: string; configurationSchemaVersion: number; config: JsonValue }): MethodologyValidationResult;
+  validateMethodologyState(input: { methodologyId: string; configurationSchemaVersion: number; config: JsonValue; state: MethodologyState }): MethodologyValidationResult;
   readonly workflows: WorkflowFacade;
   dispose(): void;
 }
@@ -648,7 +692,7 @@ function createFacade(exports: WasmExports, runtime: number, options: CreateCaud
   const volatileActiveWorkouts = new Map<string, ActiveWorkoutRecord>();
   const execute = <Request, Result>(
     request: Request,
-    operation: "recommend" | "evaluate" | "applyTrackingCommand" | "applyTrackingBatch" | "instantiateRecommendation" | "instantiateTemplate" | "completeForEvaluation",
+    operation: "recommend" | "evaluate" | "applyTrackingCommand" | "applyTrackingBatch" | "instantiateRecommendation" | "instantiateTemplate" | "completeForEvaluation" | "listMethodologies" | "describeMethodology" | "validateMethodologyConfig" | "validateMethodologyState" | "listCapabilities",
     programmingResult: boolean,
   ): Result => {
     if (disposed) {
@@ -834,6 +878,22 @@ function createFacade(exports: WasmExports, runtime: number, options: CreateCaud
     },
     completeForEvaluation(request) {
       return execute<CompletionConversionRequest, CompletionConversionResult>(request, "completeForEvaluation", false);
+    },
+    listMethodologies() {
+      return execute<{ schemaVersion: 1 }, DiscoveryRegistry>({ schemaVersion: 1 }, "listMethodologies", false);
+    },
+    describeMethodology(id) {
+      const result = execute<{ schemaVersion: 1; id: string }, { schemaVersion: 1; methodology: MethodologyDescriptor }>({ schemaVersion: 1, id }, "describeMethodology", false);
+      return result.methodology;
+    },
+    listCapabilities() {
+      return execute<{ schemaVersion: 1 }, DiscoveryRegistry>({ schemaVersion: 1 }, "listCapabilities", false);
+    },
+    validateMethodologyConfiguration(input) {
+      return execute<typeof input & { schemaVersion: 1 }, MethodologyValidationResult>({ schemaVersion: 1, ...input }, "validateMethodologyConfig", false);
+    },
+    validateMethodologyState(input) {
+      return execute<typeof input & { schemaVersion: 1 }, MethodologyValidationResult>({ schemaVersion: 1, ...input }, "validateMethodologyState", false);
     },
     workflows: {
       recommend(request) {
