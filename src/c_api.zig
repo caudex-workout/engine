@@ -12,9 +12,11 @@ const training = caudex.training;
 const tracking = @import("caudex_tracking");
 const tracking_protocol = @import("caudex_tracking_protocol");
 const workflows = @import("caudex_workflows");
+const portable = @import("caudex_portable");
 
 pub const abi_version: u32 = 2;
-const max_result_bytes: usize = 1024 * 1024;
+const max_result_bytes: usize = portable.max_input_bytes;
+const max_execution_request_bytes: usize = portable.max_input_bytes + 1024;
 const tracking_workspace_items: usize = 4096;
 
 pub const Status = enum(c_int) {
@@ -110,6 +112,8 @@ const Operation = enum {
     validateMethodologyConfig,
     validateMethodologyState,
     listCapabilities,
+    exportPortable,
+    validatePortableImport,
 };
 
 const ExecutionRequest = struct {
@@ -119,10 +123,10 @@ const ExecutionRequest = struct {
 };
 
 fn executeDispatch(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) ExecuteError!void {
-    const document = try canonical_json.decodeValue(ExecutionRequest, runtime.allocator(), input, .{});
+    const document = try canonical_json.decodeValue(ExecutionRequest, runtime.allocator(), input, .{ .max_input_bytes = max_execution_request_bytes, .max_collection_items = 100_000 });
     defer document.deinit();
     if (document.value.schemaVersion != 1) return error.UnsupportedVersion;
-    const payload = runtime.allocator().alloc(u8, (canonical_json.Limits{}).max_input_bytes) catch return error.OutOfMemory;
+    const payload = runtime.allocator().alloc(u8, portable.max_input_bytes) catch return error.OutOfMemory;
     defer runtime.allocator().free(payload);
     var writer: std.Io.Writer = .fixed(payload);
     std.json.Stringify.value(document.value.payload, .{}, &writer) catch return error.InvalidRequest;
@@ -139,7 +143,25 @@ fn executeDispatch(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) Exec
         .validateMethodologyConfig => executeMethodologyValidation(runtime, writer.buffered(), false, out),
         .validateMethodologyState => executeMethodologyValidation(runtime, writer.buffered(), true, out),
         .listCapabilities => executeListCapabilities(runtime, writer.buffered(), out),
+        .exportPortable => executePortableExport(runtime, writer.buffered(), out),
+        .validatePortableImport => executePortableImportValidation(runtime, writer.buffered(), out),
     };
+}
+
+fn executePortableExport(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) ExecuteError!void {
+    const document = portable.decodeDocument(runtime.allocator(), input) catch |err| return mapTrackingError(err);
+    defer document.deinit();
+    const issues = runtime.allocator().alloc(portable.Issue, portable.max_issues) catch return error.OutOfMemory;
+    defer runtime.allocator().free(issues);
+    return encodeOwned(runtime, portable.validateExport(document.value, issues) catch return error.InvalidRequest, out);
+}
+
+fn executePortableImportValidation(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) ExecuteError!void {
+    const request = portable.decodeImportRequest(runtime.allocator(), input) catch |err| return mapTrackingError(err);
+    defer request.deinit();
+    const issues = runtime.allocator().alloc(portable.Issue, portable.max_issues) catch return error.OutOfMemory;
+    defer runtime.allocator().free(issues);
+    return encodeOwned(runtime, portable.planImport(request.value, issues) catch return error.InvalidRequest, out);
 }
 
 const DiscoveryRequest = struct { schemaVersion: u32 };
@@ -1227,6 +1249,40 @@ test "versioned dispatcher applies canonical tracking command and batch" {
     try std.testing.expect(batch_result.value.applied);
     try std.testing.expectEqual(@as(u64, 2), batch_result.value.snapshot.workouts[0].revision);
     try std.testing.expectEqualStrings("squat", batch_result.value.snapshot.exerciseCatalog[0].exerciseId);
+}
+
+test "versioned dispatcher exports and validates portable documents" {
+    var runtime: Runtime = .{ .debug_allocator = .init };
+    defer _ = runtime.debug_allocator.deinit();
+
+    var export_output: OwnedBuffer = .{};
+    defer if (export_output.data) |data| runtime.allocator().free(data[0..export_output.capacity]);
+    try executeDispatch(&runtime, @embedFile("../fixtures/operations/portable-export-v1.json"), &export_output);
+    const exported = try canonical_json.decodeValue(
+        portable.ExportResult,
+        std.testing.allocator,
+        export_output.data.?[0..export_output.len],
+        .{ .max_input_bytes = portable.max_input_bytes },
+    );
+    defer exported.deinit();
+    try std.testing.expectEqualStrings(
+        "185.00",
+        exported.value.outcome.accepted.completedWorkouts[0].workout.exercises[0].sets[0].actualMetrics[0].value.amount,
+    );
+
+    var import_output: OwnedBuffer = .{};
+    defer if (import_output.data) |data| runtime.allocator().free(data[0..import_output.capacity]);
+    try executeDispatch(&runtime, @embedFile("../fixtures/operations/portable-import-v1.json"), &import_output);
+    const planned = try canonical_json.decodeValue(
+        portable.ImportPlan,
+        std.testing.allocator,
+        import_output.data.?[0..import_output.len],
+        .{},
+    );
+    defer planned.deinit();
+    try std.testing.expect(planned.value.valid);
+    try std.testing.expect(planned.value.dryRun);
+    try std.testing.expectEqual(@as(usize, 1), planned.value.counts.completedWorkouts);
 }
 
 test "versioned dispatcher instantiates a canonical template" {

@@ -25,6 +25,7 @@
         "catalog/source-manifest.json",
         "catalog/THIRD_PARTY_NOTICES.md",
         "catalog/upstream/LICENSE.md",
+        "portable",
         "src",
         "include",
         "examples/zig",

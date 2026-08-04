@@ -2,6 +2,7 @@ const std = @import("std");
 const caudex = @import("caudex");
 const caudex_persistence = @import("caudex_persistence");
 const caudex_exercise_catalog = @import("caudex_exercise_catalog");
+const caudex_portable = @import("caudex_portable");
 const caudex_sqlite = @import("caudex_sqlite");
 const caudex_tracking = @import("caudex_tracking");
 
@@ -75,12 +76,14 @@ const simple_methodology = caudex.methodology.Methodology{
 };
 
 pub fn main() !void {
-    if (caudex_persistence.contract_version != 2)
+    if (caudex_persistence.contract_version != 3)
         return error.UnsupportedPersistenceContract;
     if (caudex_persistence.canonical != caudex.canonical)
         return error.PersistenceUsesDifferentCanonicalContract;
     if (caudex_tracking.contract_version != 6)
         return error.UnsupportedTrackingContract;
+    if (caudex_portable.schema_version != 1)
+        return error.UnsupportedPortableSchema;
     const database = try caudex_sqlite.openInMemory(.{});
     defer database.close();
     const database_metadata = try database.metadata();

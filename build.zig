@@ -51,14 +51,6 @@ pub fn build(b: *std.Build) void {
     });
     const run_architecture_tests = b.addRunArtifact(architecture_tests);
 
-    const persistence_module = b.addModule("caudex_persistence", .{
-        .root_source_file = b.path("adapters/persistence.zig"),
-        .target = target,
-        .optimize = optimize,
-        .imports = &.{
-            .{ .name = "caudex", .module = module },
-        },
-    });
     const tracking_module = b.addModule("caudex_tracking", .{
         .root_source_file = b.path("tracking/root.zig"),
         .target = target,
@@ -92,6 +84,36 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &.{.{ .name = "caudex", .module = module }},
     });
+    const portable_module = b.addModule("caudex_portable", .{
+        .root_source_file = b.path("portable/protocol.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "caudex", .module = module },
+            .{ .name = "caudex_tracking", .module = tracking_module },
+            .{ .name = "caudex_tracking_protocol", .module = tracking_protocol_module },
+        },
+    });
+    const persistence_module = b.addModule("caudex_persistence", .{
+        .root_source_file = b.path("adapters/persistence.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "caudex", .module = module },
+            .{ .name = "caudex_portable", .module = portable_module },
+        },
+    });
+    const portable_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("portable_protocol_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "caudex_portable", .module = portable_module }},
+        }),
+    });
+    const run_portable_tests = b.addRunArtifact(portable_tests);
+    const portable_test_step = b.step("test-portable", "Test bounded adapter-independent portable import and export");
+    portable_test_step.dependOn(&run_portable_tests.step);
     const exercise_catalog_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("catalog/catalog_test.zig"),
@@ -146,6 +168,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "caudex_tracking", .module = tracking_module },
             .{ .name = "caudex_tracking_protocol", .module = tracking_protocol_module },
             .{ .name = "caudex_workflows", .module = workflows_module },
+            .{ .name = "caudex_portable", .module = portable_module },
         },
     });
     const c_library = b.addLibrary(.{ .name = "caudex_c", .root_module = c_api_module });
@@ -320,6 +343,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "caudex_tracking", .module = tracking_module },
                 .{ .name = "caudex_tracking_protocol", .module = tracking_protocol_module },
                 .{ .name = "caudex_workflows", .module = workflows_module },
+                .{ .name = "caudex_portable", .module = portable_module },
             },
         }),
     });
@@ -405,6 +429,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "caudex_tracking", .module = tracking_module },
                 .{ .name = "caudex_tracking_protocol", .module = tracking_protocol_module },
                 .{ .name = "caudex_workflows", .module = workflows_module },
+                .{ .name = "caudex_portable", .module = portable_module },
             },
         }),
     });
@@ -448,6 +473,7 @@ pub fn build(b: *std.Build) void {
     typescript_loader_test.addFileArg(
         b.path("fixtures/requests/recommendation.json"),
     );
+    typescript_loader_test.addFileArg(b.path("fixtures/portable/export-v1.json"));
     typescript_loader_test.step.dependOn(&npm_source_typecheck.step);
     const typescript_step = b.step(
         "test-typescript",
@@ -529,6 +555,8 @@ pub fn build(b: *std.Build) void {
                 .module = persistence_module,
             },
             .{ .name = "caudex_tracking", .module = tracking_module },
+            .{ .name = "caudex_tracking_protocol", .module = tracking_protocol_module },
+            .{ .name = "caudex_portable", .module = portable_module },
         },
     });
     sqlite_module.link_libc = true;
@@ -712,8 +740,8 @@ pub fn build(b: *std.Build) void {
     const cli_version = b.addRunArtifact(cli);
     cli_version.addArg("version");
     cli_version.expectStdOutEqual(
-        "caudex 0.1.0\nengine: 0.1.0 (schema 1)\npersistence contract: 2\n" ++
-            "tracking contract: 6\nsqlite adapter: 0.1.0 (schema 1-8)\n",
+        "caudex 0.1.0\nengine: 0.1.0 (schema 1)\npersistence contract: 3\n" ++
+            "tracking contract: 6\nsqlite adapter: 0.1.0 (schema 1-9)\n",
     );
 
     const cli_database_human = b.addRunArtifact(cli);
@@ -722,8 +750,8 @@ pub fn build(b: *std.Build) void {
         \\Database: :memory:
         \\Kind: memory
         \\Adapter version: 0.1.0
-        \\Schema version: 8
-        \\Supported schema: 1-8
+        \\Schema version: 9
+        \\Supported schema: 1-9
         \\Compatibility: current
         \\
     );
@@ -740,8 +768,8 @@ pub fn build(b: *std.Build) void {
     cli_database_json.expectStdOutEqual(
         "{\"schemaVersion\":1,\"kind\":\"caudex.database.info\",\"data\":{" ++
             "\"databasePath\":\":memory:\",\"databaseKind\":\"memory\"," ++
-            "\"adapterVersion\":\"0.1.0\",\"databaseSchemaVersion\":8," ++
-            "\"minimumSchemaVersion\":1,\"latestSchemaVersion\":8," ++
+            "\"adapterVersion\":\"0.1.0\",\"databaseSchemaVersion\":9," ++
+            "\"minimumSchemaVersion\":1,\"latestSchemaVersion\":9," ++
             "\"compatibility\":\"current\"}}\n",
     );
 
@@ -786,8 +814,8 @@ pub fn build(b: *std.Build) void {
         "{\"schemaVersion\":1,\"kind\":\"caudex.database.info\",\"data\":{" ++
             "\"databasePath\":\".zig-cache/cwe112-broken-pipe.sqlite\"," ++
             "\"databaseKind\":\"file\",\"adapterVersion\":\"0.1.0\"," ++
-            "\"databaseSchemaVersion\":8,\"minimumSchemaVersion\":1," ++
-            "\"latestSchemaVersion\":8,\"compatibility\":\"current\"}}\n",
+            "\"databaseSchemaVersion\":9,\"minimumSchemaVersion\":1," ++
+            "\"latestSchemaVersion\":9,\"compatibility\":\"current\"}}\n",
     );
 
     const cli_workout_start_test = b.addSystemCommand(&.{
@@ -1088,6 +1116,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_workflow_tests.step);
     test_step.dependOn(&run_workflow_architecture_tests.step);
     test_step.dependOn(&run_exercise_catalog_tests.step);
+    test_step.dependOn(&run_portable_tests.step);
     test_step.dependOn(&verify_exercise_catalog.step);
     test_step.dependOn(&exercise_catalog_generator_tests.step);
     test_step.dependOn(&exercise_catalog_runtime.step);

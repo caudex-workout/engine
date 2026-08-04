@@ -125,6 +125,50 @@ test "retry returns replay without duplicating or replacing the workout" {
     try std.testing.expectEqualStrings("workout-1", original.found.id.bytes);
 }
 
+test "portable active workout preserves exact targets scope and start replay" {
+    const source = try sqlite.openInMemory(.{});
+    defer source.close();
+    const destination = try sqlite.openInMemory(.{});
+    defer destination.close();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    try source.replaceCatalog(allocator, .{ .host_scope_key = scope.host_scope_key.bytes, .as_of = start.started_at.bytes }, &.{.{ .id = "bench" }});
+    _ = try source.startWorkout(allocator, start);
+    _ = try source.addExercise(allocator, .{
+        .metadata = metadata("portable-add-bench"),
+        .scope = scope,
+        .workout_id = start.workout_id,
+        .expected_revision = 1,
+        .membership_id = .{ .bytes = "bench-membership" },
+        .exercise_id = .{ .bytes = "bench" },
+        .anchor = .end,
+    });
+    const target: tracking.Metric = .{ .code = .{ .bytes = "load" }, .value = .{ .value = .{ .mantissa = 18500, .scale = 2 }, .unit = .lb } };
+    _ = try source.addSet(allocator, .{
+        .metadata = metadata("portable-add-set"),
+        .scope = scope,
+        .workout_id = start.workout_id,
+        .expected_revision = 2,
+        .membership_id = .{ .bytes = "bench-membership" },
+        .set_id = .{ .bytes = "set-1" },
+        .kind = .{ .bytes = "working" },
+        .target_metrics = &.{target},
+        .anchor = .end,
+    });
+
+    const document = try source.portableStore().exportData(allocator, .{ .host_scope_key = scope.host_scope_key.bytes, .exported_at = "2026-08-04T12:00:00Z" });
+    try std.testing.expectEqualStrings("athlete-1", document.activeWorkouts[0].athleteId.?);
+    try std.testing.expectEqualStrings("185.00", document.activeWorkouts[0].snapshot.workouts[0].exercises[0].sets[0].targetMetrics[0].value.amount);
+    const imported = try destination.portableStore().importData(allocator, .{ .schemaVersion = 1, .mode = .replace, .conflictPolicy = .overwrite, .dryRun = false, .document = document });
+    try std.testing.expect(imported.valid);
+    const loaded = (try destination.readWorkout(allocator, .{ .scope = scope, .workout_id = start.workout_id })).found;
+    try std.testing.expectEqual(@as(u64, 3), loaded.revision);
+    try std.testing.expectEqual(@as(i64, 18500), loaded.exercises[0].sets[0].target_metrics[0].value.value.mantissa);
+    const replay = try destination.startWorkout(allocator, start);
+    try std.testing.expectEqual(tracking.CommandDisposition.replayed, replay.accepted.disposition);
+}
+
 test "rejected duplicate rolls back without recording its command receipt" {
     const database = try sqlite.openInMemory(.{});
     defer database.close();

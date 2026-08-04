@@ -159,7 +159,7 @@ test "newer schema is rejected distinctly" {
         database,
         "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY)",
     );
-    try execRaw(database, "INSERT INTO schema_migrations (version) VALUES (9)");
+    try execRaw(database, "INSERT INTO schema_migrations (version) VALUES (10)");
 
     try std.testing.expectError(
         error.UnsupportedSchema,
@@ -206,6 +206,101 @@ test "templates and workflow recovery persist through public capabilities" {
     });
     const recovery = (try adapter.recoveryStore().load(allocator, .{ .host_scope_key = "scope-1", .workflow_id = "workflow-1" })).?;
     try std.testing.expectEqualStrings("completion-1", recovery.idempotency_key);
+}
+
+test "portable data dry-runs and round trips across independent SQLite databases" {
+    const source = try sqlite.openInMemory(.{});
+    defer source.close();
+    const destination = try sqlite.openInMemory(.{});
+    defer destination.close();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    try source.replaceCatalog(allocator, .{ .host_scope_key = "scope-1", .as_of = "2026-08-04T12:00:00Z" }, &.{.{ .id = "squat", .name = "Back Squat" }});
+    try source.appendCompletedWorkout(allocator, "scope-1", .{
+        .id = "completed-1",
+        .startedAt = "2026-08-04T11:00:00Z",
+        .completedAt = "2026-08-04T12:00:00Z",
+        .exercises = &.{.{ .exerciseId = "squat", .sets = &.{.{
+            .id = "set-1",
+            .kind = "working",
+            .actualMetrics = &.{.{ .code = "load", .value = .{ .amount = "185.00", .unit = "lb" } }},
+            .status = .completed,
+        }} }},
+    });
+    _ = try source.stateStore().compareAndSet(allocator, .{
+        .key = .{ .host_scope_key = "scope-1", .methodology_id = "caudex.double-progression" },
+        .expected_revision = null,
+        .methodology_version = "1.0.0",
+        .next_state = state,
+        .updated_at = "2026-08-04T12:00:00Z",
+    });
+    _ = try source.templateStore().put(allocator, .{
+        .record = .{ .host_scope_key = "scope-1", .template = .{ .schemaVersion = 1, .id = "template-1", .displayName = "Squat day", .exercises = &.{.{ .exerciseId = "squat" }}, .revision = 2 } },
+        .expected_revision = null,
+    });
+    try source.recoveryStore().put(.{
+        .key = .{ .host_scope_key = "scope-1", .workflow_id = "workflow-1" },
+        .kind = "workout_completion",
+        .status = .pending,
+        .idempotency_key = "completion-1",
+        .payload_json = "{\"amount\":\"185.00\"}",
+        .updated_at = "2026-08-04T12:00:00Z",
+    });
+    try source.recommendationJournal().append(.{
+        .id = "accepted-1",
+        .host_scope_key = "scope-1",
+        .accepted_at = "2026-08-04T12:00:00Z",
+        .result = .{
+            .ok = false,
+            .metadata = .{
+                .engineVersion = "0.1.0",
+                .schemaVersion = 1,
+                .methodology = .{ .id = "caudex.double-progression", .version = "1.0.0", .configVersion = 1 },
+                .inputFingerprint = "input",
+                .resultFingerprint = "result",
+            },
+        },
+    });
+
+    const exported = try source.portableStore().exportData(allocator, .{ .host_scope_key = "scope-1", .exported_at = "2026-08-04T12:00:00Z" });
+    try std.testing.expectEqualStrings("accepted-1", exported.acceptedRecommendations[0].id);
+    try std.testing.expectEqualStrings("185.00", exported.completedWorkouts[0].workout.exercises[0].sets[0].actualMetrics[0].value.amount);
+    const dry_run = try destination.portableStore().importData(allocator, .{ .schemaVersion = 1, .mode = .merge, .conflictPolicy = .reject, .dryRun = true, .document = exported });
+    try std.testing.expect(dry_run.valid);
+    try std.testing.expect((try destination.templateStore().load(allocator, .{ .host_scope_key = "scope-1", .template_id = "template-1" })) == null);
+
+    const applied = try destination.portableStore().importData(allocator, .{ .schemaVersion = 1, .mode = .merge, .conflictPolicy = .reject, .dryRun = false, .document = exported });
+    try std.testing.expect(applied.valid);
+    try std.testing.expectEqualStrings("Squat day", (try destination.templateStore().load(allocator, .{ .host_scope_key = "scope-1", .template_id = "template-1" })).?.template.displayName);
+    const imported_history = try destination.historySource().load(allocator, .{ .host_scope_key = "scope-1", .through = "2026-08-04T12:00:00Z" });
+    try std.testing.expectEqualStrings("185.00", imported_history.workouts[0].exercises[0].sets[0].actualMetrics[0].value.amount);
+    const conflict = try destination.portableStore().importData(allocator, .{ .schemaVersion = 1, .mode = .merge, .conflictPolicy = .reject, .dryRun = false, .document = exported });
+    try std.testing.expect(!conflict.valid);
+    try std.testing.expectEqualStrings("portable.conflict", conflict.issues[0].code);
+}
+
+test "shared portable fixture preserves canonical meaning in SQLite" {
+    const fixture = @embedFile("fixtures/portable/export-v1.json");
+    const parsed = try persistence.portable.decodeDocument(std.testing.allocator, fixture);
+    defer parsed.deinit();
+    const adapter = try sqlite.openInMemory(.{});
+    defer adapter.close();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const applied = try adapter.portableStore().importData(allocator, .{
+        .schemaVersion = 1,
+        .mode = .replace,
+        .conflictPolicy = .overwrite,
+        .dryRun = false,
+        .document = parsed.value,
+    });
+    try std.testing.expect(applied.valid);
+    const exported = try adapter.portableStore().exportData(allocator, .{ .host_scope_key = "scope-1", .exported_at = "2026-08-04T12:00:00Z" });
+    try std.testing.expectEqualStrings("host.catalog", exported.catalogReferences[0].catalogId.?);
+    try std.testing.expectEqualStrings("185.00", exported.completedWorkouts[0].workout.exercises[0].sets[0].actualMetrics[0].value.amount);
 }
 
 test "schema version one migrates forward to current metadata" {

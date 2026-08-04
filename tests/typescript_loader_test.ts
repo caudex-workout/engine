@@ -10,11 +10,12 @@ import {
   type TemplateInstantiationRequest,
   type ActiveWorkoutRecord,
   type WorkflowRecoveryRecord,
+  type PortableDocument,
   type JsonValue,
 } from "../packages/npm/workout-engine/src/index.ts";
 
-const [wasmPath, fixturePath] = process.argv.slice(2);
-if (!wasmPath || !fixturePath) throw new Error("missing test artifact paths");
+const [wasmPath, fixturePath, portableFixturePath] = process.argv.slice(2);
+if (!wasmPath || !fixturePath || !portableFixturePath) throw new Error("missing test artifact paths");
 
 const wasm = await readFile(wasmPath);
 const request = JSON.parse(
@@ -238,6 +239,22 @@ const templateInstantiation: TemplateInstantiationRequest = {
 const instantiatedTemplate = caudex.instantiateTemplate(templateInstantiation);
 if (!("accepted" in instantiatedTemplate.outcome) || instantiatedTemplate.outcome.accepted.origin !== "template") {
   throw new Error("template workflow did not cross the WASM boundary");
+}
+
+const portableDocument = JSON.parse(await readFile(portableFixturePath, "utf8")) as PortableDocument;
+const portableExport = caudex.exportPortable(portableDocument);
+if (!("accepted" in portableExport.outcome) || portableExport.outcome.accepted.completedWorkouts?.[0]?.workout.exercises[0]?.sets[0]?.actualMetrics[0]?.value.amount !== "185.00") {
+  throw new Error("portable export did not preserve an exact decimal through WASM");
+}
+const portablePlan = caudex.validatePortableImport({
+  schemaVersion: 1,
+  mode: "merge",
+  conflictPolicy: "reject",
+  dryRun: true,
+  document: portableDocument,
+});
+if (!portablePlan.valid || !portablePlan.dryRun || portablePlan.counts.completedWorkouts !== 1) {
+  throw new Error("portable dry-run validation did not cross the WASM boundary");
 }
 
 const invalid = caudex.recommendSession({

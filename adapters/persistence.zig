@@ -7,9 +7,10 @@
 
 const std = @import("std");
 const caudex = @import("caudex");
+pub const portable = @import("caudex_portable");
 
 pub const canonical = caudex.canonical;
-pub const contract_version: u32 = 2;
+pub const contract_version: u32 = 3;
 
 pub const AdapterError = error{
     Unavailable,
@@ -215,5 +216,26 @@ pub const WorkflowRecoveryStore = struct {
 
     pub fn put(self: WorkflowRecoveryStore, record: WorkflowRecoveryRecord) AdapterError!void {
         return self.put_fn(self.context, record);
+    }
+};
+
+pub const PortableExportQuery = struct {
+    host_scope_key: []const u8,
+    exported_at: []const u8,
+};
+
+/// Adapter-independent import/export capability. Exported values and import
+/// issues live in `allocator`; implementations must validate before mutation.
+pub const PortableDataStore = struct {
+    context: *anyopaque,
+    export_fn: *const fn (*anyopaque, std.mem.Allocator, PortableExportQuery) CapabilityError!portable.Document,
+    import_fn: *const fn (*anyopaque, std.mem.Allocator, portable.ImportRequest) CapabilityError!portable.ImportPlan,
+
+    pub fn exportData(self: PortableDataStore, allocator: std.mem.Allocator, query: PortableExportQuery) CapabilityError!portable.Document {
+        return self.export_fn(self.context, allocator, query);
+    }
+
+    pub fn importData(self: PortableDataStore, allocator: std.mem.Allocator, request: portable.ImportRequest) CapabilityError!portable.ImportPlan {
+        return self.import_fn(self.context, allocator, request);
     }
 };

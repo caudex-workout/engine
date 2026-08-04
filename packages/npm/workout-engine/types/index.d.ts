@@ -328,7 +328,7 @@ export declare class CaudexTrackingRejectedError extends Error {
 }
 export interface ClockProvider { now(): string }
 export interface IdProvider { next(kind: "workout" | "membership" | "set" | "command" | "acceptedRecommendation"): string }
-export interface ActiveWorkoutRecord { hostScopeKey: string; workoutId: string; snapshot: TrackingSnapshot }
+export interface ActiveWorkoutRecord { hostScopeKey: string; athleteId?: string; workoutId: string; snapshot: TrackingSnapshot }
 export interface ActiveWorkoutPersistence {
   loadActiveWorkout(hostScopeKey: string, workoutId: string): Promise<ActiveWorkoutRecord | null>;
   saveActiveWorkout(record: ActiveWorkoutRecord, expectedRevision: number | null): Promise<void>;
@@ -354,6 +354,31 @@ export interface WorkflowRecoveryRecord {
   payload: JsonValue;
   updatedAt: string;
 }
+export interface PortableCatalogReference { hostScopeKey: string; exerciseId: string; catalogId?: string; catalogVersion?: string }
+export interface PortableCustomExerciseRecord { hostScopeKey: string; exercise: Exercise }
+export interface PortableTemplateRecord { hostScopeKey: string; template: WorkoutTemplateDocument }
+export interface PortableCompletedWorkoutRecord { hostScopeKey: string; workout: CompletedWorkout }
+export interface PortableAcceptedRecommendationRecord { id: string; hostScopeKey: string; acceptedAt: string; result: RecommendationResult }
+export interface PortableMethodologyStateRecord { hostScopeKey: string; methodologyId: string; methodologyVersion: string; state: MethodologyState; revision: string; updatedAt: string }
+export interface PortableDocument {
+  schemaVersion: 1;
+  exportedAt: string;
+  catalogReferences?: PortableCatalogReference[];
+  customExercises?: PortableCustomExerciseRecord[];
+  templates?: PortableTemplateRecord[];
+  activeWorkouts?: ActiveWorkoutRecord[];
+  completedWorkouts?: PortableCompletedWorkoutRecord[];
+  acceptedRecommendations?: PortableAcceptedRecommendationRecord[];
+  methodologyStates?: PortableMethodologyStateRecord[];
+  workflowRecovery?: WorkflowRecoveryRecord[];
+}
+export type PortableImportMode = "merge" | "replace";
+export type PortableConflictPolicy = "reject" | "keepExisting" | "overwrite";
+export interface PortableImportRequest { schemaVersion: 1; mode: PortableImportMode; conflictPolicy: PortableConflictPolicy; dryRun?: boolean; document: PortableDocument }
+export interface PortableIssue { code: string; path: string; message: string; severity: "warning" | "error" }
+export interface PortableCounts { catalogReferences: number; customExercises: number; templates: number; activeWorkouts: number; completedWorkouts: number; acceptedRecommendations: number; methodologyStates: number; workflowRecovery: number }
+export interface PortableImportPlan { schemaVersion: 1; valid: boolean; dryRun: boolean; mode: PortableImportMode; conflictPolicy: PortableConflictPolicy; counts: PortableCounts; issues: PortableIssue[] }
+export type PortableExportResult = { schemaVersion: 1; outcome: { accepted: PortableDocument } | { rejected: PortableIssue[] } };
 
 export interface CreateCaudexOptions {
   wasm?: WebAssembly.Module | BufferSource;
@@ -393,6 +418,8 @@ export interface Caudex {
   listCapabilities(): DiscoveryRegistry;
   validateMethodologyConfiguration(input: { methodologyId: string; configurationSchemaVersion: number; config: JsonValue }): MethodologyValidationResult;
   validateMethodologyState(input: { methodologyId: string; configurationSchemaVersion: number; config: JsonValue; state: MethodologyState }): MethodologyValidationResult;
+  exportPortable(document: PortableDocument): PortableExportResult;
+  validatePortableImport(request: PortableImportRequest): PortableImportPlan;
   readonly workflows: WorkflowFacade;
   dispose(): void;
 }

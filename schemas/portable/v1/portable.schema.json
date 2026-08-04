@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://caudex.dev/schemas/portable/v1/portable.schema.json",
+  "title": "Caudex portable data protocol v1",
+  "oneOf": [
+    { "$ref": "#/$defs/document" },
+    { "$ref": "#/$defs/importRequest" },
+    { "$ref": "#/$defs/importPlan" },
+    { "$ref": "#/$defs/exportResult" }
+  ],
+  "$defs": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "scope": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "catalogReference": {
+      "type": "object",
+      "required": ["hostScopeKey", "exerciseId"],
+      "properties": {
+        "hostScopeKey": { "$ref": "#/$defs/scope" },
+        "exerciseId": { "$ref": "#/$defs/id" },
+        "catalogId": { "$ref": "#/$defs/id" },
+        "catalogVersion": { "type": "string", "minLength": 1, "maxLength": 100 }
+      },
+      "additionalProperties": false
+    },
+    "customExercise": {
+      "type": "object",
+      "required": ["hostScopeKey", "exercise"],
+      "properties": {
+        "hostScopeKey": { "$ref": "#/$defs/scope" },
+        "exercise": { "$ref": "../../v0/canonical.schema.json#/$defs/exercise" }
+      },
+      "additionalProperties": false
+    },
+    "template": {
+      "type": "object",
+      "required": ["hostScopeKey", "template"],
+      "properties": {
+        "hostScopeKey": { "$ref": "#/$defs/scope" },
+        "template": { "$ref": "../../templates/v1/workout-template.schema.json" }
+      },
+      "additionalProperties": false
+    },
+    "activeWorkout": {
+      "type": "object",
+      "required": ["hostScopeKey", "workoutId", "snapshot"],
+      "properties": {
+        "hostScopeKey": { "$ref": "#/$defs/scope" },
+        "athleteId": { "$ref": "#/$defs/id" },
+        "workoutId": { "$ref": "#/$defs/id" },
+        "snapshot": { "$ref": "../../tracking/v1/tracking.schema.json#/$defs/snapshot" }
+      },
+      "additionalProperties": false
+    },
+    "completedWorkout": {
+      "type": "object",
+      "required": ["hostScopeKey", "workout"],
+      "properties": {
+        "hostScopeKey": { "$ref": "#/$defs/scope" },
+        "workout": { "$ref": "../../v0/canonical.schema.json#/$defs/completedWorkout" }
+      },
+      "additionalProperties": false
+    },
+    "acceptedRecommendation": {
+      "type": "object",
+      "required": ["id", "hostScopeKey", "acceptedAt", "result"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "hostScopeKey": { "$ref": "#/$defs/scope" },
+        "acceptedAt": { "type": "string", "format": "date-time", "maxLength": 64 },
+        "result": { "$ref": "../../v0/canonical.schema.json#/$defs/recommendationResult" }
+      },
+      "additionalProperties": false
+    },
+    "methodologyState": {
+      "type": "object",
+      "required": ["hostScopeKey", "methodologyId", "methodologyVersion", "state", "revision", "updatedAt"],
+      "properties": {
+        "hostScopeKey": { "$ref": "#/$defs/scope" },
+        "methodologyId": { "$ref": "#/$defs/id" },
+        "methodologyVersion": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "state": { "$ref": "../../v0/canonical.schema.json#/$defs/methodologyState" },
+        "revision": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "updatedAt": { "type": "string", "format": "date-time", "maxLength": 64 }
+      },
+      "additionalProperties": false
+    },
+    "recovery": {
+      "type": "object",
+      "required": ["hostScopeKey", "workflowId", "kind", "status", "idempotencyKey", "payload", "updatedAt"],
+      "properties": {
+        "hostScopeKey": { "$ref": "#/$defs/scope" },
+        "workflowId": { "$ref": "#/$defs/id" },
+        "kind": { "$ref": "#/$defs/id" },
+        "status": { "enum": ["pending", "completed"] },
+        "idempotencyKey": { "$ref": "#/$defs/id" },
+        "payload": true,
+        "updatedAt": { "type": "string", "format": "date-time", "maxLength": 64 }
+      },
+      "additionalProperties": false
+    },
+    "document": {
+      "type": "object",
+      "required": ["schemaVersion", "exportedAt"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "exportedAt": { "type": "string", "format": "date-time", "maxLength": 64 },
+        "catalogReferences": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/catalogReference" } },
+        "customExercises": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/customExercise" } },
+        "templates": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/template" } },
+        "activeWorkouts": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/activeWorkout" } },
+        "completedWorkouts": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/completedWorkout" } },
+        "acceptedRecommendations": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/acceptedRecommendation" } },
+        "methodologyStates": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/methodologyState" } },
+        "workflowRecovery": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/recovery" } }
+      },
+      "additionalProperties": false
+    },
+    "issue": {
+      "type": "object",
+      "required": ["code", "path", "message", "severity"],
+      "properties": {
+        "code": { "$ref": "#/$defs/id" },
+        "path": { "type": "string", "maxLength": 500 },
+        "message": { "type": "string", "maxLength": 1000 },
+        "severity": { "enum": ["warning", "error"] }
+      },
+      "additionalProperties": false
+    },
+    "counts": {
+      "type": "object",
+      "required": ["catalogReferences", "customExercises", "templates", "activeWorkouts", "completedWorkouts", "acceptedRecommendations", "methodologyStates", "workflowRecovery"],
+      "properties": {
+        "catalogReferences": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "customExercises": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "templates": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "activeWorkouts": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "completedWorkouts": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "acceptedRecommendations": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "methodologyStates": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "workflowRecovery": { "type": "integer", "minimum": 0, "maximum": 10000 }
+      },
+      "additionalProperties": false
+    },
+    "importRequest": {
+      "type": "object",
+      "required": ["schemaVersion", "mode", "conflictPolicy", "document"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "mode": { "enum": ["merge", "replace"] },
+        "conflictPolicy": { "enum": ["reject", "keepExisting", "overwrite"] },
+        "dryRun": { "type": "boolean" },
+        "document": { "$ref": "#/$defs/document" }
+      },
+      "additionalProperties": false
+    },
+    "importPlan": {
+      "type": "object",
+      "required": ["schemaVersion", "valid", "dryRun", "mode", "conflictPolicy", "counts", "issues"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "valid": { "type": "boolean" },
+        "dryRun": { "type": "boolean" },
+        "mode": { "enum": ["merge", "replace"] },
+        "conflictPolicy": { "enum": ["reject", "keepExisting", "overwrite"] },
+        "counts": { "$ref": "#/$defs/counts" },
+        "issues": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/issue" } }
+      },
+      "additionalProperties": false
+    },
+    "exportResult": {
+      "type": "object",
+      "required": ["schemaVersion", "outcome"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "outcome": {
+          "oneOf": [
+            { "type": "object", "required": ["accepted"], "properties": { "accepted": { "$ref": "#/$defs/document" } }, "additionalProperties": false },
+            { "type": "object", "required": ["rejected"], "properties": { "rejected": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/issue" } } }, "additionalProperties": false }
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

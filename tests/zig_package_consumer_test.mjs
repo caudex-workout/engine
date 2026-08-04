@@ -43,13 +43,13 @@ try {
   if (!result.stderr.includes("vendor.simple-progression registered")) {
     throw new Error(`unexpected Zig consumer output: ${result.stderr}`);
   }
-  if (!result.stderr.includes("persistence contract v2")) {
+  if (!result.stderr.includes("persistence contract v3")) {
     throw new Error(`persistence package was not imported: ${result.stderr}`);
   }
   if (!result.stderr.includes("tracking contract v6")) {
     throw new Error(`tracking package was not imported: ${result.stderr}`);
   }
-  if (!result.stderr.includes("SQLite schema v8")) {
+  if (!result.stderr.includes("SQLite schema v9")) {
     throw new Error(`SQLite package was not exercised: ${result.stderr}`);
   }
   if (!result.stderr.includes("catalog bc747f833ab3e31e2cad8e45ade4d42c12dfd73fbba86192a4dd87f201cbda3c")) {

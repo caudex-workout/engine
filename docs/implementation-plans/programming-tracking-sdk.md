@@ -130,21 +130,21 @@ keys; unrelated host services are explicitly not presented as one transaction.
 
 ### 8. Persistence expansion
 
-**Status:** In progress; active-workout, template, provenance, and recovery persistence implemented
+**Status:** Completed
 
 - Contracts and contract kit cover replay, templates, provenance, acceptance,
   completion, state, recovery, and portable data.
 - SQLite migration/transaction/rollback/reopen tests and IndexedDB connection,
   upgrade, abort, conflict, delete, reopen, scope, and round-trip tests pass.
 
-The npm persistence contract v2 and IndexedDB schema v2 now persist
+The npm persistence contract v3 and IndexedDB schema v3 now persist
 revision-aware active snapshots, templates, and workflow recovery records.
-SQLite schema v8 preserves recommendation/template provenance and immutable
+SQLite schema v9 preserves recommendation/template provenance and immutable
 prescriptions, adds revision-aware templates and workflow recovery records, and
 persists workflow-instantiated workouts transactionally. The reusable contract
 kit now verifies template compare-and-set and pending-to-completed recovery
-semantics. Portable import/export and broader orchestration recovery remain in
-their owning phases.
+semantics. Both first-party adapters implement scoped portable dry-run,
+merge/replace, conflict handling, and exact canonical round trips.
 
 ### 9. Methodology discovery
 
@@ -176,9 +176,16 @@ projection, and host override helpers. All upstream image data is excluded.
 
 ### 11. Portable import/export
 
+**Status:** Completed
+
 - A bounded adapter-independent format supports validation, dry-run, merge and
   replace, structured conflicts, excludes secrets, and round-trips semantically
   between SQLite and IndexedDB.
+
+Portable schema v1, deterministic fixtures, Zig/C/WASM/npm operations, the
+versioned persistence capability, SQLite transaction, and IndexedDB transaction
+are implemented. Both adapters consume the same fixture and retain catalog
+references and exact decimals.
 
 ### 12. Package boundaries and names
 

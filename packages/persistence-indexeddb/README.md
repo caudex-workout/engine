@@ -15,9 +15,11 @@ is packaged separately and is never imported or linked by
 | `active_workouts` | `[hostScopeKey, workoutId]` | none |
 | `workout_templates` | `[hostScopeKey, template.id]` | none |
 | `workflow_recovery` | `[hostScopeKey, workflowId]` | none |
+| `portable_catalog_references` | `[hostScopeKey, exerciseId]` | none |
 
-The database version is `2`. Version 2 adds active tracking snapshots,
-templates, and workflow recovery records without rewriting v1 stores. Future
+The database version is `3`. Version 2 added active tracking snapshots,
+templates, and workflow recovery records without rewriting v1 stores. Version
+3 adds scoped portable catalog references. Future
 released schema changes must increment the
 version and upgrade stores in `onupgradeneeded`; released upgrade steps are
 forward-only. This physical schema is adapter-private and is not the canonical

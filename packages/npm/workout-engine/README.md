@@ -46,7 +46,10 @@ initialization that prevent safe execution throw `CaudexRuntimeError`.
 The deterministic low-level `Caudex` value exposes `recommendSession()`,
 `evaluatePerformance()`, `applyTrackingCommand()`, `applyTrackingBatch()`,
 `instantiateRecommendation()`, `instantiateTemplate()`,
-`completeForEvaluation()`, and `dispose()`. Tracking and workflow calls require
+`completeForEvaluation()`, `exportPortable()`, `validatePortableImport()`, and
+`dispose()`. Portable export validates and canonicalizes a public document;
+portable import validation returns structured dry-run issues and counts, while
+an optional adapter performs durable merge or replace. Tracking and workflow calls require
 the complete current snapshot or programming result plus explicit
 command IDs, revisions, and timestamps. Accepted and rejected command results
 both return the appropriate resulting snapshot, while transport failures throw

@@ -25,6 +25,7 @@
     "./schema/evaluation-result": "./schemas/v0/evaluation-result.schema.json",
     "./schema/execution-request": "./schemas/operations/v1/execution-request.schema.json",
     "./schema/discovery": "./schemas/discovery/v1/discovery.schema.json",
+    "./schema/portable": "./schemas/portable/v1/portable.schema.json",
     "./schema/double-progression-config": "./schemas/methodologies/double-progression-config-v1.schema.json",
     "./schema/double-progression-state": "./schemas/methodologies/double-progression-state-v1.schema.json",
     "./schema/rpe-top-set-backoff-config": "./schemas/methodologies/rpe-top-set-backoff-config-v1.schema.json",

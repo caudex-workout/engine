@@ -6,6 +6,9 @@ import type {
   RecommendationResult,
   TrackingSnapshot,
   WorkoutTemplateDocument,
+  PortableDocument,
+  PortableImportPlan,
+  PortableImportRequest,
 } from "@caudex-workout/engine";
 
 export const PERSISTENCE_CONTRACT_VERSION = 2;
@@ -84,6 +87,7 @@ export interface CompletedWorkoutSink {
 
 export interface ActiveWorkoutRecord {
   hostScopeKey: string;
+  athleteId?: string;
   workoutId: string;
   snapshot: TrackingSnapshot;
 }
@@ -116,6 +120,16 @@ export interface WorkflowRecoveryRecord {
 export interface WorkflowRecoveryStore {
   loadWorkflowRecovery(hostScopeKey: string, workflowId: string): Promise<WorkflowRecoveryRecord | null>;
   saveWorkflowRecovery(record: WorkflowRecoveryRecord): Promise<void>;
+}
+
+export interface PortableExportQuery {
+  hostScopeKey: string;
+  exportedAt: string;
+}
+
+export interface PortableDataStore {
+  exportPortable(query: PortableExportQuery): Promise<PortableDocument>;
+  importPortable(request: PortableImportRequest): Promise<PortableImportPlan>;
 }
 
 export type PersistenceAdapterErrorCode =

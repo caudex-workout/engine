@@ -1,4 +1,5 @@
 import "../packages/persistence-indexeddb/node_modules/fake-indexeddb/auto/index.mjs";
+import { readFile } from "node:fs/promises";
 import { PersistenceConflictError, PersistenceRevisionConflictError } from "../packages/persistence-indexeddb/node_modules/@caudex/persistence/dist/index.js";
 import { IndexedDbPersistenceAdapter } from "../packages/persistence-indexeddb/src/index.ts";
 
@@ -132,6 +133,47 @@ try {
   });
   if ((await adapter.loadWorkflowRecovery("athlete-1", "workflow-1"))?.idempotencyKey !== "completion-1") {
     throw new Error("workflow recovery record did not round trip");
+  }
+
+  const exported = await adapter.exportPortable({ hostScopeKey: "athlete-1", exportedAt: "2026-08-04T12:00:00Z" });
+  if (exported.schemaVersion !== 1 || exported.customExercises?.map((record) => record.exercise.id).join(",") !== "bench-press,squat" ||
+      exported.activeWorkouts?.[0]?.snapshot.workouts?.[0]?.revision !== 2 ||
+      exported.activeWorkouts?.[0]?.snapshot.workouts?.[0]?.exercises?.[0]?.sets?.[0]?.targetMetrics?.[0]?.value.amount !== "185.00") {
+    throw new Error("portable export did not preserve deterministic scoped adapter data");
+  }
+  const importedAdapter = new IndexedDbPersistenceAdapter({ databaseName: `caudex-import-${crypto.randomUUID()}` });
+  try {
+    const dryRun = await importedAdapter.importPortable({ schemaVersion: 1, mode: "merge", conflictPolicy: "reject", dryRun: true, document: exported });
+    if (!dryRun.valid || (await importedAdapter.loadActiveWorkout("athlete-1", "active-1")) !== null) {
+      throw new Error("portable dry run mutated IndexedDB");
+    }
+    const applied = await importedAdapter.importPortable({ schemaVersion: 1, mode: "merge", conflictPolicy: "reject", dryRun: false, document: exported });
+    if (!applied.valid || (await importedAdapter.loadTemplate("athlete-1", "template-1"))?.template.displayName !== "Squat day" ||
+        (await importedAdapter.loadActiveWorkout("athlete-1", "active-1"))?.snapshot.workouts?.[0]?.exercises?.[0]?.sets?.[0]?.targetMetrics?.[0]?.value.amount !== "185.00") {
+      throw new Error("portable import did not round trip exact IndexedDB records");
+    }
+    const rejectedConflict = await importedAdapter.importPortable({ schemaVersion: 1, mode: "merge", conflictPolicy: "reject", dryRun: false, document: exported });
+    if (rejectedConflict.valid || rejectedConflict.issues[0]?.code !== "portable.conflict") {
+      throw new Error("portable merge did not report existing-record conflicts");
+    }
+    const kept = await importedAdapter.importPortable({ schemaVersion: 1, mode: "merge", conflictPolicy: "keepExisting", dryRun: false, document: exported });
+    if (!kept.valid) throw new Error("portable keep-existing merge was rejected");
+    await importedAdapter.close();
+    const reopened = new IndexedDbPersistenceAdapter({ databaseName: importedAdapter.databaseName });
+    if ((await reopened.loadState(key))?.revision !== "2") throw new Error("portable import was not durable after reopen");
+    await reopened.deleteDatabase();
+
+    const fixtureAdapter = new IndexedDbPersistenceAdapter({ databaseName: `caudex-fixture-${crypto.randomUUID()}` });
+    const fixture = JSON.parse(await readFile("fixtures/portable/export-v1.json", "utf8"));
+    const fixturePlan = await fixtureAdapter.importPortable({ schemaVersion: 1, mode: "replace", conflictPolicy: "overwrite", dryRun: false, document: fixture });
+    const fixtureRoundTrip = await fixtureAdapter.exportPortable({ hostScopeKey: "scope-1", exportedAt: "2026-08-04T12:00:00Z" });
+    if (!fixturePlan.valid || fixtureRoundTrip.catalogReferences?.[0]?.catalogId !== "host.catalog" ||
+        fixtureRoundTrip.completedWorkouts?.[0]?.workout.exercises[0]?.sets[0]?.actualMetrics[0]?.value.amount !== "185.00") {
+      throw new Error("shared portable fixture did not preserve canonical meaning in IndexedDB");
+    }
+    await fixtureAdapter.deleteDatabase();
+  } finally {
+    try { await importedAdapter.deleteDatabase(); } catch { /* already deleted */ }
   }
   await secondConnection.close();
 

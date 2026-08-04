@@ -8,12 +8,14 @@ const builtin = @import("builtin");
 const caudex = @import("caudex");
 const persistence = @import("caudex_persistence");
 const tracking = @import("caudex_tracking");
+const tracking_protocol = @import("caudex_tracking_protocol");
+const portable = @import("caudex_portable");
 const c = @cImport({
     @cInclude("sqlite3.h");
 });
 
 pub const adapter_version = "0.1.0";
-pub const schema_version: u32 = 8;
+pub const schema_version: u32 = 9;
 pub const minimum_schema_version: u32 = 1;
 
 pub const Options = struct {
@@ -154,6 +156,14 @@ pub const Adapter = opaque {
 
     pub fn recoveryStore(self: *Adapter) persistence.WorkflowRecoveryStore {
         return .{ .context = self, .load_fn = loadRecoveryCallback, .put_fn = putRecoveryCallback };
+    }
+
+    pub fn recommendationJournal(self: *Adapter) persistence.RecommendationJournal {
+        return .{ .context = self, .append_fn = appendAcceptedRecommendationCallback };
+    }
+
+    pub fn portableStore(self: *Adapter) persistence.PortableDataStore {
+        return .{ .context = self, .export_fn = exportPortableCallback, .import_fn = importPortableCallback };
     }
 
     /// Persists a pure workflow-instantiated workout and its immutable
@@ -558,6 +568,10 @@ pub const Adapter = opaque {
         if (current < 8) try self.applyMigration(
             8,
             @embedFile("sqlite/migrations/008_workflow_persistence.sql"),
+        );
+        if (current < 9) try self.applyMigration(
+            9,
+            @embedFile("sqlite/migrations/009_accepted_recommendations.sql"),
         );
     }
 
@@ -1946,6 +1960,510 @@ fn putRecoveryCallback(context: *anyopaque, record: persistence.WorkflowRecovery
     try statement.bindText(6, record.payload_json);
     try statement.bindText(7, record.updated_at);
     try statement.done();
+}
+
+fn appendAcceptedRecommendationCallback(context: *anyopaque, record: persistence.AcceptedRecommendationRecord) persistence.AdapterError!void {
+    const self: *Adapter = @ptrCast(@alignCast(context));
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const payload = encodeAlloc(arena.allocator(), record.result) catch return error.OperationFailed;
+    var statement = try self.prepare(
+        \\INSERT INTO accepted_recommendations
+        \\ (host_scope_key, accepted_recommendation_id, accepted_at, result_json)
+        \\VALUES (?1, ?2, ?3, ?4)
+        \\ON CONFLICT (host_scope_key, accepted_recommendation_id) DO UPDATE SET
+        \\ accepted_at = excluded.accepted_at, result_json = excluded.result_json
+    );
+    defer statement.finalize();
+    try statement.bindText(1, record.host_scope_key);
+    try statement.bindText(2, record.id);
+    try statement.bindText(3, record.accepted_at);
+    try statement.bindText(4, payload);
+    try statement.done();
+}
+
+fn exportPortableCallback(context: *anyopaque, allocator: std.mem.Allocator, query: persistence.PortableExportQuery) persistence.CapabilityError!portable.Document {
+    const self: *Adapter = @ptrCast(@alignCast(context));
+    _ = tracking.Timestamp.parse(query.exported_at) catch return error.InvalidData;
+
+    var catalog_references: std.ArrayList(portable.CatalogReference) = .empty;
+    {
+        var statement = try self.prepare("SELECT exercise_id, catalog_id, catalog_version FROM portable_catalog_references WHERE host_scope_key = ?1 ORDER BY exercise_id");
+        defer statement.finalize();
+        try statement.bindText(1, query.host_scope_key);
+        while (try statement.row()) try catalog_references.append(allocator, .{
+            .hostScopeKey = try allocator.dupe(u8, query.host_scope_key),
+            .exerciseId = try dupeColumn(allocator, statement.raw, 0),
+            .catalogId = if (column(statement.raw, 1)) |value| try allocator.dupe(u8, value) else null,
+            .catalogVersion = if (column(statement.raw, 2)) |value| try allocator.dupe(u8, value) else null,
+        });
+    }
+    var custom_exercises: std.ArrayList(portable.CustomExerciseRecord) = .empty;
+    var catalog_entries: std.ArrayList(tracking.ExerciseCatalogEntry) = .empty;
+    {
+        var statement = try self.prepare("SELECT exercise_id, payload, archived FROM catalog WHERE host_scope_key = ?1 ORDER BY exercise_id");
+        defer statement.finalize();
+        try statement.bindText(1, query.host_scope_key);
+        while (try statement.row()) {
+            const exercise = try parseColumn(persistence.canonical.Exercise, allocator, statement.raw, 1);
+            try custom_exercises.append(allocator, .{ .hostScopeKey = try allocator.dupe(u8, query.host_scope_key), .exercise = exercise });
+            try catalog_entries.append(allocator, .{
+                .exercise_id = .{ .bytes = try dupeColumn(allocator, statement.raw, 0) },
+                .availability = if (c.sqlite3_column_int(statement.raw, 2) == 0) .active else .archived,
+            });
+        }
+    }
+
+    var templates: std.ArrayList(portable.TemplateRecord) = .empty;
+    {
+        var statement = try self.prepare("SELECT payload_json FROM workout_templates WHERE host_scope_key = ?1 ORDER BY template_id");
+        defer statement.finalize();
+        try statement.bindText(1, query.host_scope_key);
+        while (try statement.row()) try templates.append(allocator, .{
+            .hostScopeKey = try allocator.dupe(u8, query.host_scope_key),
+            .template = try parseColumn(persistence.canonical.WorkoutTemplate, allocator, statement.raw, 0),
+        });
+    }
+
+    var active: std.ArrayList(portable.ActiveWorkoutRecord) = .empty;
+    {
+        var statement = try self.prepare(
+            \\SELECT athlete_id, workout_id FROM tracking_workouts
+            \\WHERE host_scope_key = ?1 AND status = 'active'
+            \\ORDER BY athlete_id, workout_id
+        );
+        defer statement.finalize();
+        try statement.bindText(1, query.host_scope_key);
+        while (try statement.row()) {
+            const athlete = try dupeColumn(allocator, statement.raw, 0);
+            const workout_id = try dupeColumn(allocator, statement.raw, 1);
+            const scope: tracking.Scope = .{
+                .host_scope_key = tracking.Id.parse(query.host_scope_key) catch return error.InvalidData,
+                .athlete_id = if (athlete.len == 0) null else tracking.Id.parse(athlete) catch return error.InvalidData,
+            };
+            const workout = (try loadTrackedWorkout(self, allocator, scope, tracking.Id.parse(workout_id) catch return error.InvalidData)) orelse return error.InvalidData;
+            const snapshot = try portableSnapshotForWorkout(self, allocator, workout, catalog_entries.items);
+            try active.append(allocator, .{
+                .hostScopeKey = try allocator.dupe(u8, query.host_scope_key),
+                .athleteId = if (athlete.len == 0) null else athlete,
+                .workoutId = workout_id,
+                .snapshot = snapshot,
+            });
+        }
+    }
+
+    var completed: std.ArrayList(portable.CompletedWorkoutRecord) = .empty;
+    {
+        var statement = try self.prepare("SELECT payload FROM history WHERE host_scope_key = ?1 ORDER BY workout_id");
+        defer statement.finalize();
+        try statement.bindText(1, query.host_scope_key);
+        while (try statement.row()) try completed.append(allocator, .{
+            .hostScopeKey = try allocator.dupe(u8, query.host_scope_key),
+            .workout = try parseColumn(persistence.canonical.CompletedWorkout, allocator, statement.raw, 0),
+        });
+    }
+
+    var accepted: std.ArrayList(portable.AcceptedRecommendationRecord) = .empty;
+    {
+        var statement = try self.prepare("SELECT accepted_recommendation_id, accepted_at, result_json FROM accepted_recommendations WHERE host_scope_key = ?1 ORDER BY accepted_recommendation_id");
+        defer statement.finalize();
+        try statement.bindText(1, query.host_scope_key);
+        while (try statement.row()) try accepted.append(allocator, .{
+            .id = try dupeColumn(allocator, statement.raw, 0),
+            .hostScopeKey = try allocator.dupe(u8, query.host_scope_key),
+            .acceptedAt = try dupeColumn(allocator, statement.raw, 1),
+            .result = try parseColumn(persistence.canonical.RecommendationResult, allocator, statement.raw, 2),
+        });
+    }
+
+    var states: std.ArrayList(portable.MethodologyStateRecord) = .empty;
+    {
+        var statement = try self.prepare("SELECT methodology_id, methodology_version, state_json, revision, updated_at FROM methodology_state WHERE host_scope_key = ?1 ORDER BY methodology_id");
+        defer statement.finalize();
+        try statement.bindText(1, query.host_scope_key);
+        while (try statement.row()) try states.append(allocator, .{
+            .hostScopeKey = try allocator.dupe(u8, query.host_scope_key),
+            .methodologyId = try dupeColumn(allocator, statement.raw, 0),
+            .methodologyVersion = try dupeColumn(allocator, statement.raw, 1),
+            .state = try parseColumn(persistence.canonical.MethodologyState, allocator, statement.raw, 2),
+            .revision = try std.fmt.allocPrint(allocator, "{d}", .{c.sqlite3_column_int64(statement.raw, 3)}),
+            .updatedAt = try dupeColumn(allocator, statement.raw, 4),
+        });
+    }
+
+    var recovery: std.ArrayList(portable.WorkflowRecoveryRecord) = .empty;
+    {
+        var statement = try self.prepare("SELECT workflow_id, kind, status, idempotency_key, payload_json, updated_at FROM workflow_recovery WHERE host_scope_key = ?1 ORDER BY workflow_id");
+        defer statement.finalize();
+        try statement.bindText(1, query.host_scope_key);
+        while (try statement.row()) {
+            const status = column(statement.raw, 2) orelse return error.InvalidData;
+            try recovery.append(allocator, .{
+                .hostScopeKey = try allocator.dupe(u8, query.host_scope_key),
+                .workflowId = try dupeColumn(allocator, statement.raw, 0),
+                .kind = try dupeColumn(allocator, statement.raw, 1),
+                .status = if (std.mem.eql(u8, status, "pending")) .pending else if (std.mem.eql(u8, status, "completed")) .completed else return error.InvalidData,
+                .idempotencyKey = try dupeColumn(allocator, statement.raw, 3),
+                .payload = std.json.parseFromSliceLeaky(std.json.Value, allocator, column(statement.raw, 4) orelse return error.InvalidData, .{ .allocate = .alloc_always }) catch return error.InvalidData,
+                .updatedAt = try dupeColumn(allocator, statement.raw, 5),
+            });
+        }
+    }
+
+    const document: portable.Document = .{
+        .schemaVersion = portable.schema_version,
+        .exportedAt = try allocator.dupe(u8, query.exported_at),
+        .catalogReferences = try catalog_references.toOwnedSlice(allocator),
+        .customExercises = try custom_exercises.toOwnedSlice(allocator),
+        .templates = try templates.toOwnedSlice(allocator),
+        .activeWorkouts = try active.toOwnedSlice(allocator),
+        .completedWorkouts = try completed.toOwnedSlice(allocator),
+        .acceptedRecommendations = try accepted.toOwnedSlice(allocator),
+        .methodologyStates = try states.toOwnedSlice(allocator),
+        .workflowRecovery = try recovery.toOwnedSlice(allocator),
+    };
+    portable.validateDocumentBounds(document) catch return error.InvalidData;
+    const encoded_check = try allocator.alloc(u8, portable.max_input_bytes);
+    _ = portable.encode(document, encoded_check) catch return error.InvalidData;
+    return document;
+}
+
+fn portableSnapshotForWorkout(self: *Adapter, allocator: std.mem.Allocator, workout: tracking.Workout, catalog: []const tracking.ExerciseCatalogEntry) persistence.CapabilityError!tracking_protocol.TrackingSnapshot {
+    var receipts: std.ArrayList(tracking.StartReceipt) = .empty;
+    var receipt_query = try self.prepare(
+        \\SELECT command_id FROM tracking_command_receipts
+        \\WHERE host_scope_key = ?1 AND athlete_id = ?2 AND workout_id = ?3
+        \\ORDER BY command_id
+    );
+    defer receipt_query.finalize();
+    try receipt_query.bindText(1, workout.scope.host_scope_key.bytes);
+    try receipt_query.bindText(2, athleteKey(workout.scope));
+    try receipt_query.bindText(3, workout.id.bytes);
+    while (try receipt_query.row()) {
+        const command_id = tracking.Id.parse(column(receipt_query.raw, 0) orelse return error.InvalidData) catch return error.InvalidData;
+        try receipts.append(allocator, (try loadStartReceipt(self, allocator, workout.scope, command_id)) orelse return error.InvalidData);
+    }
+    var set_count: usize = 0;
+    var metric_count: usize = 0;
+    for (workout.exercises) |exercise| for (exercise.sets) |set| {
+        set_count = std.math.add(usize, set_count, 1) catch return error.InvalidData;
+        metric_count = std.math.add(usize, metric_count, set.target_metrics.len + set.actual_metrics.len) catch return error.InvalidData;
+    };
+    var prescription_set_count: usize = 0;
+    var tag_count: usize = 0;
+    for (workout.prescription) |exercise| {
+        prescription_set_count = std.math.add(usize, prescription_set_count, exercise.sets.len) catch return error.InvalidData;
+        tag_count = std.math.add(usize, tag_count, exercise.tags.len) catch return error.InvalidData;
+        for (exercise.sets) |set| metric_count = std.math.add(usize, metric_count, set.target_metrics.len) catch return error.InvalidData;
+    }
+    return tracking_protocol.snapshotFromDomain(.{
+        .workouts = &.{workout},
+        .start_receipts = receipts.items,
+        .exercise_catalog = catalog,
+    }, .{
+        .workouts = try allocator.alloc(tracking_protocol.TrackedWorkout, 1),
+        .receipts = try allocator.alloc(tracking_protocol.StartReceipt, receipts.items.len),
+        .exercises = try allocator.alloc(tracking_protocol.ExerciseMembership, workout.exercises.len),
+        .sets = try allocator.alloc(tracking_protocol.TrackedSet, set_count),
+        .metrics = try allocator.alloc(persistence.canonical.Metric, metric_count),
+        .amountBytes = try allocator.alloc([64]u8, metric_count),
+        .prescription_exercises = try allocator.alloc(tracking_protocol.PrescribedExercise, workout.prescription.len),
+        .prescription_sets = try allocator.alloc(tracking_protocol.PrescribedSet, prescription_set_count),
+        .tags = try allocator.alloc([]const u8, tag_count),
+        .catalog = try allocator.alloc(tracking_protocol.ExerciseCatalogEntry, catalog.len),
+    }) catch return error.InvalidData;
+}
+
+fn importPortableCallback(context: *anyopaque, allocator: std.mem.Allocator, request: portable.ImportRequest) persistence.CapabilityError!portable.ImportPlan {
+    const self: *Adapter = @ptrCast(@alignCast(context));
+    var issues = try allocator.alloc(portable.Issue, portable.max_issues);
+    const encoded_check = try allocator.alloc(u8, portable.max_input_bytes);
+    _ = portable.encode(request.document, encoded_check) catch {
+        issues[0] = .{ .code = "portable.byte_limit_exceeded", .path = "/document", .message = "The portable document exceeds the 4 MiB encoded limit.", .severity = .@"error" };
+        return .{ .valid = false, .dryRun = request.dryRun, .mode = request.mode, .conflictPolicy = request.conflictPolicy, .counts = .{
+            .catalogReferences = request.document.catalogReferences.len,
+            .customExercises = request.document.customExercises.len,
+            .templates = request.document.templates.len,
+            .activeWorkouts = request.document.activeWorkouts.len,
+            .completedWorkouts = request.document.completedWorkouts.len,
+            .acceptedRecommendations = request.document.acceptedRecommendations.len,
+            .methodologyStates = request.document.methodologyStates.len,
+            .workflowRecovery = request.document.workflowRecovery.len,
+        }, .issues = issues[0..1] };
+    };
+    var plan = portable.planImport(request, issues) catch return error.InvalidData;
+    if (!plan.valid) return plan;
+    for (request.document.methodologyStates) |record| {
+        _ = std.fmt.parseInt(u64, record.revision, 10) catch {
+            issues[0] = .{ .code = "portable.revision_unsupported", .path = "/document/methodologyStates", .message = "SQLite requires portable methodology-state revisions to be unsigned decimal integers.", .severity = .@"error" };
+            plan.valid = false;
+            plan.issues = issues[0..1];
+            return plan;
+        };
+    }
+
+    try self.execute("BEGIN IMMEDIATE");
+    errdefer self.execute("ROLLBACK") catch {};
+    if (request.mode == .replace) try deletePortableScopes(self, allocator, request.document);
+
+    var issue_count: usize = 0;
+    if (request.mode == .merge and request.conflictPolicy == .reject) {
+        issue_count = try appendPortableConflicts(self, request.document, issues);
+        if (issue_count != 0) {
+            try self.execute("ROLLBACK");
+            plan.valid = false;
+            plan.issues = issues[0..issue_count];
+            return plan;
+        }
+    }
+    if (request.dryRun) {
+        try self.execute("ROLLBACK");
+        return plan;
+    }
+
+    for (request.document.catalogReferences) |record| {
+        const exists = try portableRecordExists(self, "SELECT 1 FROM portable_catalog_references WHERE host_scope_key=?1 AND exercise_id=?2", record.hostScopeKey, record.exerciseId);
+        if (exists and request.mode == .merge and request.conflictPolicy == .keepExisting) continue;
+        var statement = try self.prepare("INSERT INTO portable_catalog_references (host_scope_key, exercise_id, catalog_id, catalog_version) VALUES (?1, ?2, ?3, ?4) ON CONFLICT (host_scope_key, exercise_id) DO UPDATE SET catalog_id=excluded.catalog_id, catalog_version=excluded.catalog_version");
+        defer statement.finalize();
+        try statement.bindText(1, record.hostScopeKey);
+        try statement.bindText(2, record.exerciseId);
+        if (record.catalogId) |value| try statement.bindText(3, value) else try statement.bindNull(3);
+        if (record.catalogVersion) |value| try statement.bindText(4, value) else try statement.bindNull(4);
+        try statement.done();
+    }
+
+    for (request.document.customExercises) |record| {
+        const exists = try portableRecordExists(self, "SELECT 1 FROM catalog WHERE host_scope_key = ?1 AND exercise_id = ?2", record.hostScopeKey, record.exercise.id);
+        if (exists and request.mode == .merge and request.conflictPolicy == .keepExisting) continue;
+        try upsertPortableExercise(self, allocator, record, request.document.exportedAt);
+    }
+    for (request.document.templates) |record| {
+        const exists = try portableRecordExists(self, "SELECT 1 FROM workout_templates WHERE host_scope_key = ?1 AND template_id = ?2", record.hostScopeKey, record.template.id);
+        if (exists and request.mode == .merge and request.conflictPolicy == .keepExisting) continue;
+        const payload = try encodeAlloc(allocator, record.template);
+        defer allocator.free(payload);
+        var statement = try self.prepare("INSERT INTO workout_templates (host_scope_key, template_id, revision, payload_json) VALUES (?1, ?2, ?3, ?4) ON CONFLICT (host_scope_key, template_id) DO UPDATE SET revision=excluded.revision, payload_json=excluded.payload_json");
+        defer statement.finalize();
+        try statement.bindText(1, record.hostScopeKey);
+        try statement.bindText(2, record.template.id);
+        try statement.bindInt(3, record.template.revision);
+        try statement.bindText(4, payload);
+        try statement.done();
+    }
+    for (request.document.activeWorkouts) |record| {
+        const athlete = record.athleteId orelse "";
+        const exists = try portableActiveExists(self, record.hostScopeKey, athlete, record.workoutId);
+        if (exists and request.mode == .merge and request.conflictPolicy == .keepExisting) continue;
+        if (exists) try deletePortableWorkout(self, record.hostScopeKey, athlete, record.workoutId);
+        const snapshot = tracking_protocol.snapshotToDomain(record.snapshot, try portableSnapshotStorage(allocator, record.snapshot)) catch return error.InvalidData;
+        if (snapshot.workouts.len != 1) return error.InvalidData;
+        const workout = snapshot.workouts[0];
+        if (!std.mem.eql(u8, workout.scope.host_scope_key.bytes, record.hostScopeKey) or
+            !std.mem.eql(u8, athleteKey(workout.scope), athlete) or
+            !std.mem.eql(u8, workout.id.bytes, record.workoutId) or workout.status != .active) return error.InvalidData;
+        try insertTrackedWorkout(self, allocator, workout);
+        try persistWorkoutState(self, allocator, workout);
+        for (snapshot.start_receipts) |receipt| try insertStartReceipt(self, receipt.command, receipt.accepted);
+    }
+    for (request.document.completedWorkouts) |record| {
+        const exists = try portableRecordExists(self, "SELECT 1 FROM history WHERE host_scope_key = ?1 AND workout_id = ?2", record.hostScopeKey, record.workout.id);
+        if (exists and request.mode == .merge and request.conflictPolicy == .keepExisting) continue;
+        try self.appendCompletedWorkout(allocator, record.hostScopeKey, record.workout);
+    }
+    for (request.document.acceptedRecommendations) |record| {
+        const exists = try portableRecordExists(self, "SELECT 1 FROM accepted_recommendations WHERE host_scope_key = ?1 AND accepted_recommendation_id = ?2", record.hostScopeKey, record.id);
+        if (exists and request.mode == .merge and request.conflictPolicy == .keepExisting) continue;
+        try appendAcceptedRecommendationCallback(self, .{ .id = record.id, .host_scope_key = record.hostScopeKey, .accepted_at = record.acceptedAt, .result = record.result });
+    }
+    for (request.document.methodologyStates) |record| {
+        const exists = try portableRecordExists(self, "SELECT 1 FROM methodology_state WHERE host_scope_key = ?1 AND methodology_id = ?2", record.hostScopeKey, record.methodologyId);
+        if (exists and request.mode == .merge and request.conflictPolicy == .keepExisting) continue;
+        const revision = std.fmt.parseInt(u64, record.revision, 10) catch return error.InvalidData;
+        const state_json = try encodeAlloc(allocator, record.state);
+        defer allocator.free(state_json);
+        var statement = try self.prepare("INSERT INTO methodology_state (host_scope_key, methodology_id, methodology_version, state_schema_version, state_json, revision, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT (host_scope_key, methodology_id) DO UPDATE SET methodology_version=excluded.methodology_version, state_schema_version=excluded.state_schema_version, state_json=excluded.state_json, revision=excluded.revision, updated_at=excluded.updated_at");
+        defer statement.finalize();
+        try statement.bindText(1, record.hostScopeKey);
+        try statement.bindText(2, record.methodologyId);
+        try statement.bindText(3, record.methodologyVersion);
+        try statement.bindInt(4, record.state.schemaVersion);
+        try statement.bindText(5, state_json);
+        try statement.bindInt(6, revision);
+        try statement.bindText(7, record.updatedAt);
+        try statement.done();
+    }
+    for (request.document.workflowRecovery) |record| {
+        const exists = try portableRecordExists(self, "SELECT 1 FROM workflow_recovery WHERE host_scope_key = ?1 AND workflow_id = ?2", record.hostScopeKey, record.workflowId);
+        if (exists and request.mode == .merge and request.conflictPolicy == .keepExisting) continue;
+        const payload = try encodeAlloc(allocator, record.payload);
+        defer allocator.free(payload);
+        try putRecoveryCallback(self, .{
+            .key = .{ .host_scope_key = record.hostScopeKey, .workflow_id = record.workflowId },
+            .kind = record.kind,
+            .status = if (record.status == .pending) .pending else .completed,
+            .idempotency_key = record.idempotencyKey,
+            .payload_json = payload,
+            .updated_at = record.updatedAt,
+        });
+    }
+    try self.execute("COMMIT");
+    return plan;
+}
+
+fn portableSnapshotStorage(allocator: std.mem.Allocator, snapshot: tracking_protocol.TrackingSnapshot) std.mem.Allocator.Error!tracking_protocol.SnapshotConversionStorage {
+    var exercise_count: usize = 0;
+    var set_count: usize = 0;
+    var metric_count: usize = 0;
+    var prescribed_exercise_count: usize = 0;
+    var prescribed_set_count: usize = 0;
+    var tag_count: usize = 0;
+    for (snapshot.workouts) |workout| {
+        exercise_count += workout.exercises.len;
+        prescribed_exercise_count += workout.prescription.len;
+        for (workout.exercises) |exercise| {
+            set_count += exercise.sets.len;
+            for (exercise.sets) |set| metric_count += set.targetMetrics.len + set.actualMetrics.len;
+        }
+        for (workout.prescription) |exercise| {
+            prescribed_set_count += exercise.sets.len;
+            tag_count += exercise.tags.len;
+            for (exercise.sets) |set| metric_count += set.targetMetrics.len;
+        }
+    }
+    return .{
+        .workouts = try allocator.alloc(tracking.Workout, snapshot.workouts.len),
+        .receipts = try allocator.alloc(tracking.StartReceipt, snapshot.startReceipts.len),
+        .exercises = try allocator.alloc(tracking.ExerciseMembership, exercise_count),
+        .sets = try allocator.alloc(tracking.TrackedSet, set_count),
+        .metrics = try allocator.alloc(tracking.Metric, metric_count),
+        .prescription_exercises = try allocator.alloc(tracking.PrescribedExercise, prescribed_exercise_count),
+        .prescription_sets = try allocator.alloc(tracking.PrescribedSet, prescribed_set_count),
+        .tags = try allocator.alloc(tracking.Id, tag_count),
+        .catalog = try allocator.alloc(tracking.ExerciseCatalogEntry, snapshot.exerciseCatalog.len),
+    };
+}
+
+fn portableRecordExists(self: *Adapter, sql: []const u8, scope: []const u8, id: []const u8) persistence.AdapterError!bool {
+    var statement = try self.prepare(sql);
+    defer statement.finalize();
+    try statement.bindText(1, scope);
+    try statement.bindText(2, id);
+    return statement.row();
+}
+
+fn portableActiveExists(self: *Adapter, scope: []const u8, athlete: []const u8, id: []const u8) persistence.AdapterError!bool {
+    var statement = try self.prepare("SELECT 1 FROM tracking_workouts WHERE host_scope_key=?1 AND athlete_id=?2 AND workout_id=?3");
+    defer statement.finalize();
+    try statement.bindText(1, scope);
+    try statement.bindText(2, athlete);
+    try statement.bindText(3, id);
+    return statement.row();
+}
+
+fn appendPortableConflicts(self: *Adapter, document: portable.Document, issues: []portable.Issue) persistence.AdapterError!usize {
+    var count: usize = 0;
+    for (document.catalogReferences) |record| if (try portableRecordExists(self, "SELECT 1 FROM portable_catalog_references WHERE host_scope_key=?1 AND exercise_id=?2", record.hostScopeKey, record.exerciseId)) appendPortableConflict(issues, &count, "/document/catalogReferences");
+    for (document.customExercises) |record| if (try portableRecordExists(self, "SELECT 1 FROM catalog WHERE host_scope_key=?1 AND exercise_id=?2", record.hostScopeKey, record.exercise.id)) appendPortableConflict(issues, &count, "/document/customExercises");
+    for (document.templates) |record| if (try portableRecordExists(self, "SELECT 1 FROM workout_templates WHERE host_scope_key=?1 AND template_id=?2", record.hostScopeKey, record.template.id)) appendPortableConflict(issues, &count, "/document/templates");
+    for (document.activeWorkouts) |record| if (try portableActiveExists(self, record.hostScopeKey, record.athleteId orelse "", record.workoutId)) appendPortableConflict(issues, &count, "/document/activeWorkouts");
+    for (document.completedWorkouts) |record| if (try portableRecordExists(self, "SELECT 1 FROM history WHERE host_scope_key=?1 AND workout_id=?2", record.hostScopeKey, record.workout.id)) appendPortableConflict(issues, &count, "/document/completedWorkouts");
+    for (document.acceptedRecommendations) |record| if (try portableRecordExists(self, "SELECT 1 FROM accepted_recommendations WHERE host_scope_key=?1 AND accepted_recommendation_id=?2", record.hostScopeKey, record.id)) appendPortableConflict(issues, &count, "/document/acceptedRecommendations");
+    for (document.methodologyStates) |record| if (try portableRecordExists(self, "SELECT 1 FROM methodology_state WHERE host_scope_key=?1 AND methodology_id=?2", record.hostScopeKey, record.methodologyId)) appendPortableConflict(issues, &count, "/document/methodologyStates");
+    for (document.workflowRecovery) |record| if (try portableRecordExists(self, "SELECT 1 FROM workflow_recovery WHERE host_scope_key=?1 AND workflow_id=?2", record.hostScopeKey, record.workflowId)) appendPortableConflict(issues, &count, "/document/workflowRecovery");
+    return count;
+}
+
+fn appendPortableConflict(issues: []portable.Issue, count: *usize, path: []const u8) void {
+    if (count.* >= issues.len or count.* >= portable.max_issues) return;
+    issues[count.*] = .{ .code = "portable.conflict", .path = path, .message = "A persisted record already exists for this portable record.", .severity = .@"error" };
+    count.* += 1;
+}
+
+fn upsertPortableExercise(self: *Adapter, allocator: std.mem.Allocator, record: portable.CustomExerciseRecord, updated_at: []const u8) persistence.CapabilityError!void {
+    const payload = try encodeAlloc(allocator, record.exercise);
+    defer allocator.free(payload);
+    var statement = try self.prepare("INSERT INTO catalog (host_scope_key, exercise_id, payload, archived, revision, updated_at) VALUES (?1, ?2, ?3, 0, 1, ?4) ON CONFLICT (host_scope_key, exercise_id) DO UPDATE SET payload=excluded.payload, archived=0, revision=catalog.revision+1, updated_at=excluded.updated_at");
+    defer statement.finalize();
+    try statement.bindText(1, record.hostScopeKey);
+    try statement.bindText(2, record.exercise.id);
+    try statement.bindText(3, payload);
+    try statement.bindText(4, updated_at);
+    try statement.done();
+    var clear = try self.prepare("DELETE FROM catalog_search_terms WHERE host_scope_key=?1 AND exercise_id=?2");
+    defer clear.finalize();
+    try clear.bindText(1, record.hostScopeKey);
+    try clear.bindText(2, record.exercise.id);
+    try clear.done();
+    var search = try self.prepare("INSERT OR IGNORE INTO catalog_search_terms (host_scope_key, exercise_id, term) VALUES (?1, ?2, lower(?3))");
+    defer search.finalize();
+    try insertSearchTerm(search, record.hostScopeKey, record.exercise.id, record.exercise.id);
+    if (record.exercise.name) |name| try insertSearchTerm(search, record.hostScopeKey, record.exercise.id, name);
+    for (record.exercise.aliases) |alias| try insertSearchTerm(search, record.hostScopeKey, record.exercise.id, alias);
+}
+
+fn deletePortableScopes(self: *Adapter, allocator: std.mem.Allocator, document: portable.Document) persistence.CapabilityError!void {
+    var scopes: std.ArrayList([]const u8) = .empty;
+    defer scopes.deinit(allocator);
+    for (document.catalogReferences) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
+    for (document.customExercises) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
+    for (document.templates) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
+    for (document.activeWorkouts) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
+    for (document.completedWorkouts) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
+    for (document.acceptedRecommendations) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
+    for (document.methodologyStates) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
+    for (document.workflowRecovery) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
+    const statements = [_][]const u8{
+        "DELETE FROM tracking_set_command_receipts WHERE host_scope_key=?1",
+        "DELETE FROM tracking_workout_end_receipts WHERE host_scope_key=?1",
+        "DELETE FROM tracking_correction_receipts WHERE host_scope_key=?1",
+        "DELETE FROM tracking_command_receipts WHERE host_scope_key=?1",
+        "DELETE FROM tracking_workout_sets WHERE host_scope_key=?1",
+        "DELETE FROM tracking_workout_exercises WHERE host_scope_key=?1",
+        "DELETE FROM tracking_workouts WHERE host_scope_key=?1",
+        "DELETE FROM catalog_search_terms WHERE host_scope_key=?1",
+        "DELETE FROM catalog_command_receipts WHERE host_scope_key=?1",
+        "DELETE FROM catalog WHERE host_scope_key=?1",
+        "DELETE FROM history WHERE host_scope_key=?1",
+        "DELETE FROM methodology_state WHERE host_scope_key=?1",
+        "DELETE FROM portable_catalog_references WHERE host_scope_key=?1",
+        "DELETE FROM accepted_recommendations WHERE host_scope_key=?1",
+        "DELETE FROM workout_templates WHERE host_scope_key=?1",
+        "DELETE FROM workflow_recovery WHERE host_scope_key=?1",
+    };
+    for (scopes.items) |scope| for (statements) |sql| try executeScopeDelete(self, sql, scope);
+}
+
+fn appendUniqueScope(allocator: std.mem.Allocator, scopes: *std.ArrayList([]const u8), scope: []const u8) std.mem.Allocator.Error!void {
+    for (scopes.items) |existing| if (std.mem.eql(u8, existing, scope)) return;
+    try scopes.append(allocator, scope);
+}
+
+fn executeScopeDelete(self: *Adapter, sql: []const u8, scope: []const u8) persistence.AdapterError!void {
+    var statement = try self.prepare(sql);
+    defer statement.finalize();
+    try statement.bindText(1, scope);
+    try statement.done();
+}
+
+fn deletePortableWorkout(self: *Adapter, scope: []const u8, athlete: []const u8, workout_id: []const u8) persistence.AdapterError!void {
+    const statements = [_][]const u8{
+        "DELETE FROM tracking_set_command_receipts WHERE host_scope_key=?1 AND athlete_id=?2 AND workout_id=?3",
+        "DELETE FROM tracking_workout_end_receipts WHERE host_scope_key=?1 AND athlete_id=?2 AND workout_id=?3",
+        "DELETE FROM tracking_correction_receipts WHERE host_scope_key=?1 AND athlete_id=?2 AND workout_id=?3",
+        "DELETE FROM tracking_command_receipts WHERE host_scope_key=?1 AND athlete_id=?2 AND workout_id=?3",
+        "DELETE FROM tracking_workout_sets WHERE host_scope_key=?1 AND athlete_id=?2 AND workout_id=?3",
+        "DELETE FROM tracking_workout_exercises WHERE host_scope_key=?1 AND athlete_id=?2 AND workout_id=?3",
+        "DELETE FROM tracking_workouts WHERE host_scope_key=?1 AND athlete_id=?2 AND workout_id=?3",
+    };
+    for (statements) |sql| {
+        var statement = try self.prepare(sql);
+        defer statement.finalize();
+        try statement.bindText(1, scope);
+        try statement.bindText(2, athlete);
+        try statement.bindText(3, workout_id);
+        try statement.done();
+    }
 }
 
 fn loadCatalogCallback(

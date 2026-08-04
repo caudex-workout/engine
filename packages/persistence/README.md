@@ -19,12 +19,17 @@ The required capabilities are independently implementable:
 capabilities. Calculating a recommendation never invokes either capability.
 The host must explicitly accept a result before writing it.
 
-Contract version 2 also defines independently implementable
+Contract version 3 also defines independently implementable
 `ActiveWorkoutStore`, `WorkoutTemplateStore`, and `WorkflowRecoveryStore`
 capabilities. Active-workout saves compare the supplied expected workout
 revision; conflicts remain visible to the host. Recovery records use explicit
 workflow and idempotency IDs and do not imply a universal cross-adapter
 transaction.
+
+`PortableDataStore` adds adapter-independent, scoped export plus validated
+dry-run/merge/replace import. Its documents never expose private table or
+object-store layouts. See the
+[portable-data guide](../../docs/persistence/portable-data.md).
 
 Direct snapshot mode remains the fundamental integration:
 
