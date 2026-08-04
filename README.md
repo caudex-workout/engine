@@ -10,6 +10,11 @@ Install the package into a Node.js 22 or newer project:
 npm install @caudex-workout/engine
 ```
 
+Optional npm packages use the same namespace:
+`@caudex-workout/persistence`, `@caudex-workout/persistence-indexeddb`, and
+`@caudex-workout/exercise-catalog`. Earlier unpublished `@caudex/persistence*`
+names are not retained as aliases.
+
 Then create an engine, supply a complete request snapshot, and inspect the
 result:
 

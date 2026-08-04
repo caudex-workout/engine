@@ -1076,6 +1076,16 @@ pub fn build(b: *std.Build) void {
         "node",
         "tests/zig_package_consumer_test.mjs",
     });
+    const zig_package_archive = b.addSystemCommand(&.{
+        "node",
+        "tools/release/build-zig-packages.mjs",
+        "zig-out/zig-packages",
+    });
+    const zig_package_archive_step = b.step(
+        "package-zig",
+        "Generate separate publishable Zig source packages",
+    );
+    zig_package_archive_step.dependOn(&zig_package_archive.step);
     const zig_package_step = b.step(
         "test-zig-package",
         "Test direct Zig consumption from declared package paths",

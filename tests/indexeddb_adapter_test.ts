@@ -1,6 +1,6 @@
 import "../packages/persistence-indexeddb/node_modules/fake-indexeddb/auto/index.mjs";
 import { readFile } from "node:fs/promises";
-import { PersistenceConflictError, PersistenceRevisionConflictError } from "../packages/persistence-indexeddb/node_modules/@caudex/persistence/dist/index.js";
+import { PersistenceConflictError, PersistenceRevisionConflictError } from "../packages/persistence-indexeddb/node_modules/@caudex-workout/persistence/dist/index.js";
 import { IndexedDbPersistenceAdapter } from "../packages/persistence-indexeddb/src/index.ts";
 
 const adapter = new IndexedDbPersistenceAdapter({

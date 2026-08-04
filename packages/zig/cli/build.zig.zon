@@ -1,0 +1,13 @@
+.{
+    .name = .caudex_cli,
+    .version = "0.2.0-dev",
+    .fingerprint = 0xbc4917dd102799d6,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .caudex_core = .{ .path = "../core" },
+        .caudex_sqlite = .{ .path = "../sqlite" },
+        .caudex_exercise_catalog = .{ .path = "../exercise-catalog" },
+        .vaxis = .{ .url = "git+https://github.com/rockorager/libvaxis.git#cca454be4e002dbe1a386ff0fd3420ea21813fb5", .hash = "vaxis-0.6.0-BWNV_DYXCgBP-oydkwMvwclWtjMrMAmSmg7cO6wtYFno", .lazy = true },
+    },
+    .paths = .{ "build.zig", "build.zig.zon", "apps", "LICENSE", "NOTICE", "README.md" },
+}

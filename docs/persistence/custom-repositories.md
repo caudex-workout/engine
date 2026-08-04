@@ -57,7 +57,7 @@ The TypeScript mirror follows the same boundary:
 import {
   PersistenceConflictError,
   type MethodologyStateStore,
-} from "@caudex/persistence";
+} from "@caudex-workout/persistence";
 
 export class ExistingStateStore implements MethodologyStateStore {
   constructor(private readonly repository: ApplicationRepository) {}

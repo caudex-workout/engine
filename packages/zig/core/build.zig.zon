@@ -1,0 +1,7 @@
+.{
+    .name = .caudex_core,
+    .version = "0.2.0-dev",
+    .fingerprint = 0xbc74e8e7d6c83513,
+    .minimum_zig_version = "0.16.0",
+    .paths = .{ "build.zig", "build.zig.zon", "src", "tracking", "workflows", "portable", "adapters/persistence.zig", "fixtures", "LICENSE", "NOTICE", "README.md" },
+}

@@ -1,5 +1,5 @@
 {
-  "name": "@caudex/persistence",
+  "name": "@caudex-workout/persistence",
   "version": "0.2.0-dev",
   "description": "Optional persistence capability contracts for Caudex hosts",
   "license": "MIT",

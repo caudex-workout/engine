@@ -1,0 +1,8 @@
+.{
+    .name = .caudex_exercise_catalog,
+    .version = "0.2.0-dev",
+    .fingerprint = 0xb8bc57789f1846e1,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{ .caudex_core = .{ .path = "../core" } },
+    .paths = .{ "build.zig", "build.zig.zon", "catalog", "LICENSE", "NOTICE", "README.md" },
+}

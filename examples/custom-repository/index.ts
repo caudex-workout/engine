@@ -14,7 +14,7 @@ import {
   type MethodologyStateKey,
   type MethodologyStateRecord,
   type MethodologyStateStore,
-} from "@caudex/persistence";
+} from "@caudex-workout/persistence";
 
 interface LegacyExerciseRow {
   exercise_pk: number;

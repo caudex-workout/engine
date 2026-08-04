@@ -1,5 +1,21 @@
 # Zig package
 
+Caudex has four publishable source-package boundaries:
+
+- `caudex-core` contains programming, tracking, workflows, portable protocols,
+  and persistence capability contracts. It excludes CLI/TUI code, Vaxis, and
+  the SQLite implementation.
+- `caudex-sqlite` is the optional SQLite adapter and depends on core.
+- `caudex-exercise-catalog` is the optional generated catalog and depends on
+  core for its deterministic projection.
+- `caudex-cli` is the reference CLI/TUI application and owns its application
+  dependencies, including lazy Vaxis support.
+
+Maintainers generate clean source packages with `zig build package-zig`.
+Downstream Zig projects compile those sources for their selected target. The
+root development manifest intentionally remains a convenient monorepo build and
+is not the publishable core archive.
+
 Caudex supports direct source-package consumption with Zig 0.16.0. Tagged
 releases include `build.zig.zon`, the public `caudex` module, license and
 changelog files, module documentation, and the checked-in Zig consumer.

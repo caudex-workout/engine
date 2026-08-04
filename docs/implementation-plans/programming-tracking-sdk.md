@@ -189,6 +189,21 @@ references and exact decimals.
 
 ### 12. Package boundaries and names
 
+**Status:** Complete
+
+Final npm names are `@caudex-workout/engine`,
+`@caudex-workout/persistence`,
+`@caudex-workout/persistence-indexeddb`, and
+`@caudex-workout/exercise-catalog`. The pre-release `@caudex/persistence*`
+names are compatibility-breaking removals with no alias. Zig publication uses
+generated clean-copy archives so the root development build can remain
+convenient without leaking Vaxis, SQLite, or application source into core.
+
+Acceptance is verified by generating all four packages into a temporary clean
+directory, building each package independently, compiling a consumer through
+only their exported modules, and asserting that the core artifact contains no
+CLI/TUI, catalog, SQLite implementation, or Vaxis dependency.
+
 - Clean-copy Zig packages separate core, SQLite, catalog, and CLI/TUI.
 - npm names, dependencies, release metadata, docs, and examples change atomically.
 

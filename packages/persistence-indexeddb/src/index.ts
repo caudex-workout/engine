@@ -22,7 +22,7 @@ import {
   type WorkflowRecoveryStore,
   type PortableDataStore,
   type PortableExportQuery,
-} from "@caudex/persistence";
+} from "@caudex-workout/persistence";
 import type {
   CompletedWorkout,
   Exercise,

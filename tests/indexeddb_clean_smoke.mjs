@@ -49,7 +49,7 @@ try {
     `import {
   IndexedDbPersistenceAdapter,
   INDEXEDDB_SCHEMA_VERSION,
-} from "@caudex/persistence-indexeddb";
+} from "@caudex-workout/persistence-indexeddb";
 if (INDEXEDDB_SCHEMA_VERSION !== 3 ||
     typeof IndexedDbPersistenceAdapter !== "function") {
   throw new Error("IndexedDB package runtime exports failed");
@@ -62,8 +62,8 @@ if (INDEXEDDB_SCHEMA_VERSION !== 3 ||
     `import {
   IndexedDbPersistenceAdapter,
   INDEXEDDB_SCHEMA_VERSION,
-} from "@caudex/persistence-indexeddb";
-import type { ActiveWorkoutStore, CatalogSource, MethodologyStateStore, PortableDataStore, WorkoutTemplateStore, WorkflowRecoveryStore } from "@caudex/persistence";
+} from "@caudex-workout/persistence-indexeddb";
+import type { ActiveWorkoutStore, CatalogSource, MethodologyStateStore, PortableDataStore, WorkoutTemplateStore, WorkflowRecoveryStore } from "@caudex-workout/persistence";
 
 const adapter = new IndexedDbPersistenceAdapter({ databaseName: "smoke" });
 const catalog: CatalogSource = adapter;

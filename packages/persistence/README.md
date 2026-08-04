@@ -1,4 +1,4 @@
-# `@caudex/persistence`
+# `@caudex-workout/persistence`
 
 Optional, database-independent persistence capability contracts for Caudex
 hosts. This package does not contain a database driver or change workout-engine

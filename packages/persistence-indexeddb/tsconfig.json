@@ -15,7 +15,7 @@
     "target": "ES2022",
     "verbatimModuleSyntax": true,
     "paths": {
-      "@caudex/persistence": [
+      "@caudex-workout/persistence": [
         "../persistence/dist/index.d.ts"
       ],
       "@caudex-workout/engine": [

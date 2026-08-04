@@ -211,15 +211,15 @@ Proposed packages are separate from the core package and may release independent
 
 ```text
 @caudex-workout/engine
-@caudex/persistence
-@caudex/persistence-indexeddb
-@caudex/persistence-sqlite
-@caudex/persistence-postgres
+@caudex-workout/persistence
+@caudex-workout/persistence-indexeddb
+@caudex-workout/persistence-sqlite
+@caudex-workout/persistence-postgres
 ```
 
-Names are provisional until package availability is verified.
+ADR-0006 finalizes the first three implemented names before stable release.
 
-### `@caudex/persistence`
+### `@caudex-workout/persistence`
 
 May contain:
 
@@ -235,7 +235,7 @@ May contain:
 
 Each package:
 
-- Depends on `@caudex/persistence` and public Caudex schemas
+- Depends on `@caudex-workout/persistence` and public Caudex schemas
 - Contains its own driver dependencies
 - Owns its own schema and migrations, if it provides a reference schema
 - Documents runtime support

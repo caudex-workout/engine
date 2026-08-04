@@ -1,5 +1,5 @@
 {
-  "name": "@caudex/persistence-indexeddb",
+  "name": "@caudex-workout/persistence-indexeddb",
   "version": "0.2.0-dev",
   "description": "Optional IndexedDB persistence adapter for Caudex browser hosts",
   "license": "MIT",
@@ -18,7 +18,7 @@
     "NOTICE"
   ],
   "peerDependencies": {
-    "@caudex/persistence": ">=0.2.0-dev <1",
+    "@caudex-workout/persistence": ">=0.2.0-dev <1",
     "@caudex-workout/engine": ">=0.1.0 <1"
   },
   "publishConfig": {
@@ -26,7 +26,7 @@
     "provenance": true
   },
   "devDependencies": {
-    "@caudex/persistence": "file:../persistence",
+    "@caudex-workout/persistence": "file:../persistence",
     "@caudex-workout/engine": "file:../npm/workout-engine",
     "fake-indexeddb": "6.2.4",
     "typescript": "5.9.2"

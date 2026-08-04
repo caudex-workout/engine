@@ -110,6 +110,30 @@ decisions.
   matrix runs only for version tags or explicit manual dispatch.
 - No scheduled or nightly workflow is introduced.
 
+The final pre-stable npm names are:
+
+```text
+@caudex-workout/engine
+@caudex-workout/persistence
+@caudex-workout/persistence-indexeddb
+@caudex-workout/exercise-catalog
+```
+
+One organization scope makes ownership and related-package discovery explicit;
+`engine` remains the umbrella SDK name selected by the product owner. The two
+unpublished `@caudex/persistence*` spellings are removed rather than retained as
+aliases. A future npm SQLite adapter, if implemented, will use
+`@caudex-workout/persistence-sqlite`.
+
+Zig publication uses four generated, clean-copy source packages named
+`caudex-core`, `caudex-sqlite`, `caudex-exercise-catalog`, and `caudex-cli`.
+The repository root remains the convenient development build, but is not the
+core publication archive. The core archive contains only deterministic core,
+tracking, workflows, protocols, and public persistence contracts; it has no
+Vaxis or SQLite dependency and includes no CLI/TUI source. SQLite depends on
+the core archive. Catalog is independent of recommendation semantics. CLI may
+depend on all three packages plus the pinned Vaxis dependency.
+
 ## Consequences
 
 The product becomes broader without weakening the deterministic core.
@@ -117,4 +141,3 @@ Canonical tracking, workflows, templates, discovery, import/export, adapters,
 catalog data, and language facades require phased conformance-tested additions.
 ABI v2, schema additions, migrations, and coordinated npm naming are permitted
 pre-stable breaks and require migration notes when implemented.
-

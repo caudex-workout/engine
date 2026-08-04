@@ -1,0 +1,8 @@
+.{
+    .name = .caudex_sqlite,
+    .version = "0.2.0-dev",
+    .fingerprint = 0xed667a7f9300d191,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{ .caudex_core = .{ .path = "../core" } },
+    .paths = .{ "build.zig", "build.zig.zon", "adapters", "LICENSE", "NOTICE", "README.md" },
+}

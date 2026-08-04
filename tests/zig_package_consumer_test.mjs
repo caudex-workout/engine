@@ -1,61 +1,73 @@
-import { cp, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const root = resolve(".");
 const temporary = await mkdtemp(join(tmpdir(), "caudex-zig-consumer-"));
-const packaged = join(temporary, "caudex");
+const packaged = join(temporary, "packages");
 const cache = join(temporary, "cache");
 const globalCache = join(temporary, "global-cache");
 
 try {
-  await mkdir(packaged);
-  const manifest = await readFile(join(root, "build.zig.zon"), "utf8");
-  const paths = [...manifest.matchAll(/^        "([^"]+)",$/gm)]
-    .map((match) => match[1]);
-  if (
-    !paths.includes("src") ||
-    !paths.includes("adapters/persistence.zig") ||
-    !paths.includes("adapters/sqlite.zig") ||
-    !paths.includes("adapters/sqlite/migrations") ||
-    !paths.includes("tracking") ||
-    !paths.includes("include") ||
-    !paths.includes("examples/zig") ||
-    !paths.includes("LICENSE") ||
-    !paths.includes("NOTICE")
-  ) {
-    throw new Error("Zig package paths omit required source or release files");
-  }
-  for (const path of paths) {
-    await cp(join(root, path), join(packaged, path), { recursive: true });
+  const generated = spawnSync("node", [join(root, "tools/release/build-zig-packages.mjs"), packaged], { encoding: "utf8" });
+  if (generated.status !== 0) throw new Error(generated.stdout + generated.stderr);
+
+  for (const name of ["core", "sqlite", "exercise-catalog", "cli"]) {
+    runZigBuild(join(packaged, name), ["build"], cache, globalCache);
   }
 
-  runZigBuild(packaged, ["build"], cache, globalCache);
+  for (const forbidden of ["apps", "catalog", "adapters/sqlite.zig"]) {
+    try {
+      await access(join(packaged, "core", forbidden));
+      throw new Error(`core package unexpectedly contains ${forbidden}`);
+    } catch (error) {
+      if (error.message?.startsWith("core package unexpectedly")) throw error;
+    }
+  }
+  const coreManifest = await readFile(join(packaged, "core", "build.zig.zon"), "utf8");
+  if (coreManifest.includes("vaxis") || coreManifest.includes("sqlite.zig")) {
+    throw new Error("core package manifest contains application or SQLite dependencies");
+  }
 
-  const consumer = join(packaged, "examples/zig/consumer");
-  const result = runZigBuild(
-    consumer,
-    ["build", "run"],
-    cache,
-    globalCache,
-  );
-  if (!result.stderr.includes("vendor.simple-progression registered")) {
-    throw new Error(`unexpected Zig consumer output: ${result.stderr}`);
-  }
-  if (!result.stderr.includes("persistence contract v3")) {
-    throw new Error(`persistence package was not imported: ${result.stderr}`);
-  }
-  if (!result.stderr.includes("tracking contract v6")) {
-    throw new Error(`tracking package was not imported: ${result.stderr}`);
-  }
-  if (!result.stderr.includes("SQLite schema v9")) {
-    throw new Error(`SQLite package was not exercised: ${result.stderr}`);
-  }
-  if (!result.stderr.includes("catalog bc747f833ab3e31e2cad8e45ade4d42c12dfd73fbba86192a4dd87f201cbda3c")) {
-    throw new Error(`exercise catalog package was not exercised: ${result.stderr}`);
-  }
-  console.log("caudex clean Zig package consumer passed");
+  const consumer = join(temporary, "consumer");
+  await mkdir(join(consumer, "src"), { recursive: true });
+  await writeFile(join(consumer, "build.zig.zon"), `.forbidden\n`.replace(".forbidden", `.{
+    .name = .clean_consumer,
+    .version = "0.0.0",
+    .fingerprint = 0xe359b05add76bf69,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .core = .{ .path = "../packages/core" },
+        .sqlite = .{ .path = "../packages/sqlite" },
+        .catalog = .{ .path = "../packages/exercise-catalog" },
+    },
+    .paths = .{ "build.zig", "build.zig.zon", "src" },
+}`));
+  await writeFile(join(consumer, "build.zig"), `const std = @import("std");
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+    const core = b.dependency("core", .{ .target = target, .optimize = optimize });
+    const sqlite = b.dependency("sqlite", .{ .target = target, .optimize = optimize });
+    const catalog = b.dependency("catalog", .{ .target = target, .optimize = optimize });
+    const exe = b.addExecutable(.{ .name = "consumer", .root_module = b.createModule(.{ .root_source_file = b.path("src/main.zig"), .target = target, .optimize = optimize, .imports = &.{
+        .{ .name = "caudex", .module = core.module("caudex") },
+        .{ .name = "caudex_tracking", .module = core.module("caudex_tracking") },
+        .{ .name = "caudex_sqlite", .module = sqlite.module("caudex_sqlite") },
+        .{ .name = "caudex_exercise_catalog", .module = catalog.module("caudex_exercise_catalog") },
+    } }) });
+    b.installArtifact(exe);
+}`);
+  await writeFile(join(consumer, "src/main.zig"), `const std = @import("std");
+const caudex = @import("caudex");
+const tracking = @import("caudex_tracking");
+const sqlite = @import("caudex_sqlite");
+const catalog = @import("caudex_exercise_catalog");
+pub fn main() void { std.debug.print("{d} {d} {d} {d}\\n", .{ caudex.engine.schema_version, tracking.contract_version, sqlite.schema_version, catalog.schema_version }); }
+`);
+  runZigBuild(consumer, ["build"], cache, globalCache);
+  console.log("caudex clean Zig package consumers passed");
 } finally {
   await rm(temporary, { recursive: true, force: true });
 }

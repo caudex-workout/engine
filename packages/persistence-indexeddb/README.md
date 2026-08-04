@@ -1,4 +1,4 @@
-# `@caudex/persistence-indexeddb`
+# `@caudex-workout/persistence-indexeddb`
 
 Optional IndexedDB implementation of the Caudex persistence capabilities. It
 is packaged separately and is never imported or linked by
