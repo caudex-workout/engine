@@ -57,6 +57,38 @@ The v0.1 npm evaluation boundary supports double progression. Requests for
 other methodology implementations return the same structured unsupported
 methodology result used by recommendation requests.
 
+## Application tracker and workflows
+
+`createCaudex()` also provides a convenience workflow layer. It uses secure
+platform UUIDs and the platform clock by default; deterministic tests and hosts
+can inject both. Persistence is optional and structural, so the engine package
+does not depend on a database package.
+
+```ts
+const caudex = await createCaudex({ persistence, clock, ids });
+const recommendation = caudex.workflows.recommend(request);
+const workout = await caudex.workflows.startRecommendation(recommendation, {
+  catalog: request.catalog,
+  scope: { hostScopeKey: "profile-1" },
+});
+
+await workout.completeSet({
+  membershipId: workout.workout.exercises![0].id,
+  setId: workout.workout.exercises![0].sets![0].id,
+  actual: [
+    { code: "repetitions", value: { amount: "8", unit: "count" } },
+    { code: "load", value: { amount: "185", unit: "lb" } },
+  ],
+});
+```
+
+Every mutation saves with the prior workout revision. Adapter conflicts are
+allowed to propagate; they are never converted into success or silently
+retried. `reloadActiveWorkout()` works within an in-memory instance and uses
+the optional persistence capability across reloads. Methodology state is never
+accepted automatically: `acceptProposedState()` must be called explicitly and
+requires a compare-and-set capability.
+
 ## Methodology factories
 
 The package exports typed factories for both first-party configurations:

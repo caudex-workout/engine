@@ -102,11 +102,18 @@ complete this phase in their owning phases.
 
 ### 6. npm APIs
 
+**Status:** Completed for deterministic and convenience APIs
+
 - Deterministic APIs require explicit snapshots, IDs, revisions, and timestamps.
 - Convenience APIs inject/default secure IDs and clocks, support reload/retry,
   expose conflicts, and never accept methodology state implicitly.
 - Node, browser, declaration, docs, and clean-consumer tests pass without an
   unexplained runtime dependency.
+
+The convenience facade injects or defaults secure IDs and clocks, operates with
+an in-memory active-workout store when persistence is absent, reloads through a
+narrow optional persistence capability, preserves revision conflicts, and
+requires an explicit compare-and-set call to accept methodology state.
 
 ### 7. Optional orchestration
 

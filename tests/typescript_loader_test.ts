@@ -8,6 +8,7 @@ import {
   type TrackingBatchRequest,
   type TrackingCommandRequest,
   type TemplateInstantiationRequest,
+  type ActiveWorkoutRecord,
 } from "../packages/npm/workout-engine/src/index.ts";
 
 const [wasmPath, fixturePath] = process.argv.slice(2);
@@ -18,7 +19,25 @@ const request = JSON.parse(
   await readFile(fixturePath, "utf8"),
 ) as RecommendationRequest;
 
-const caudex = await createCaudex({ wasm });
+let idSequence = 0;
+const activeRecords = new Map<string, ActiveWorkoutRecord>();
+const caudex = await createCaudex({
+  wasm,
+  clock: { now: () => "2026-08-04T12:00:00Z" },
+  ids: { next: (kind) => `${kind}-${++idSequence}` },
+  persistence: {
+    async loadActiveWorkout(hostScopeKey, workoutId) {
+      return activeRecords.get(`${hostScopeKey}/${workoutId}`) ?? null;
+    },
+    async saveActiveWorkout(record, expectedRevision) {
+      const key = `${record.hostScopeKey}/${record.workoutId}`;
+      const existing = activeRecords.get(key);
+      const actual = existing?.snapshot.workouts?.find((workout) => workout.id === record.workoutId)?.revision ?? null;
+      if (actual !== expectedRevision) throw new Error(`revision conflict: expected ${expectedRevision}, actual ${actual}`);
+      activeRecords.set(key, structuredClone(record));
+    },
+  },
+});
 const result = caudex.recommendSession(request);
 if (!result.ok || !result.recommendation) {
   throw new Error("ordinary object request did not produce a recommendation");
@@ -28,6 +47,28 @@ if (
   "83481330a812bb41384d958c104038d230bf93ceee163fd47b7c62a41361fd6f"
 ) {
   throw new Error("TypeScript facade fingerprint differs from core fixtures");
+}
+
+const highLevel = await caudex.workflows.startRecommendation(result, {
+  catalog: request.catalog,
+  scope: { hostScopeKey: "scope-high-level" },
+  acceptedRecommendationId: "accepted-high-level",
+});
+const firstMembership = highLevel.workout.exercises?.[0];
+const firstSet = firstMembership?.sets?.[0];
+if (!firstMembership || !firstSet) throw new Error("high-level workflow did not instantiate prescribed IDs");
+await highLevel.completeSet({
+  membershipId: firstMembership.id,
+  setId: firstSet.id,
+  actual: firstSet.targetMetrics ?? [],
+});
+const reloaded = await caudex.workflows.reloadActiveWorkout({
+  hostScopeKey: "scope-high-level",
+  workoutId: highLevel.workout.id,
+  catalog: request.catalog,
+});
+if (!reloaded || reloaded.workout.revision !== 2) {
+  throw new Error("high-level active workout did not persist and reload with its revision");
 }
 if ("memory" in caudex || "alloc" in caudex || "execute" in caudex) {
   throw new Error("the public facade exposes raw WebAssembly ownership");

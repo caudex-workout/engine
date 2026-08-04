@@ -278,17 +278,17 @@ export interface TrackingSnapshot {
 }
 
 export type TrackingCommand =
-  | { startWorkout: JsonObject }
-  | { addExercise: JsonObject }
-  | { removeExercise: JsonObject }
-  | { reorderExercise: JsonObject }
-  | { addSet: JsonObject }
-  | { completeSet: JsonObject }
-  | { skipSet: JsonObject }
-  | { reopenSet: JsonObject }
-  | { removeSet: JsonObject }
-  | { reorderSet: JsonObject }
-  | { completeWorkout: JsonObject };
+  | { startWorkout: Record<string, unknown> }
+  | { addExercise: Record<string, unknown> }
+  | { removeExercise: Record<string, unknown> }
+  | { reorderExercise: Record<string, unknown> }
+  | { addSet: Record<string, unknown> }
+  | { completeSet: Record<string, unknown> }
+  | { skipSet: Record<string, unknown> }
+  | { reopenSet: Record<string, unknown> }
+  | { removeSet: Record<string, unknown> }
+  | { reorderSet: Record<string, unknown> }
+  | { completeWorkout: Record<string, unknown> };
 
 export interface TrackingCommandRequest {
   schemaVersion: 1;
@@ -396,10 +396,60 @@ export class CaudexRuntimeError extends Error {
   }
 }
 
+export class CaudexTrackingRejectedError extends Error {
+  readonly issues: TrackingIssue[];
+  constructor(issues: TrackingIssue[]) {
+    super(issues[0]?.message ?? "The tracking command was rejected.");
+    this.name = "CaudexTrackingRejectedError";
+    this.issues = issues;
+  }
+}
+
+export interface ClockProvider { now(): string }
+export interface IdProvider { next(kind: "workout" | "membership" | "set" | "command" | "acceptedRecommendation"): string }
+export interface ActiveWorkoutRecord { hostScopeKey: string; workoutId: string; snapshot: TrackingSnapshot }
+export interface ActiveWorkoutPersistence {
+  loadActiveWorkout(hostScopeKey: string, workoutId: string): Promise<ActiveWorkoutRecord | null>;
+  saveActiveWorkout(record: ActiveWorkoutRecord, expectedRevision: number | null): Promise<void>;
+}
+export interface MethodologyStateAcceptancePersistence {
+  compareAndSetState(change: {
+    key: { hostScopeKey: string; methodologyId: string };
+    expectedRevision: string | null;
+    methodologyVersion: string;
+    nextState: MethodologyState;
+    updatedAt: string;
+  }): Promise<unknown>;
+}
+
 export interface CreateCaudexOptions {
   wasm?: WebAssembly.Module | BufferSource;
   wasmUrl?: string | URL;
   fetch?: typeof globalThis.fetch;
+  clock?: ClockProvider;
+  ids?: IdProvider;
+  persistence?: Partial<ActiveWorkoutPersistence & MethodologyStateAcceptancePersistence>;
+}
+
+export interface ActiveWorkout {
+  readonly snapshot: TrackingSnapshot;
+  readonly workout: TrackedWorkout;
+  completeSet(input: { membershipId: string; setId: string; actual: Metric[]; status?: "completed" | "partial" | "failed" }): Promise<TrackedWorkout>;
+  complete(): Promise<CompletedWorkout>;
+}
+
+export interface WorkflowFacade {
+  recommend(request: RecommendationRequest): RecommendationResult;
+  startRecommendation(result: RecommendationResult, input: {
+    catalog: Exercise[]; scope: { hostScopeKey: string; athleteId?: string };
+    acceptedRecommendationId?: string; methodologyStateRevision?: string; methodologyStateFingerprint?: string;
+  }): Promise<ActiveWorkout>;
+  startTemplate(template: WorkoutTemplateDocument, input: {
+    catalog: Exercise[]; scope: { hostScopeKey: string; athleteId?: string };
+  }): Promise<ActiveWorkout>;
+  reloadActiveWorkout(input: { hostScopeKey: string; workoutId: string; catalog: Exercise[] }): Promise<ActiveWorkout | null>;
+  evaluateCompletion(request: EvaluationRequest): EvaluationResult;
+  acceptProposedState(evaluation: EvaluationResult, input: { hostScopeKey: string; expectedRevision: string | null }): Promise<unknown>;
 }
 
 export interface Caudex {
@@ -410,6 +460,7 @@ export interface Caudex {
   instantiateRecommendation(request: RecommendationInstantiationRequest): InstantiationResult;
   instantiateTemplate(request: TemplateInstantiationRequest): InstantiationResult;
   completeForEvaluation(request: CompletionConversionRequest): CompletionConversionResult;
+  readonly workflows: WorkflowFacade;
   dispose(): void;
 }
 
@@ -463,7 +514,7 @@ export async function createCaudex(
       "The WebAssembly runtime could not be created.",
     );
   }
-  return createFacade(exports, runtime);
+  return createFacade(exports, runtime, options);
 }
 
 async function instantiate(
@@ -474,7 +525,7 @@ async function instantiate(
       const module =
         options.wasm instanceof WebAssembly.Module
           ? options.wasm
-          : await WebAssembly.compile(options.wasm);
+          : await WebAssembly.compile(options.wasm as BufferSource);
       return await WebAssembly.instantiate(module, {});
     } catch (cause) {
       throw new CaudexInitializationError(
@@ -498,7 +549,7 @@ async function instantiate(
       }>;
       const { readFile } = await dynamicImport("node:fs/promises");
       const bytes = await readFile(url);
-      const module = await WebAssembly.compile(bytes);
+      const module = await WebAssembly.compile(bytes as BufferSource);
       return await WebAssembly.instantiate(module, {});
     } catch (cause) {
       throw new CaudexInitializationError(
@@ -552,8 +603,12 @@ function requireExports(raw: WebAssembly.Exports): WasmExports {
   return raw as WasmExports;
 }
 
-function createFacade(exports: WasmExports, runtime: number): Caudex {
+function createFacade(exports: WasmExports, runtime: number, options: CreateCaudexOptions): Caudex {
   let disposed = false;
+  const clock = options.clock ?? { now: () => new Date().toISOString() };
+  const ids = options.ids ?? { next: (kind: string) => `${kind}-${secureRandomId()}` };
+  const persistence = options.persistence;
+  const volatileActiveWorkouts = new Map<string, ActiveWorkoutRecord>();
   const execute = <Request, Result>(
     request: Request,
     operation: "recommend" | "evaluate" | "applyTrackingCommand" | "applyTrackingBatch" | "instantiateRecommendation" | "instantiateTemplate" | "completeForEvaluation",
@@ -637,7 +692,65 @@ function createFacade(exports: WasmExports, runtime: number): Caudex {
       exports.caudex_wasm_free(requestPointer, requestBytes.length);
     }
   };
-  return {
+  const persistSnapshot = async (hostScopeKey: string, workoutId: string, snapshot: TrackingSnapshot, expectedRevision: number | null): Promise<void> => {
+    const record = { hostScopeKey, workoutId, snapshot };
+    if (persistence?.saveActiveWorkout) {
+      await persistence.saveActiveWorkout(record, expectedRevision);
+    }
+    volatileActiveWorkouts.set(`${hostScopeKey}/${workoutId}`, structuredClone(record));
+  };
+  const activeWorkout = (snapshot: TrackingSnapshot, workoutId: string, catalog: Exercise[]): ActiveWorkout => {
+    let current = snapshot;
+    const currentWorkout = (): TrackedWorkout => {
+      const workout = current.workouts?.find((candidate) => candidate.id === workoutId);
+      if (!workout) throw new CaudexRuntimeError(`Active workout "${workoutId}" is absent from its snapshot.`);
+      return workout;
+    };
+    const apply = async (command: TrackingCommand): Promise<TrackedWorkout> => {
+      const before = currentWorkout();
+      const result = execute<TrackingCommandRequest, TrackingCommandResult>({ schemaVersion: 1, snapshot: current, command }, "applyTrackingCommand", false);
+      current = result.snapshot;
+      if ("rejected" in result.outcome) throw new CaudexTrackingRejectedError(result.outcome.rejected.issues);
+      await persistSnapshot(before.scope.hostScopeKey, workoutId, current, before.revision);
+      return result.outcome.accepted.workout;
+    };
+    return {
+      get snapshot() { return current; },
+      get workout() { return currentWorkout(); },
+      async completeSet(input) {
+        const workout = currentWorkout();
+        return apply({ completeSet: {
+          metadata: { commandId: ids.next("command"), occurredAt: clock.now() },
+          scope: workout.scope,
+          workoutId,
+          expectedRevision: workout.revision,
+          membershipId: input.membershipId,
+          setId: input.setId,
+          actualMetrics: input.actual,
+          status: input.status ?? "completed",
+          completedAt: clock.now(),
+        } });
+      },
+      async complete() {
+        const workout = currentWorkout();
+        await apply({ completeWorkout: {
+          metadata: { commandId: ids.next("command"), occurredAt: clock.now() },
+          scope: workout.scope,
+          workoutId,
+          expectedRevision: workout.revision,
+          completedAt: clock.now(),
+        } });
+        const converted = execute<CompletionConversionRequest, CompletionConversionResult>(
+          { schemaVersion: 1, workout: currentWorkout(), catalog },
+          "completeForEvaluation",
+          false,
+        );
+        if ("rejected" in converted.outcome) throw new CaudexTrackingRejectedError(converted.outcome.rejected);
+        return converted.outcome.accepted;
+      },
+    };
+  };
+  const facade: Caudex = {
     recommendSession(request) {
       return execute<RecommendationRequest, RecommendationResult>(
         request,
@@ -667,6 +780,79 @@ function createFacade(exports: WasmExports, runtime: number): Caudex {
     completeForEvaluation(request) {
       return execute<CompletionConversionRequest, CompletionConversionResult>(request, "completeForEvaluation", false);
     },
+    workflows: {
+      recommend(request) {
+        return execute<RecommendationRequest, RecommendationResult>(request, "recommend", true);
+      },
+      async startRecommendation(result, input) {
+        const recommendation = result.recommendation;
+        const membershipIds = recommendation?.exercises.map(() => ids.next("membership")) ?? [];
+        const setIds = recommendation?.exercises.flatMap((exercise) => exercise.sets.map(() => ids.next("set"))) ?? [];
+        const instantiated = execute<RecommendationInstantiationRequest, InstantiationResult>({
+          schemaVersion: 1,
+          recommendationResult: result,
+          catalog: input.catalog,
+          scope: input.scope,
+          ids: { workoutId: ids.next("workout"), membershipIds, setIds },
+          createdAt: clock.now(),
+          acceptedRecommendationId: input.acceptedRecommendationId ?? ids.next("acceptedRecommendation"),
+          methodologyStateRevision: input.methodologyStateRevision,
+          methodologyStateFingerprint: input.methodologyStateFingerprint,
+        }, "instantiateRecommendation", false);
+        if ("rejected" in instantiated.outcome) throw new CaudexTrackingRejectedError(instantiated.outcome.rejected);
+        const snapshot: TrackingSnapshot = {
+          workouts: [instantiated.outcome.accepted],
+          startReceipts: [],
+          exerciseCatalog: input.catalog.map((exercise) => ({ exerciseId: exercise.id, availability: "active" })),
+        };
+        await persistSnapshot(input.scope.hostScopeKey, instantiated.outcome.accepted.id, snapshot, null);
+        return activeWorkout(snapshot, instantiated.outcome.accepted.id, input.catalog);
+      },
+      async startTemplate(template, input) {
+        const membershipIds = template.exercises.map(() => ids.next("membership"));
+        const setIds = template.exercises.flatMap((exercise) => (exercise.sets ?? []).map(() => ids.next("set")));
+        const instantiated = execute<TemplateInstantiationRequest, InstantiationResult>({
+          schemaVersion: 1,
+          template,
+          catalog: input.catalog,
+          scope: input.scope,
+          ids: { workoutId: ids.next("workout"), membershipIds, setIds },
+          createdAt: clock.now(),
+        }, "instantiateTemplate", false);
+        if ("rejected" in instantiated.outcome) throw new CaudexTrackingRejectedError(instantiated.outcome.rejected);
+        const snapshot: TrackingSnapshot = {
+          workouts: [instantiated.outcome.accepted],
+          startReceipts: [],
+          exerciseCatalog: input.catalog.map((exercise) => ({ exerciseId: exercise.id, availability: "active" })),
+        };
+        await persistSnapshot(input.scope.hostScopeKey, instantiated.outcome.accepted.id, snapshot, null);
+        return activeWorkout(snapshot, instantiated.outcome.accepted.id, input.catalog);
+      },
+      async reloadActiveWorkout(input) {
+        const record = persistence?.loadActiveWorkout
+          ? await persistence.loadActiveWorkout(input.hostScopeKey, input.workoutId)
+          : volatileActiveWorkouts.get(`${input.hostScopeKey}/${input.workoutId}`) ?? null;
+        return record ? activeWorkout(record.snapshot, record.workoutId, input.catalog) : null;
+      },
+      evaluateCompletion(request) {
+        return execute<EvaluationRequest, EvaluationResult>(request, "evaluate", true);
+      },
+      async acceptProposedState(evaluation, input) {
+        if (!evaluation.ok || !evaluation.nextMethodologyState) {
+          throw new CaudexRuntimeError("The evaluation has no methodology-state proposal to accept.");
+        }
+        if (!persistence?.compareAndSetState) {
+          throw new CaudexRuntimeError("No methodology-state persistence capability was supplied.");
+        }
+        return persistence.compareAndSetState({
+          key: { hostScopeKey: input.hostScopeKey, methodologyId: evaluation.metadata.methodology.id },
+          expectedRevision: input.expectedRevision,
+          methodologyVersion: evaluation.metadata.methodology.version,
+          nextState: evaluation.nextMethodologyState,
+          updatedAt: clock.now(),
+        });
+      },
+    },
     dispose() {
       if (!disposed) {
         exports.caudex_wasm_runtime_destroy(runtime);
@@ -674,6 +860,13 @@ function createFacade(exports: WasmExports, runtime: number): Caudex {
       }
     },
   };
+  return facade;
+}
+
+function secureRandomId(): string {
+  const crypto = globalThis.crypto;
+  if (!crypto?.randomUUID) throw new CaudexRuntimeError("Secure platform randomness is unavailable; inject an ID provider.");
+  return crypto.randomUUID();
 }
 
 function statusResult<Result extends RecommendationResult | EvaluationResult>(
@@ -737,7 +930,7 @@ function invalidResult<
       inputFingerprint: "",
       resultFingerprint: "",
     },
-  } as Result;
+  } as unknown as Result;
 }
 
 function isNode(): boolean {

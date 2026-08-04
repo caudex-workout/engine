@@ -377,10 +377,27 @@ pub fn build(b: *std.Build) void {
         "--disable-warning=ExperimentalWarning",
         "tests/typescript_loader_test.ts",
     });
+    const npm_source_typecheck = b.addSystemCommand(&.{
+        "node",
+        "packages/npm/workout-engine/node_modules/typescript/bin/tsc",
+        "--noEmit",
+        "--strict",
+        "--allowImportingTsExtensions",
+        "--target",
+        "ES2022",
+        "--module",
+        "NodeNext",
+        "--moduleResolution",
+        "NodeNext",
+        "--lib",
+        "ES2023,DOM",
+        "packages/npm/workout-engine/src/index.ts",
+    });
     typescript_loader_test.addArtifactArg(wasm_runtime);
     typescript_loader_test.addFileArg(
         b.path("fixtures/requests/recommendation.json"),
     );
+    typescript_loader_test.step.dependOn(&npm_source_typecheck.step);
     const typescript_step = b.step(
         "test-typescript",
         "Run the TypeScript WebAssembly loader and facade tests",

@@ -28,6 +28,9 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   single-command results carry the resulting replay-bearing snapshot.
 - Recommendation/template instantiation and tracked-workout completion
   conversion are available through Zig, C, WASM, and npm workflow operations.
+- The npm package provides an injected/default clock and secure-ID workflow
+  facade with active-workout reload, revision-aware optional persistence,
+  idempotent low-level retries, and explicit methodology-state acceptance.
 
 ## [0.1.0] - 2026-07-26
 

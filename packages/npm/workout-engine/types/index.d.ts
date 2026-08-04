@@ -248,17 +248,17 @@ export interface TrackingSnapshot {
   exerciseCatalog?: Array<{ exerciseId: string; availability: TrackingAvailability }>;
 }
 export type TrackingCommand =
-  | { startWorkout: JsonObject }
-  | { addExercise: JsonObject }
-  | { removeExercise: JsonObject }
-  | { reorderExercise: JsonObject }
-  | { addSet: JsonObject }
-  | { completeSet: JsonObject }
-  | { skipSet: JsonObject }
-  | { reopenSet: JsonObject }
-  | { removeSet: JsonObject }
-  | { reorderSet: JsonObject }
-  | { completeWorkout: JsonObject };
+  | { startWorkout: Record<string, unknown> }
+  | { addExercise: Record<string, unknown> }
+  | { removeExercise: Record<string, unknown> }
+  | { reorderExercise: Record<string, unknown> }
+  | { addSet: Record<string, unknown> }
+  | { completeSet: Record<string, unknown> }
+  | { skipSet: Record<string, unknown> }
+  | { reopenSet: Record<string, unknown> }
+  | { removeSet: Record<string, unknown> }
+  | { reorderSet: Record<string, unknown> }
+  | { completeWorkout: Record<string, unknown> };
 export interface TrackingCommandRequest { schemaVersion: 1; snapshot: TrackingSnapshot; command: TrackingCommand }
 export interface TrackingBatchRequest { schemaVersion: 1; snapshot: TrackingSnapshot; commands: TrackingCommand[] }
 export type TrackingCommandOutcome =
@@ -307,11 +307,42 @@ export declare class CaudexRuntimeError extends Error {
   readonly status?: number;
   constructor(message: string, status?: number);
 }
+export declare class CaudexTrackingRejectedError extends Error {
+  readonly issues: TrackingIssue[];
+  constructor(issues: TrackingIssue[]);
+}
+export interface ClockProvider { now(): string }
+export interface IdProvider { next(kind: "workout" | "membership" | "set" | "command" | "acceptedRecommendation"): string }
+export interface ActiveWorkoutRecord { hostScopeKey: string; workoutId: string; snapshot: TrackingSnapshot }
+export interface ActiveWorkoutPersistence {
+  loadActiveWorkout(hostScopeKey: string, workoutId: string): Promise<ActiveWorkoutRecord | null>;
+  saveActiveWorkout(record: ActiveWorkoutRecord, expectedRevision: number | null): Promise<void>;
+}
+export interface MethodologyStateAcceptancePersistence {
+  compareAndSetState(change: { key: { hostScopeKey: string; methodologyId: string }; expectedRevision: string | null; methodologyVersion: string; nextState: MethodologyState; updatedAt: string }): Promise<unknown>;
+}
 
 export interface CreateCaudexOptions {
   wasm?: WebAssembly.Module | BufferSource;
   wasmUrl?: string | URL;
   fetch?: typeof globalThis.fetch;
+  clock?: ClockProvider;
+  ids?: IdProvider;
+  persistence?: Partial<ActiveWorkoutPersistence & MethodologyStateAcceptancePersistence>;
+}
+export interface ActiveWorkout {
+  readonly snapshot: TrackingSnapshot;
+  readonly workout: TrackedWorkout;
+  completeSet(input: { membershipId: string; setId: string; actual: Metric[]; status?: "completed" | "partial" | "failed" }): Promise<TrackedWorkout>;
+  complete(): Promise<CompletedWorkout>;
+}
+export interface WorkflowFacade {
+  recommend(request: RecommendationRequest): RecommendationResult;
+  startRecommendation(result: RecommendationResult, input: { catalog: Exercise[]; scope: { hostScopeKey: string; athleteId?: string }; acceptedRecommendationId?: string; methodologyStateRevision?: string; methodologyStateFingerprint?: string }): Promise<ActiveWorkout>;
+  startTemplate(template: WorkoutTemplateDocument, input: { catalog: Exercise[]; scope: { hostScopeKey: string; athleteId?: string } }): Promise<ActiveWorkout>;
+  reloadActiveWorkout(input: { hostScopeKey: string; workoutId: string; catalog: Exercise[] }): Promise<ActiveWorkout | null>;
+  evaluateCompletion(request: EvaluationRequest): EvaluationResult;
+  acceptProposedState(evaluation: EvaluationResult, input: { hostScopeKey: string; expectedRevision: string | null }): Promise<unknown>;
 }
 
 export interface Caudex {
@@ -322,6 +353,7 @@ export interface Caudex {
   instantiateRecommendation(request: RecommendationInstantiationRequest): InstantiationResult;
   instantiateTemplate(request: TemplateInstantiationRequest): InstantiationResult;
   completeForEvaluation(request: CompletionConversionRequest): CompletionConversionResult;
+  readonly workflows: WorkflowFacade;
   dispose(): void;
 }
 
