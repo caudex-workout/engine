@@ -7,7 +7,7 @@ Current release: **0.1.0**
 Install the package into a Node.js 22 or newer project:
 
 ```bash
-npm install @caudex/workout-engine
+npm install @caudex-workout/engine
 ```
 
 Then create an engine, supply a complete request snapshot, and inspect the
@@ -18,7 +18,7 @@ import {
   createCaudex,
   methodologies,
   type RecommendationRequest,
-} from "@caudex/workout-engine";
+} from "@caudex-workout/engine";
 import { sampleCatalog } from "./sample-catalog.js";
 
 const caudex = await createCaudex();
@@ -108,7 +108,7 @@ explicitly accept or reject proposed methodology state.
 
 Framework-neutral builders, determinism checks, explanation assertions, and
 canonical fixture loading are available from
-`@caudex/workout-engine/testing`.
+`@caudex-workout/engine/testing`.
 
 The checked-in [Node](examples/typescript-node/recommend-and-evaluate.ts)
 example demonstrates recommendation and completed-performance evaluation. The
@@ -116,16 +116,16 @@ static [browser playground](examples/browser/README.md) consumes the packed
 public API and lets developers edit requests, switch methodologies, inspect
 explanations, and export fixtures without a backend.
 
-Caudex Workout Engine is an open-source, embeddable strength and hypertrophy
-programming engine for developers. Applications supply explicit training
-snapshots and methodology configuration; Caudex returns deterministic,
-explainable workout recommendations, performance evaluations, and proposed
+Caudex Workout Engine is an open-source, embeddable exercise-programming and
+active-workout tracking SDK for developers. Applications supply explicit
+snapshots and commands; Caudex returns deterministic recommendations,
+performance evaluations, tracking transitions, explanations, and proposed
 methodology state.
 
-Caudex is a stateless library, not a workout-tracker application or hosted
-fitness platform. The host owns users, UI, workout-history persistence,
-synchronization, and whether a recommendation is accepted or stored. The core
-does not require SQLite or any other database.
+Caudex's pure core is stateless even when calculating active-workout
+transitions. It is not a hosted fitness platform. The host owns users, UI,
+persistence, synchronization, and whether a proposal is accepted or stored.
+The core does not require SQLite or any other database.
 
 The first-party `caudex-cli` reference client lives under `apps/caudex-cli`. It
 remains architecturally external to the engine: it consumes intentionally
@@ -146,11 +146,12 @@ The initial release targets Zig 0.16.0 and includes:
 - Typed Zig and C APIs
 - An npm/WebAssembly package with Node and browser examples
 - Canonical schemas and cross-language conformance fixtures
+- A pure Zig active-workout lifecycle with explicit revisions and replay
 
-The engine itself does not include a tracker UI, required persistence, user
-accounts, sync, a hosted API, full periodization, cardio programming, arbitrary
-runtime plugins, or medical/AI coaching. The separate reference CLI is an
-optional local client and does not change the engine's stateless scope.
+The engine itself does not include required persistence, user accounts, sync, a
+hosted API, full periodization, cardio programming, arbitrary runtime plugins,
+or medical/AI coaching. The reference CLI/TUI is an optional application and
+does not change the pure engine's stateless scope.
 
 ## Architecture
 
@@ -165,7 +166,9 @@ The architecture and implementation sequence are defined by:
 - [ADR-0002: Library-First Product, Stateless Core, and Multi-Ecosystem Distribution](docs/adr/ADR-0002-library-first-product-and-distribution.md)
 - [ADR-0003: Persistence Is an Optional Adapter Outside the Core](docs/adr/ADR-0003-persistence-as-optional-adapter.md)
 - [ADR-0004: First-Party Zig Reference Client in the Workout Engine Monorepo](docs/adr/ADR-0004-first-party-zig-reference-client.md)
+- [ADR-0006: Programming and Active-Workout Tracking SDK](docs/adr/ADR-0006-programming-and-active-tracking-sdk.md)
 - [Active reference-client implementation plan](docs/implementation-plan.md)
+- [Programming and active-tracking SDK implementation plan](docs/implementation-plans/programming-tracking-sdk.md)
 - [Completed v0.1 implementation plan](docs/implementation-plans/completed/v0.1-library-first-implementation-plan.md)
 
 ADR-0002 supersedes ADR-0001's tracking-first and SQLite-first product
@@ -173,6 +176,5 @@ decisions. ADR-0003 makes persistence permanently optional and outside the core.
 ADR-0001 remains authoritative for the functional-programming discipline and
 explicit Zig boundary design.
 
-Engine v0.1 is complete. Reference-client commands remain planned until their
-public engine and adapter prerequisites satisfy the active plan's acceptance
-criteria.
+Engine v0.1 and the reference-client tracking lifecycle are implemented. The
+active SDK plan records the remaining cross-language tracking and workflow work.

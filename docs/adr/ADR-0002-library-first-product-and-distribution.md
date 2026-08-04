@@ -280,7 +280,7 @@ A future binary encoding may be added, but it must represent the same canonical 
 Publish a scoped public package, proposed as:
 
 ```text
-@caudex/workout-engine
+@caudex-workout/engine
 ```
 
 The exact scope and names must be reserved and verified before announcement.
@@ -359,7 +359,7 @@ import {
   createCaudex,
   methodologies,
   type RecommendationRequest,
-} from "@caudex/workout-engine";
+} from "@caudex-workout/engine";
 
 const caudex = await createCaudex();
 
@@ -411,10 +411,10 @@ API rules:
 Prefer one excellent npm package for v0.1 with controlled subpath exports:
 
 ```text
-@caudex/workout-engine
-@caudex/workout-engine/methodologies
-@caudex/workout-engine/schema
-@caudex/workout-engine/testing
+@caudex-workout/engine
+@caudex-workout/engine/methodologies
+@caudex-workout/engine/schema
+@caudex-workout/engine/testing
 ```
 
 Do not fragment every feature into a separate package before there is independent versioning or ownership value.

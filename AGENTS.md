@@ -2,32 +2,35 @@
 
 ## Project purpose
 
-Caudex Workout Engine is an open-source, embeddable strength and hypertrophy
-programming library written in Zig 0.16.0. It accepts explicit host-supplied
-snapshots and returns deterministic, explainable workout recommendations,
-performance evaluations, and proposed methodology state.
+Caudex Workout Engine is an open-source, embeddable exercise-programming and
+active-workout tracking SDK written in Zig 0.16.0. It accepts explicit
+host-supplied snapshots and returns deterministic recommendations, performance
+evaluations, tracking transitions, workflow results, and proposed methodology
+state.
 
 The initial product is a developer-facing, stateless engine/library. The host
 owns users, UI, persistence, workout history, synchronization, and the decision
 to accept or store a result.
 
-Engine v0.1 includes recommendation generation and methodology strategies. It
-does not include a tracker application, required persistence, a CLI product,
-hosted services, mobile or web frontends, full periodization, or long-term
-calendar generation.
+The SDK includes programming and pure tracking domains plus first-party
+reference applications. It does not include required persistence, hosted
+services, mobile or web frontends, full periodization, or long-term calendar
+generation.
 
 Read these documents before making architectural or domain changes:
 
 - `docs/adr/ADR-0001-workout-engine-core-architecture.md`
 - `docs/adr/ADR-0002-library-first-product-and-distribution.md`
 - `docs/adr/ADR-0003-persistence-as-optional-adapter.md`
+- `docs/adr/ADR-0006-programming-and-active-tracking-sdk.md`
 - `docs/implementation-plan.md`
 - `README.md`
 
 Accepted ADRs are authoritative. Apply them in decision order: ADR-0002
 supersedes ADR-0001's tracking-first scope, SQLite-first MVP, event-journal
 requirements, and implementation sequence; ADR-0003 supersedes any remaining
-implication that the core owns persistence or durable state. ADR-0001 remains
+implication that the core owns persistence or durable state; ADR-0006 supersedes
+ADR-0002's programming-only scope. ADR-0001 remains
 authoritative for the functional-core discipline, explicit idiomatic Zig shell,
 deterministic calculations, C ABI principles, and rejection of generalized
 functional-programming frameworks.

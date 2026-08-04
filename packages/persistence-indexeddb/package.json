@@ -19,7 +19,7 @@
   ],
   "peerDependencies": {
     "@caudex/persistence": ">=0.2.0-dev <1",
-    "@caudex/workout-engine": ">=0.1.0 <1"
+    "@caudex-workout/engine": ">=0.1.0 <1"
   },
   "publishConfig": {
     "access": "public",
@@ -27,7 +27,7 @@
   },
   "devDependencies": {
     "@caudex/persistence": "file:../persistence",
-    "@caudex/workout-engine": "file:../npm/workout-engine",
+    "@caudex-workout/engine": "file:../npm/workout-engine",
     "fake-indexeddb": "6.2.4",
     "typescript": "5.9.2"
   },

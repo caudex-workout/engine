@@ -1,6 +1,6 @@
 # npm release
 
-The npm release workflow publishes `@caudex/workout-engine` from a Git tag named
+The npm release workflow publishes `@caudex-workout/engine` from a Git tag named
 for the package version, such as `v0.1.0`.
 
 ## Prepare a release

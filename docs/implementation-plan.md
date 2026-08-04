@@ -70,10 +70,10 @@ It does not yet provide:
 
 ### 2.3 Public capability gap
 
-The current engine represents completed workout snapshots for recommendation
-and evaluation. It does not implement a mutable tracking domain. The client
-cannot legitimately implement the illustrative command tree until public
-packages add the relevant operations.
+The engine now includes a public pure tracking domain with explicit snapshots,
+commands, revisions, replay semantics, and structured issues. The client uses
+those public packages; remaining cross-language tracking and workflow work is
+tracked in the [programming and active-tracking SDK plan](implementation-plans/programming-tracking-sdk.md).
 
 Each requested feature is classified as:
 

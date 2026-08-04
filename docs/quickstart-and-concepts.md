@@ -5,7 +5,7 @@ The shortest integration is install, initialize, recommend, inspect, and
 dispose:
 
 ```bash
-npm install @caudex/workout-engine
+npm install @caudex-workout/engine
 ```
 
 ```ts
@@ -13,7 +13,7 @@ import {
   createCaudex,
   methodologies,
   type RecommendationRequest,
-} from "@caudex/workout-engine";
+} from "@caudex-workout/engine";
 
 const caudex = await createCaudex();
 try {

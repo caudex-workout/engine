@@ -33,7 +33,7 @@ try {
   );
   await writeFile(
     join(project, "testing-smoke.mjs"),
-    `import { createCaudex } from "@caudex/workout-engine";
+    `import { createCaudex } from "@caudex-workout/engine";
 import {
   CaudexTestAssertionError,
   assertDeterministic,
@@ -42,7 +42,7 @@ import {
   buildExercise,
   buildRecommendationRequest,
   loadCanonicalFixture,
-} from "@caudex/workout-engine/testing";
+} from "@caudex-workout/engine/testing";
 
 const caudex = await createCaudex();
 try {
@@ -81,7 +81,7 @@ try {
   );
   await writeFile(
     join(project, "testing-smoke.ts"),
-    `import type { RecommendationResult } from "@caudex/workout-engine";
+    `import type { RecommendationResult } from "@caudex-workout/engine";
 import {
   assertDeterministic,
   assertExplanationCode,
@@ -89,7 +89,7 @@ import {
   buildExercise,
   buildRecommendationRequest,
   loadCanonicalFixture,
-} from "@caudex/workout-engine/testing";
+} from "@caudex-workout/engine/testing";
 
 const request = buildRecommendationRequest({
   catalog: [buildExercise({ id: "typed-exercise" })],

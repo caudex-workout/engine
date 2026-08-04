@@ -2,7 +2,7 @@
 
 Caudex always supports direct snapshot mode. A host may load catalog, history,
 and methodology state using its existing repositories and pass the resulting
-canonical values directly to `@caudex/workout-engine`; implementing these
+canonical values directly to `@caudex-workout/engine`; implementing these
 interfaces is optional.
 
 The primary contract is the Zig module

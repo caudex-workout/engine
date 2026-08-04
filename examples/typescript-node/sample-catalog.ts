@@ -1,4 +1,4 @@
-import type { Exercise } from "@caudex/workout-engine";
+import type { Exercise } from "@caudex-workout/engine";
 
 export const sampleCatalog: Exercise[] = [
   {

@@ -3,7 +3,7 @@ import type {
   Exercise,
   MethodologyState,
   RecommendationResult,
-} from "@caudex/workout-engine";
+} from "@caudex-workout/engine";
 
 interface HostExercise {
   key: number;

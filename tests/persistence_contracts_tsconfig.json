@@ -9,7 +9,7 @@
     "target": "ES2022",
     "verbatimModuleSyntax": true,
     "paths": {
-      "@caudex/workout-engine": [
+      "@caudex-workout/engine": [
         "../packages/npm/workout-engine/types/index.d.ts"
       ]
     }

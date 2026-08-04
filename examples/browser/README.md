@@ -1,6 +1,6 @@
 # Browser playground
 
-This static playground imports only `@caudex/workout-engine`. It provides an
+This static playground imports only `@caudex-workout/engine`. It provides an
 editable canonical request, switches between the double-progression and RPE
 top-set/backoff methodology factories, renders the recommendation and its
 structured explanation trace, and copies or downloads the current fixture. It

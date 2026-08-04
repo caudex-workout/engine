@@ -4,7 +4,7 @@ import type {
   JsonValue,
   MethodologyState,
   RecommendationResult,
-} from "@caudex/workout-engine";
+} from "@caudex-workout/engine";
 
 export const PERSISTENCE_CONTRACT_VERSION = 1;
 

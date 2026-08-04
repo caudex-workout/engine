@@ -1,7 +1,7 @@
 {
-  "name": "@caudex/workout-engine",
+  "name": "@caudex-workout/engine",
   "version": "0.1.0",
-  "description": "Deterministic strength and hypertrophy workout programming engine",
+  "description": "Deterministic exercise-programming and active-workout tracking SDK",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,

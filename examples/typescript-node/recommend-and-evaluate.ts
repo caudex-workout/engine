@@ -5,7 +5,7 @@ import {
   type EvaluationRequest,
   type Exercise,
   type RecommendationRequest,
-} from "@caudex/workout-engine";
+} from "@caudex-workout/engine";
 
 const catalog: Exercise[] = [{
   id: "incline-dumbbell-press",

@@ -18,7 +18,7 @@
     "NOTICE"
   ],
   "peerDependencies": {
-    "@caudex/workout-engine": ">=0.1.0 <1"
+    "@caudex-workout/engine": ">=0.1.0 <1"
   },
   "engines": {
     "node": ">=22"

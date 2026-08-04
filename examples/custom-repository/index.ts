@@ -4,7 +4,7 @@ import {
   type Exercise,
   type MethodologyState,
   type RecommendationRequest,
-} from "@caudex/workout-engine";
+} from "@caudex-workout/engine";
 import {
   PersistenceConflictError,
   type CatalogSource,

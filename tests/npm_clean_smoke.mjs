@@ -50,8 +50,8 @@ try {
   await writeFile(
     join(project, "node-smoke.mjs"),
     `import { readFile } from "node:fs/promises";
-import { createCaudex, methodologies } from "@caudex/workout-engine";
-import canonicalSchema from "@caudex/workout-engine/schema/canonical" with { type: "json" };
+import { createCaudex, methodologies } from "@caudex-workout/engine";
+import canonicalSchema from "@caudex-workout/engine/schema/canonical" with { type: "json" };
 
 const request = JSON.parse(await readFile(new URL("./request.json", import.meta.url)));
 request.methodology = methodologies.doubleProgression(request.methodology.config);
@@ -80,7 +80,7 @@ if (canonicalSchema.$id !== "https://caudex.dev/schemas/v0/canonical.schema.json
   methodologies,
   type RecommendationRequest,
   type RecommendationResult,
-} from "@caudex/workout-engine";
+} from "@caudex-workout/engine";
 
 const methodology = methodologies.doubleProgression({
   repRange: { min: 8, max: 12 },
@@ -137,13 +137,13 @@ void check;
   await cp(
     join(
       project,
-      "node_modules/@caudex/workout-engine/wasm/caudex.wasm",
+      "node_modules/@caudex-workout/engine/wasm/caudex.wasm",
     ),
     join(browser, "wasm/caudex.wasm"),
   );
   await writeFile(
     join(browser, "app.js"),
-    `import { createCaudex } from "../node_modules/@caudex/workout-engine/dist/index.js";
+    `import { createCaudex } from "../node_modules/@caudex-workout/engine/dist/index.js";
 const output = document.querySelector("#output");
 try {
   const request = await fetch("/request.json").then((response) => response.json());

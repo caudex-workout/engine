@@ -2,7 +2,7 @@ import {
   createCaudex,
   methodologies,
   type RecommendationRequest,
-} from "@caudex/workout-engine";
+} from "@caudex-workout/engine";
 import { sampleCatalog } from "./sample-catalog.js";
 
 const caudex = await createCaudex();

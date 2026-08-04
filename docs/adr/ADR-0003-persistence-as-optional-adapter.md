@@ -210,7 +210,7 @@ Do not pretend IndexedDB, SQLite, PostgreSQL, and arbitrary remote repositories 
 Proposed packages are separate from the core package and may release independently:
 
 ```text
-@caudex/workout-engine
+@caudex-workout/engine
 @caudex/persistence
 @caudex/persistence-indexeddb
 @caudex/persistence-sqlite
@@ -431,7 +431,7 @@ These directories are created only when the corresponding adapter is implemented
 ## Enforcement
 
 - `core/` may not import adapter packages, database modules, repository contracts, or migration code.
-- `@caudex/workout-engine` may not depend on any persistence package or database driver.
+- `@caudex-workout/engine` may not depend on any persistence package or database driver.
 - Methodology interfaces may not accept repositories or database handles.
 - Core operations may not implicitly load history or state.
 - Persistence only occurs after an explicit host action.
@@ -490,7 +490,7 @@ Rejected. Established applications need to map existing models, and different da
 
 Rejected. Calculation, acceptance, and persistence are separate actions.
 
-### Implement adapters inside `@caudex/workout-engine`
+### Implement adapters inside `@caudex-workout/engine`
 
 Rejected. Database drivers and environment-specific behavior would increase package size, compatibility risk, and install complexity.
 

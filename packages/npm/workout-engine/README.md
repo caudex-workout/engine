@@ -3,7 +3,7 @@
 Install the ESM package on Node.js 22 or newer:
 
 ```bash
-npm install @caudex/workout-engine
+npm install @caudex-workout/engine
 ```
 
 The repository's
@@ -20,7 +20,7 @@ objects:
 import {
   createCaudex,
   type RecommendationRequest,
-} from "@caudex/workout-engine";
+} from "@caudex-workout/engine";
 
 const caudex = await createCaudex();
 const result = caudex.recommendSession(request satisfies RecommendationRequest);
@@ -57,7 +57,7 @@ methodology result used by recommendation requests.
 The package exports typed factories for both first-party configurations:
 
 ```ts
-import { methodologies } from "@caudex/workout-engine";
+import { methodologies } from "@caudex-workout/engine";
 
 const methodology = methodologies.doubleProgression({
   repRange: { min: 8, max: 12 },
@@ -133,17 +133,17 @@ TypeScript (Apache-2.0), used to compile the installed declarations; Rollup
 
 ## Testing utilities
 
-The dependency-free `@caudex/workout-engine/testing` subpath provides
+The dependency-free `@caudex-workout/engine/testing` subpath provides
 framework-neutral builders, assertions, and bundled canonical fixtures:
 
 ```ts
-import { createCaudex } from "@caudex/workout-engine";
+import { createCaudex } from "@caudex-workout/engine";
 import {
   assertDeterministic,
   assertExplanationCode,
   buildRecommendationRequest,
   loadCanonicalFixture,
-} from "@caudex/workout-engine/testing";
+} from "@caudex-workout/engine/testing";
 
 const fixture = await loadCanonicalFixture("recommendation-request");
 const caudex = await createCaudex();
@@ -166,7 +166,7 @@ Assertions throw `CaudexTestAssertionError` and do not depend on Jest, Vitest,
 or another test runner. Builders use fixed explicit timestamps and return
 ordinary mutable objects that callers may customize.
 
-On 2026-07-26, a read-only lookup of `@caudex/workout-engine` against the public
+On 2026-07-26, a read-only lookup of `@caudex-workout/engine` against the public
 npm registry returned `E404`, meaning no published package currently claims
 that full name. Publication still requires the maintainer to create or control
 the `@caudex` organization; this repository does not infer registry ownership

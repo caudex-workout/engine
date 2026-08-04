@@ -18,7 +18,7 @@
       "@caudex/persistence": [
         "../persistence/dist/index.d.ts"
       ],
-      "@caudex/workout-engine": [
+      "@caudex-workout/engine": [
         "../npm/workout-engine/types/index.d.ts"
       ]
     }

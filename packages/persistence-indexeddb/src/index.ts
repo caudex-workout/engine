@@ -17,7 +17,7 @@ import {
 import type {
   CompletedWorkout,
   Exercise,
-} from "@caudex/workout-engine";
+} from "@caudex-workout/engine";
 
 export const INDEXEDDB_SCHEMA_VERSION = 1;
 

@@ -1,4 +1,4 @@
-import { createCaudex, methodologies } from "@caudex/workout-engine";
+import { createCaudex, methodologies } from "@caudex-workout/engine";
 
 const elements = Object.fromEntries([
   "request-editor", "methodology", "run-request", "copy-fixture",

@@ -77,7 +77,7 @@ try {
   await cp(
     join(
       project,
-      "node_modules/@caudex/workout-engine/wasm/caudex.wasm",
+      "node_modules/@caudex-workout/engine/wasm/caudex.wasm",
     ),
     join(browser, "wasm/caudex.wasm"),
   );
