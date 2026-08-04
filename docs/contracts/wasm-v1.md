@@ -1,5 +1,8 @@
 # Caudex WebAssembly runtime v1
 
+> Superseded by [WebAssembly runtime v2](wasm-v2.md). v1 is retained as
+> migration history and is no longer implemented.
+
 CWE-060 produces `zig-out/bin/caudex.wasm` as a `wasm32-freestanding`
 `ReleaseSmall` artifact. It uses the same canonical JSON execution adapter and
 status codes as the C ABI.

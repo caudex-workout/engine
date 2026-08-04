@@ -1,5 +1,8 @@
 # Caudex C ABI v1
 
+> Superseded by [C ABI v2](c-abi-v2.md). v1 is retained as migration history
+> and is no longer implemented.
+
 The public header is `include/caudex.h`. The ABI is a thin native adapter over
 the canonical JSON protocol and typed engine; it does not expose Zig structs,
 slices, allocators, or error unions.

@@ -7,7 +7,6 @@ comptime {
     _ = c_api.caudex_runtime_destroy;
     _ = c_api.caudex_runtime_execute;
     _ = c_api.runtimeEvaluate;
-    _ = c_api.caudex_buffer_free;
 }
 
 /// Allocates host-visible linear memory. Zero is returned on failure.
@@ -42,20 +41,25 @@ pub export fn caudex_wasm_runtime_evaluate(
     runtime: usize,
     request_pointer: usize,
     request_len: usize,
-    descriptor_pointer: usize,
+    output_pointer: usize,
+    output_capacity: usize,
+    required_pointer: usize,
 ) c_api.Status {
     const request: ?[*]const u8 = if (request_pointer == 0)
         null
     else
         @ptrFromInt(request_pointer);
-    const descriptor: ?*c_api.Buffer = if (descriptor_pointer == 0)
+    const output: ?[*]u8 = if (output_pointer == 0)
         null
     else
-        @ptrFromInt(descriptor_pointer);
+        @ptrFromInt(output_pointer);
+    const required: ?*usize = if (required_pointer == 0) null else @ptrFromInt(required_pointer);
     return c_api.runtimeEvaluate(
         if (runtime == 0) null else @ptrFromInt(runtime),
         request,
         request_len,
-        descriptor,
+        output,
+        output_capacity,
+        required,
     );
 }

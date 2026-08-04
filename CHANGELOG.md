@@ -17,6 +17,11 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Minimal versioned workout-template model, canonical JSON schema, optional
   persistence capability, and deterministic template fixture.
 
+### Changed
+
+- C and WebAssembly ABI version 2 uses caller-owned output with exact required
+  size reporting; the pre-release v1 `caudex_buffer` disposal API was removed.
+
 ## [0.1.0] - 2026-07-26
 
 ### Added

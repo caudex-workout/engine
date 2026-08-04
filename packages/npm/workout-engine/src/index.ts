@@ -277,15 +277,18 @@ interface WasmExports extends WebAssembly.Exports {
     runtime: number,
     requestPointer: number,
     requestLength: number,
-    descriptorPointer: number,
+    outputPointer: number,
+    outputCapacity: number,
+    requiredPointer: number,
   ): number;
   caudex_wasm_runtime_evaluate(
     runtime: number,
     requestPointer: number,
     requestLength: number,
-    descriptorPointer: number,
+    outputPointer: number,
+    outputCapacity: number,
+    requiredPointer: number,
   ): number;
-  caudex_buffer_free(runtime: number, descriptorPointer: number): void;
   caudex_wasm_alloc(length: number): number;
   caudex_wasm_free(pointer: number, length: number): void;
   caudex_wasm_runtime_create(): number;
@@ -297,7 +300,6 @@ const REQUIRED_EXPORTS = [
   "caudex_abi_version",
   "caudex_runtime_execute",
   "caudex_wasm_runtime_evaluate",
-  "caudex_buffer_free",
   "caudex_wasm_alloc",
   "caudex_wasm_free",
   "caudex_wasm_runtime_create",
@@ -307,16 +309,17 @@ const REQUIRED_EXPORTS = [
 const STATUS_INVALID_REQUEST = 3;
 const STATUS_UNSUPPORTED_VERSION = 4;
 const STATUS_UNSUPPORTED_METHODOLOGY = 5;
+const STATUS_INSUFFICIENT_OUTPUT = 7;
 
 export async function createCaudex(
   options: CreateCaudexOptions = {},
 ): Promise<Caudex> {
   const instance = await instantiate(options);
   const exports = requireExports(instance.exports);
-  if (exports.caudex_abi_version() !== 1) {
+  if (exports.caudex_abi_version() !== 2) {
     throw new CaudexInitializationError(
       "abi_mismatch",
-      "The WebAssembly runtime does not implement Caudex ABI version 1.",
+      "The WebAssembly runtime does not implement Caudex ABI version 2.",
     );
   }
   const runtime = exports.caudex_wasm_runtime_create();
@@ -439,9 +442,9 @@ function createFacade(exports: WasmExports, runtime: number): Caudex {
     }
 
     const requestPointer = exports.caudex_wasm_alloc(requestBytes.length);
-    const descriptorPointer = exports.caudex_wasm_alloc(12);
-    if (requestPointer === 0 || descriptorPointer === 0) {
-      if (descriptorPointer !== 0) exports.caudex_wasm_free(descriptorPointer, 12);
+    const requiredPointer = exports.caudex_wasm_alloc(4);
+    if (requestPointer === 0 || requiredPointer === 0) {
+      if (requiredPointer !== 0) exports.caudex_wasm_free(requiredPointer, 4);
       if (requestPointer !== 0) {
         exports.caudex_wasm_free(requestPointer, requestBytes.length);
       }
@@ -453,36 +456,43 @@ function createFacade(exports: WasmExports, runtime: number): Caudex {
         requestPointer,
         requestBytes.length,
       ).set(requestBytes);
-      new Uint8Array(exports.memory.buffer, descriptorPointer, 12).fill(0);
-      const status = operation(
+      new Uint8Array(exports.memory.buffer, requiredPointer, 4).fill(0);
+      const sizingStatus = operation(
         runtime,
         requestPointer,
         requestBytes.length,
-        descriptorPointer,
+        0,
+        0,
+        requiredPointer,
       );
-      if (status !== 0) return statusResult<Result>(request, status);
-
-      const descriptor = new DataView(
-        exports.memory.buffer,
-        descriptorPointer,
-        12,
-      );
-      const resultPointer = descriptor.getUint32(0, true);
-      const resultLength = descriptor.getUint32(4, true);
+      if (sizingStatus !== STATUS_INSUFFICIENT_OUTPUT) {
+        return statusResult<Result>(request, sizingStatus);
+      }
+      const resultLength = new DataView(exports.memory.buffer).getUint32(requiredPointer, true);
+      const resultPointer = exports.caudex_wasm_alloc(resultLength);
+      if (resultPointer === 0) throw new CaudexRuntimeError("WebAssembly result allocation failed.");
+      const status = operation(runtime, requestPointer, requestBytes.length, resultPointer, resultLength, requiredPointer);
+      if (status !== 0) {
+        exports.caudex_wasm_free(resultPointer, resultLength);
+        return statusResult<Result>(request, status);
+      }
       const resultBytes = new Uint8Array(
         exports.memory.buffer,
         resultPointer,
         resultLength,
       );
-      return JSON.parse(new TextDecoder().decode(resultBytes)) as Result;
+      try {
+        return JSON.parse(new TextDecoder().decode(resultBytes)) as Result;
+      } finally {
+        exports.caudex_wasm_free(resultPointer, resultLength);
+      }
     } catch (cause) {
       if (cause instanceof CaudexRuntimeError) throw cause;
       throw new CaudexRuntimeError(
         "The WebAssembly runtime returned an unreadable result.",
       );
     } finally {
-      exports.caudex_buffer_free(runtime, descriptorPointer);
-      exports.caudex_wasm_free(descriptorPointer, 12);
+      exports.caudex_wasm_free(requiredPointer, 4);
       exports.caudex_wasm_free(requestPointer, requestBytes.length);
     }
   };

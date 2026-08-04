@@ -74,7 +74,7 @@ const simple_methodology = caudex.methodology.Methodology{
 };
 
 pub fn main() !void {
-    if (caudex_persistence.contract_version != 1)
+    if (caudex_persistence.contract_version != 2)
         return error.UnsupportedPersistenceContract;
     if (caudex_persistence.canonical != caudex.canonical)
         return error.PersistenceUsesDifferentCanonicalContract;

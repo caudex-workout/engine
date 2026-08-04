@@ -8,7 +8,7 @@ const primitives = @import("primitives.zig");
 const rpe_top_set_backoff = @import("rpe_top_set_backoff.zig");
 const training = @import("training.zig");
 
-pub const abi_version: u32 = 1;
+pub const abi_version: u32 = 2;
 const max_result_bytes: usize = 1024 * 1024;
 
 pub const Status = enum(c_int) {
@@ -19,10 +19,11 @@ pub const Status = enum(c_int) {
     unsupported_version = 4,
     unsupported_methodology = 5,
     output_limit_reached = 6,
+    insufficient_output = 7,
     internal_error = 255,
 };
 
-pub const Buffer = extern struct {
+const OwnedBuffer = struct {
     data: ?[*]u8 = null,
     len: usize = 0,
     capacity: usize = 0,
@@ -64,20 +65,26 @@ pub export fn caudex_runtime_execute(
     runtime: ?*Runtime,
     request_data: ?[*]const u8,
     request_len: usize,
-    out_result: ?*Buffer,
+    output_data: ?[*]u8,
+    output_capacity: usize,
+    out_required: ?*usize,
 ) callconv(.c) Status {
     const active = runtime orelse return .invalid_argument;
-    const result = out_result orelse return .invalid_argument;
-    if (result.data != null or result.len != 0 or result.capacity != 0) {
-        return .invalid_argument;
-    }
+    const required = out_required orelse return .invalid_argument;
+    required.* = 0;
     if (request_data == null and request_len != 0) return .invalid_argument;
+    if (output_data == null and output_capacity != 0) return .invalid_argument;
     const input = if (request_len == 0)
         @as([]const u8, &.{})
     else
         request_data.?[0..request_len];
 
-    execute(active, input, result) catch |err| return statusForError(err);
+    var result: OwnedBuffer = .{};
+    execute(active, input, &result) catch |err| return statusForError(err);
+    defer if (result.data) |data| active.allocator().free(data[0..result.capacity]);
+    required.* = result.len;
+    if (output_capacity < result.len) return .insufficient_output;
+    if (result.len != 0) @memcpy(output_data.?[0..result.len], result.data.?[0..result.len]);
     return .ok;
 }
 
@@ -86,36 +93,27 @@ pub fn runtimeEvaluate(
     runtime: ?*Runtime,
     request_data: ?[*]const u8,
     request_len: usize,
-    out_result: ?*Buffer,
+    output_data: ?[*]u8,
+    output_capacity: usize,
+    out_required: ?*usize,
 ) Status {
     const active = runtime orelse return .invalid_argument;
-    const result = out_result orelse return .invalid_argument;
-    if (result.data != null or result.len != 0 or result.capacity != 0) {
-        return .invalid_argument;
-    }
+    const required = out_required orelse return .invalid_argument;
+    required.* = 0;
     if (request_data == null and request_len != 0) return .invalid_argument;
+    if (output_data == null and output_capacity != 0) return .invalid_argument;
     const input = if (request_len == 0)
         @as([]const u8, &.{})
     else
         request_data.?[0..request_len];
 
-    executeEvaluation(active, input, result) catch |err|
-        return statusForError(err);
+    var result: OwnedBuffer = .{};
+    executeEvaluation(active, input, &result) catch |err| return statusForError(err);
+    defer if (result.data) |data| active.allocator().free(data[0..result.capacity]);
+    required.* = result.len;
+    if (output_capacity < result.len) return .insufficient_output;
+    if (result.len != 0) @memcpy(output_data.?[0..result.len], result.data.?[0..result.len]);
     return .ok;
-}
-
-pub export fn caudex_buffer_free(
-    runtime: ?*Runtime,
-    buffer: ?*Buffer,
-) callconv(.c) void {
-    const active = runtime orelse return;
-    const value = buffer orelse return;
-    if (value.data) |data| {
-        if (value.capacity != 0) {
-            active.allocator().free(data[0..value.capacity]);
-        }
-    }
-    value.* = .{};
 }
 
 const ExecuteError = canonical_json.DecodeError || engine.RecommendError ||
@@ -142,7 +140,7 @@ fn statusForError(err: ExecuteError) Status {
 fn execute(
     runtime: *Runtime,
     input: []const u8,
-    out: *Buffer,
+    out: *OwnedBuffer,
 ) ExecuteError!void {
     const document = try canonical_json.decodeRecommendationRequest(
         runtime.allocator(),
@@ -194,7 +192,7 @@ fn executeRpeRecommendation(
     runtime: *Runtime,
     allocator: std.mem.Allocator,
     source: canonical.RecommendationRequest,
-    out: *Buffer,
+    out: *OwnedBuffer,
 ) ExecuteError!void {
     if (source.methodology.configVersion != rpe_top_set_backoff.config_version) {
         return error.UnsupportedVersion;
@@ -398,7 +396,7 @@ const EvaluationWireResult = struct {
 fn executeEvaluation(
     runtime: *Runtime,
     input: []const u8,
-    out: *Buffer,
+    out: *OwnedBuffer,
 ) ExecuteError!void {
     const document = try canonical_json.decodeEvaluationRequest(
         runtime.allocator(),
@@ -829,36 +827,82 @@ fn translateState(
     };
 }
 
-test "C runtime executes a canonical request and frees its result" {
+test "C runtime reports required size and writes caller-owned output" {
     var runtime: ?*Runtime = null;
     try std.testing.expectEqual(Status.ok, caudex_runtime_create(&runtime));
     defer caudex_runtime_destroy(runtime);
-    var result: Buffer = .{};
     const input = @embedFile("../fixtures/requests/recommendation.json");
+    var required: usize = 0;
+    try std.testing.expectEqual(
+        Status.insufficient_output,
+        caudex_runtime_execute(runtime, input.ptr, input.len, null, 0, &required),
+    );
+    try std.testing.expect(required != 0);
+    const output = try std.testing.allocator.alloc(u8, required);
+    defer std.testing.allocator.free(output);
+    var exact_required: usize = 0;
     try std.testing.expectEqual(
         Status.ok,
-        caudex_runtime_execute(runtime, input.ptr, input.len, &result),
+        caudex_runtime_execute(runtime, input.ptr, input.len, output.ptr, output.len, &exact_required),
     );
-    try std.testing.expect(result.data != null);
-    try std.testing.expect(result.len != 0);
+    try std.testing.expectEqual(required, exact_required);
     const parsed = try canonical_json.decodeRecommendationResult(
         std.testing.allocator,
-        result.data.?[0..result.len],
+        output,
         .{},
     );
     defer parsed.deinit();
     try std.testing.expect(parsed.value.ok);
-    caudex_buffer_free(runtime, &result);
-    try std.testing.expect(result.data == null);
-    try std.testing.expectEqual(@as(usize, 0), result.len);
 }
 
 test "C ABI rejects invalid arguments without exposing errors" {
-    var result: Buffer = .{};
+    var required: usize = 99;
     try std.testing.expectEqual(
         Status.invalid_argument,
-        caudex_runtime_execute(null, null, 0, &result),
+        caudex_runtime_execute(null, null, 0, null, 0, &required),
     );
     try std.testing.expectEqual(Status.invalid_argument, caudex_runtime_create(null));
-    try std.testing.expectEqual(@as(u32, 1), caudex_abi_version());
+    try std.testing.expectEqual(@as(u32, 2), caudex_abi_version());
+}
+
+test "C ABI leaves insufficient caller output untouched" {
+    var runtime: ?*Runtime = null;
+    try std.testing.expectEqual(Status.ok, caudex_runtime_create(&runtime));
+    defer caudex_runtime_destroy(runtime);
+    const input = @embedFile("../fixtures/requests/recommendation.json");
+    var required: usize = 0;
+    try std.testing.expectEqual(Status.insufficient_output, caudex_runtime_execute(runtime, input.ptr, input.len, null, 0, &required));
+    const short = try std.testing.allocator.alloc(u8, required - 1);
+    defer std.testing.allocator.free(short);
+    @memset(short, 0xaa);
+    try std.testing.expectEqual(Status.insufficient_output, caudex_runtime_execute(runtime, input.ptr, input.len, short.ptr, short.len, &required));
+    for (short) |byte| try std.testing.expectEqual(@as(u8, 0xaa), byte);
+}
+
+test "C ABI validates pointer length and UTF-8 combinations" {
+    var runtime: ?*Runtime = null;
+    try std.testing.expectEqual(Status.ok, caudex_runtime_create(&runtime));
+    defer caudex_runtime_destroy(runtime);
+    var required: usize = 0;
+    try std.testing.expectEqual(Status.invalid_argument, caudex_runtime_execute(runtime, null, 1, null, 0, &required));
+    try std.testing.expectEqual(Status.invalid_argument, caudex_runtime_execute(runtime, null, 0, null, 1, &required));
+    try std.testing.expectEqual(Status.invalid_argument, caudex_runtime_execute(runtime, null, 0, null, 0, null));
+    const invalid_utf8 = [_]u8{0xff};
+    try std.testing.expectEqual(Status.invalid_request, caudex_runtime_execute(runtime, &invalid_utf8, invalid_utf8.len, null, 0, &required));
+}
+
+test "C ABI supports independent runtimes" {
+    var first: ?*Runtime = null;
+    var second: ?*Runtime = null;
+    try std.testing.expectEqual(Status.ok, caudex_runtime_create(&first));
+    defer caudex_runtime_destroy(first);
+    try std.testing.expectEqual(Status.ok, caudex_runtime_create(&second));
+    defer caudex_runtime_destroy(second);
+    try std.testing.expect(first != second);
+    const input = @embedFile("../fixtures/requests/recommendation.json");
+    var first_required: usize = 0;
+    var second_required: usize = 0;
+    try std.testing.expectEqual(Status.insufficient_output, caudex_runtime_execute(first, input.ptr, input.len, null, 0, &first_required));
+    try std.testing.expectEqual(Status.insufficient_output, caudex_runtime_execute(second, input.ptr, input.len, null, 0, &second_required));
+    try std.testing.expectEqual(first_required, second_required);
 }

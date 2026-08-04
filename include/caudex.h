@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-#define CAUDEX_ABI_VERSION 1u
+#define CAUDEX_ABI_VERSION 2u
 
 typedef struct caudex_runtime caudex_runtime;
 
@@ -20,14 +20,9 @@ typedef enum caudex_status {
     CAUDEX_STATUS_UNSUPPORTED_VERSION = 4,
     CAUDEX_STATUS_UNSUPPORTED_METHODOLOGY = 5,
     CAUDEX_STATUS_OUTPUT_LIMIT_REACHED = 6,
+    CAUDEX_STATUS_INSUFFICIENT_OUTPUT = 7,
     CAUDEX_STATUS_INTERNAL_ERROR = 255
 } caudex_status;
-
-typedef struct caudex_buffer {
-    uint8_t *data;
-    size_t len;
-    size_t capacity;
-} caudex_buffer;
 
 uint32_t caudex_abi_version(void);
 
@@ -39,9 +34,9 @@ caudex_status caudex_runtime_execute(
     caudex_runtime *runtime,
     const uint8_t *request_data,
     size_t request_len,
-    caudex_buffer *out_result);
-
-void caudex_buffer_free(caudex_runtime *runtime, caudex_buffer *buffer);
+    uint8_t *output_data,
+    size_t output_capacity,
+    size_t *out_required);
 
 #ifdef __cplusplus
 }

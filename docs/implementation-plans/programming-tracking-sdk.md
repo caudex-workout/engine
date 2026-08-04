@@ -85,10 +85,16 @@ introducing persistence into this pure phase.
 
 ### 5. C ABI v2 and WASM
 
+**Status:** In progress; safe caller-owned output is implemented
+
 - One registry-backed executor covers programming, tracking, workflows,
   discovery, and portable data with safe output ownership.
 - Lifetime, synchronization, pointers, capacity, UTF-8, versions, disposal, and
   independent runtimes are tested; C/WASM/Zig fixtures agree.
+
+ABI v2 removed caller-mutable allocator metadata and result disposal. Native C,
+WASM, and npm now use required-size discovery plus exact caller-owned output.
+The unified multi-operation dispatcher remains to complete this phase.
 
 ### 6. npm APIs
 

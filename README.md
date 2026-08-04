@@ -171,6 +171,8 @@ The architecture and implementation sequence are defined by:
 - [Programming and active-tracking SDK implementation plan](docs/implementation-plans/programming-tracking-sdk.md)
 - [Canonical tracking protocol v1](docs/contracts/tracking-v1.md)
 - [Programming, tracking, and template workflows](docs/tracking/workflows-and-templates.md)
+- [C ABI v2](docs/contracts/c-abi-v2.md)
+- [WebAssembly runtime v2](docs/contracts/wasm-v2.md)
 - [Completed v0.1 implementation plan](docs/implementation-plans/completed/v0.1-library-first-implementation-plan.md)
 
 ADR-0002 supersedes ADR-0001's tracking-first and SQLite-first product

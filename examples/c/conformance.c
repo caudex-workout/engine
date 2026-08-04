@@ -8,6 +8,11 @@ static const char fingerprint_prefix[] = "\"resultFingerprint\":\"";
 static const char methodology_marker[] =
     "\"id\":\"caudex.double-progression\"";
 
+typedef struct result_bytes {
+    uint8_t *data;
+    size_t len;
+} result_bytes;
+
 static int load_file(
     const char *path,
     uint8_t **out_data,
@@ -65,7 +70,7 @@ static const uint8_t *find_bytes(
 }
 
 static int extract_fingerprint(
-    const caudex_buffer *result,
+    const result_bytes *result,
     char out_fingerprint[65]
 ) {
     const uint8_t *start = find_bytes(
@@ -88,12 +93,39 @@ static int extract_fingerprint(
     return 1;
 }
 
+static caudex_status execute(
+    caudex_runtime *runtime,
+    const uint8_t *request,
+    size_t request_len,
+    result_bytes *result
+) {
+    size_t required = 0;
+    caudex_status status = caudex_runtime_execute(
+        runtime, request, request_len, NULL, 0, &required);
+    if (status != CAUDEX_STATUS_INSUFFICIENT_OUTPUT) {
+        return status;
+    }
+    result->data = (uint8_t *)malloc(required);
+    if (result->data == NULL && required != 0) {
+        return CAUDEX_STATUS_OUT_OF_MEMORY;
+    }
+    result->len = required;
+    status = caudex_runtime_execute(
+        runtime, request, request_len, result->data, result->len, &required);
+    if (status != CAUDEX_STATUS_OK) {
+        free(result->data);
+        result->data = NULL;
+        result->len = 0;
+    }
+    return status;
+}
+
 int main(int argc, char **argv) {
     uint8_t *request = NULL;
     size_t request_len = 0;
     caudex_runtime *runtime = NULL;
-    caudex_buffer first = {0};
-    caudex_buffer second = {0};
+    result_bytes first = {0};
+    result_bytes second = {0};
     char first_fingerprint[65];
     char second_fingerprint[65];
     caudex_status status;
@@ -116,22 +148,12 @@ int main(int argc, char **argv) {
         fprintf(stderr, "runtime creation failed: %d\n", (int)status);
         goto cleanup;
     }
-    status = caudex_runtime_execute(
-        runtime,
-        request,
-        request_len,
-        &first
-    );
+    status = execute(runtime, request, request_len, &first);
     if (status != CAUDEX_STATUS_OK) {
         fprintf(stderr, "first execution failed: %d\n", (int)status);
         goto cleanup;
     }
-    status = caudex_runtime_execute(
-        runtime,
-        request,
-        request_len,
-        &second
-    );
+    status = execute(runtime, request, request_len, &second);
     if (status != CAUDEX_STATUS_OK) {
         fprintf(stderr, "second execution failed: %d\n", (int)status);
         goto cleanup;
@@ -155,8 +177,8 @@ int main(int argc, char **argv) {
     exit_code = 0;
 
 cleanup:
-    caudex_buffer_free(runtime, &second);
-    caudex_buffer_free(runtime, &first);
+    free(second.data);
+    free(first.data);
     caudex_runtime_destroy(runtime);
     free(request);
     return exit_code;
