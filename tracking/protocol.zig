@@ -50,6 +50,43 @@ pub const ExerciseMembership = struct {
     sets: []const TrackedSet = &.{},
 };
 
+pub const WorkoutOrigin = enum { manual, template, recommendation };
+
+pub const PrescribedSet = struct {
+    setId: []const u8,
+    kind: []const u8,
+    targetMetrics: []const caudex.canonical.Metric = &.{},
+};
+
+pub const PrescribedExercise = struct {
+    membershipId: []const u8,
+    exerciseId: []const u8,
+    sets: []const PrescribedSet = &.{},
+    notes: ?[]const u8 = null,
+    tags: []const []const u8 = &.{},
+};
+
+pub const RecommendationProvenance = struct {
+    acceptedRecommendationId: []const u8,
+    inputFingerprint: []const u8,
+    resultFingerprint: []const u8,
+    methodologyId: []const u8,
+    methodologyVersion: []const u8,
+    methodologyConfigVersion: u32,
+    methodologyStateRevision: ?[]const u8 = null,
+    methodologyStateFingerprint: ?[]const u8 = null,
+};
+
+pub const TemplateProvenance = struct {
+    templateId: []const u8,
+    templateRevision: u64,
+};
+
+pub const Provenance = union(enum) {
+    recommendation: RecommendationProvenance,
+    template: TemplateProvenance,
+};
+
 pub const TrackedWorkout = struct {
     id: []const u8,
     scope: Scope,
@@ -58,6 +95,9 @@ pub const TrackedWorkout = struct {
     startedAt: []const u8,
     completedAt: ?[]const u8 = null,
     exercises: []const ExerciseMembership = &.{},
+    origin: WorkoutOrigin = .manual,
+    provenance: ?Provenance = null,
+    prescription: []const PrescribedExercise = &.{},
 };
 
 pub const TrackingSnapshot = struct {
@@ -295,12 +335,18 @@ fn validateSnapshotBounds(snapshot: TrackingSnapshot) error{SnapshotLimitExceede
     if (snapshot.startReceipts.len > max_workouts) return error.SnapshotLimitExceeded;
     for (snapshot.workouts) |workout| {
         if (workout.exercises.len > max_exercises_per_workout) return error.SnapshotLimitExceeded;
+        if (workout.prescription.len > max_exercises_per_workout) return error.SnapshotLimitExceeded;
         for (workout.exercises) |exercise| {
             if (exercise.sets.len > max_sets_per_exercise) return error.SnapshotLimitExceeded;
             for (exercise.sets) |set| {
                 if (set.targetMetrics.len > max_metrics_per_set or set.actualMetrics.len > max_metrics_per_set)
                     return error.SnapshotLimitExceeded;
             }
+        }
+        for (workout.prescription) |exercise| {
+            if (exercise.sets.len > max_sets_per_exercise) return error.SnapshotLimitExceeded;
+            for (exercise.sets) |set| if (set.targetMetrics.len > max_metrics_per_set)
+                return error.SnapshotLimitExceeded;
         }
     }
 }
@@ -329,6 +375,9 @@ pub const SnapshotConversionStorage = struct {
     exercises: []tracking.ExerciseMembership,
     sets: []tracking.TrackedSet,
     metrics: []tracking.Metric,
+    prescription_exercises: []tracking.PrescribedExercise,
+    prescription_sets: []tracking.PrescribedSet,
+    tags: []tracking.Id,
 };
 
 pub const WireSnapshotStorage = struct {
@@ -338,12 +387,18 @@ pub const WireSnapshotStorage = struct {
     sets: []TrackedSet,
     metrics: []caudex.canonical.Metric,
     amountBytes: [][64]u8,
+    prescription_exercises: []PrescribedExercise,
+    prescription_sets: []PrescribedSet,
+    tags: [][]const u8,
 };
 
 const WireOffsets = struct {
     exercise: usize = 0,
     set: usize = 0,
     metric: usize = 0,
+    prescription_exercise: usize = 0,
+    prescription_set: usize = 0,
+    tag: usize = 0,
 };
 
 pub fn snapshotFromDomain(value: tracking.LifecycleSnapshot, storage: WireSnapshotStorage) SnapshotConversionError!TrackingSnapshot {
@@ -362,6 +417,9 @@ fn snapshotFromDomainAt(value: tracking.LifecycleSnapshot, storage: WireSnapshot
             &offsets.exercise,
             &offsets.set,
             &offsets.metric,
+            &offsets.prescription_exercise,
+            &offsets.prescription_set,
+            &offsets.tag,
         );
     }
     for (value.start_receipts, 0..) |receipt, index| {
@@ -410,6 +468,9 @@ pub fn batchResultFromDomain(result: tracking.BatchResult, original: tracking.Li
                     &offsets.exercise,
                     &offsets.set,
                     &offsets.metric,
+                    &offsets.prescription_exercise,
+                    &offsets.prescription_set,
+                    &offsets.tag,
                 );
                 const warnings = try issuesFromDomain(
                     accepted.issues,
@@ -472,6 +533,9 @@ pub fn commandResultFromDomain(result: tracking.CommandResult, storage: BatchRes
                 &offsets.exercise,
                 &offsets.set,
                 &offsets.metric,
+                &offsets.prescription_exercise,
+                &offsets.prescription_set,
+                &offsets.tag,
             );
             storage.accepted[0] = .{
                 .commandId = accepted.command_id.bytes,
@@ -518,7 +582,7 @@ fn issuesFromDomain(values: []const tracking.Issue, storage: BatchResultStorage,
     return storage.issues[issue_start..issue_end];
 }
 
-fn workoutFromDomain(value: tracking.Workout, storage: WireSnapshotStorage, exercise_offset: *usize, set_offset: *usize, metric_offset: *usize) SnapshotConversionError!TrackedWorkout {
+fn workoutFromDomain(value: tracking.Workout, storage: WireSnapshotStorage, exercise_offset: *usize, set_offset: *usize, metric_offset: *usize, prescribed_exercise_offset: *usize, prescribed_set_offset: *usize, tag_offset: *usize) SnapshotConversionError!TrackedWorkout {
     const exercise_end = std.math.add(usize, exercise_offset.*, value.exercises.len) catch return error.SnapshotLimitExceeded;
     if (exercise_end > storage.exercises.len) return error.ExerciseBufferTooSmall;
     const exercise_start = exercise_offset.*;
@@ -546,6 +610,35 @@ fn workoutFromDomain(value: tracking.Workout, storage: WireSnapshotStorage, exer
         set_offset.* = set_end;
     }
     exercise_offset.* = exercise_end;
+    const prescribed_exercise_end = std.math.add(usize, prescribed_exercise_offset.*, value.prescription.len) catch return error.SnapshotLimitExceeded;
+    if (prescribed_exercise_end > storage.prescription_exercises.len) return error.ExerciseBufferTooSmall;
+    const prescribed_exercise_start = prescribed_exercise_offset.*;
+    for (value.prescription, prescribed_exercise_start..) |exercise, output_index| {
+        const prescribed_set_end = std.math.add(usize, prescribed_set_offset.*, exercise.sets.len) catch return error.SnapshotLimitExceeded;
+        if (prescribed_set_end > storage.prescription_sets.len) return error.SetBufferTooSmall;
+        const prescribed_set_start = prescribed_set_offset.*;
+        for (exercise.sets, prescribed_set_start..) |set, set_index| {
+            storage.prescription_sets[set_index] = .{
+                .setId = set.set_id.bytes,
+                .kind = set.kind.bytes,
+                .targetMetrics = try metricsFromDomain(set.target_metrics, storage, metric_offset),
+            };
+        }
+        const tag_end = std.math.add(usize, tag_offset.*, exercise.tags.len) catch return error.SnapshotLimitExceeded;
+        if (tag_end > storage.tags.len) return error.ExerciseBufferTooSmall;
+        const tag_start = tag_offset.*;
+        for (exercise.tags, tag_start..) |tag, tag_index| storage.tags[tag_index] = tag.bytes;
+        storage.prescription_exercises[output_index] = .{
+            .membershipId = exercise.membership_id.bytes,
+            .exerciseId = exercise.exercise_id.bytes,
+            .sets = storage.prescription_sets[prescribed_set_start..prescribed_set_end],
+            .notes = exercise.notes,
+            .tags = storage.tags[tag_start..tag_end],
+        };
+        prescribed_set_offset.* = prescribed_set_end;
+        tag_offset.* = tag_end;
+    }
+    prescribed_exercise_offset.* = prescribed_exercise_end;
     return .{
         .id = value.id.bytes,
         .scope = scopeFromDomain(value.scope),
@@ -554,6 +647,9 @@ fn workoutFromDomain(value: tracking.Workout, storage: WireSnapshotStorage, exer
         .startedAt = value.started_at.bytes,
         .completedAt = if (value.completed_at) |at| at.bytes else null,
         .exercises = storage.exercises[exercise_start..exercise_end],
+        .origin = originFromDomain(value.origin),
+        .provenance = provenanceFromDomain(value.provenance),
+        .prescription = storage.prescription_exercises[prescribed_exercise_start..prescribed_exercise_end],
     };
 }
 
@@ -589,6 +685,9 @@ pub fn snapshotToDomain(value: TrackingSnapshot, storage: SnapshotConversionStor
     var exercise_offset: usize = 0;
     var set_offset: usize = 0;
     var metric_offset: usize = 0;
+    var prescription_exercise_offset: usize = 0;
+    var prescription_set_offset: usize = 0;
+    var tag_offset: usize = 0;
     for (value.workouts, 0..) |workout, workout_index| {
         storage.workouts[workout_index] = try workoutToDomain(
             workout,
@@ -596,6 +695,9 @@ pub fn snapshotToDomain(value: TrackingSnapshot, storage: SnapshotConversionStor
             &exercise_offset,
             &set_offset,
             &metric_offset,
+            &prescription_exercise_offset,
+            &prescription_set_offset,
+            &tag_offset,
         );
     }
     for (value.startReceipts, 0..) |receipt, receipt_index| {
@@ -617,7 +719,7 @@ pub fn snapshotToDomain(value: TrackingSnapshot, storage: SnapshotConversionStor
     };
 }
 
-fn workoutToDomain(value: TrackedWorkout, storage: SnapshotConversionStorage, exercise_offset: *usize, set_offset: *usize, metric_offset: *usize) SnapshotConversionError!tracking.Workout {
+fn workoutToDomain(value: TrackedWorkout, storage: SnapshotConversionStorage, exercise_offset: *usize, set_offset: *usize, metric_offset: *usize, prescribed_exercise_offset: *usize, prescribed_set_offset: *usize, tag_offset: *usize) SnapshotConversionError!tracking.Workout {
     const exercise_end = std.math.add(usize, exercise_offset.*, value.exercises.len) catch return error.SnapshotLimitExceeded;
     if (exercise_end > storage.exercises.len) return error.ExerciseBufferTooSmall;
     const exercise_start = exercise_offset.*;
@@ -651,6 +753,38 @@ fn workoutToDomain(value: TrackedWorkout, storage: SnapshotConversionStorage, ex
         set_offset.* = set_end;
     }
     exercise_offset.* = exercise_end;
+    const prescribed_exercise_end = std.math.add(usize, prescribed_exercise_offset.*, value.prescription.len) catch return error.SnapshotLimitExceeded;
+    if (prescribed_exercise_end > storage.prescription_exercises.len) return error.ExerciseBufferTooSmall;
+    const prescribed_exercise_start = prescribed_exercise_offset.*;
+    for (value.prescription, prescribed_exercise_start..) |exercise, output_index| {
+        const prescribed_set_end = std.math.add(usize, prescribed_set_offset.*, exercise.sets.len) catch return error.SnapshotLimitExceeded;
+        if (prescribed_set_end > storage.prescription_sets.len) return error.SetBufferTooSmall;
+        const prescribed_set_start = prescribed_set_offset.*;
+        for (exercise.sets, prescribed_set_start..) |set, set_index| {
+            const metric_end = std.math.add(usize, metric_offset.*, set.targetMetrics.len) catch return error.SnapshotLimitExceeded;
+            if (metric_end > storage.metrics.len) return error.MetricBufferTooSmall;
+            storage.prescription_sets[set_index] = .{
+                .set_id = try tracking.Id.parse(set.setId),
+                .kind = try tracking.Id.parse(set.kind),
+                .target_metrics = try metricsToDomain(set.targetMetrics, storage.metrics[metric_offset.*..metric_end]),
+            };
+            metric_offset.* = metric_end;
+        }
+        const tag_end = std.math.add(usize, tag_offset.*, exercise.tags.len) catch return error.SnapshotLimitExceeded;
+        if (tag_end > storage.tags.len) return error.ExerciseBufferTooSmall;
+        const tag_start = tag_offset.*;
+        for (exercise.tags, tag_start..) |tag, tag_index| storage.tags[tag_index] = try tracking.Id.parse(tag);
+        storage.prescription_exercises[output_index] = .{
+            .membership_id = try tracking.Id.parse(exercise.membershipId),
+            .exercise_id = try tracking.Id.parse(exercise.exerciseId),
+            .sets = storage.prescription_sets[prescribed_set_start..prescribed_set_end],
+            .notes = exercise.notes,
+            .tags = storage.tags[tag_start..tag_end],
+        };
+        prescribed_set_offset.* = prescribed_set_end;
+        tag_offset.* = tag_end;
+    }
+    prescribed_exercise_offset.* = prescribed_exercise_end;
     return .{
         .id = try tracking.Id.parse(value.id),
         .scope = try scopeToDomain(value.scope),
@@ -659,6 +793,9 @@ fn workoutToDomain(value: TrackedWorkout, storage: SnapshotConversionStorage, ex
         .started_at = try tracking.Timestamp.parse(value.startedAt),
         .completed_at = if (value.completedAt) |at| try tracking.Timestamp.parse(at) else null,
         .exercises = storage.exercises[exercise_start..exercise_end],
+        .origin = originToDomain(value.origin),
+        .provenance = try provenanceToDomain(value.provenance),
+        .prescription = storage.prescription_exercises[prescribed_exercise_start..prescribed_exercise_end],
     };
 }
 
@@ -843,13 +980,23 @@ pub fn commandFromDomain(value: tracking.Command, storage: CommandFormatStorage)
 
 fn commandMetricsFromDomain(values: []const tracking.Metric, storage: CommandFormatStorage) CommandFormatError![]const caudex.canonical.Metric {
     var offset: usize = 0;
+    var empty_workouts: [0]TrackedWorkout = .{};
+    var empty_receipts: [0]StartReceipt = .{};
+    var empty_exercises: [0]ExerciseMembership = .{};
+    var empty_sets: [0]TrackedSet = .{};
+    var empty_prescribed_exercises: [0]PrescribedExercise = .{};
+    var empty_prescribed_sets: [0]PrescribedSet = .{};
+    var empty_tags: [0][]const u8 = .{};
     const wire_storage: WireSnapshotStorage = .{
-        .workouts = &.{},
-        .receipts = &.{},
-        .exercises = &.{},
-        .sets = &.{},
+        .workouts = &empty_workouts,
+        .receipts = &empty_receipts,
+        .exercises = &empty_exercises,
+        .sets = &empty_sets,
         .metrics = storage.metrics,
         .amountBytes = storage.amountBytes,
+        .prescription_exercises = &empty_prescribed_exercises,
+        .prescription_sets = &empty_prescribed_sets,
+        .tags = &empty_tags,
     };
     return metricsFromDomain(values, wire_storage, &offset) catch |err| switch (err) {
         error.MetricBufferTooSmall => error.MetricBufferTooSmall,
@@ -1058,6 +1205,56 @@ pub fn dispositionToDomain(value: CommandDisposition) tracking.CommandDispositio
     return switch (value) {
         .applied => .applied,
         .replayed => .replayed,
+    };
+}
+
+fn originFromDomain(value: tracking.WorkoutOrigin) WorkoutOrigin {
+    return switch (value) {
+        .manual => .manual,
+        .template => .template,
+        .recommendation => .recommendation,
+    };
+}
+
+fn originToDomain(value: WorkoutOrigin) tracking.WorkoutOrigin {
+    return switch (value) {
+        .manual => .manual,
+        .template => .template,
+        .recommendation => .recommendation,
+    };
+}
+
+fn provenanceFromDomain(value: ?tracking.Provenance) ?Provenance {
+    const provenance = value orelse return null;
+    return switch (provenance) {
+        .recommendation => |item| .{ .recommendation = .{
+            .acceptedRecommendationId = item.accepted_recommendation_id.bytes,
+            .inputFingerprint = item.input_fingerprint,
+            .resultFingerprint = item.result_fingerprint,
+            .methodologyId = item.methodology_id.bytes,
+            .methodologyVersion = item.methodology_version,
+            .methodologyConfigVersion = item.methodology_config_version,
+            .methodologyStateRevision = item.methodology_state_revision,
+            .methodologyStateFingerprint = item.methodology_state_fingerprint,
+        } },
+        .template => |item| .{ .template = .{ .templateId = item.template_id.bytes, .templateRevision = item.template_revision } },
+    };
+}
+
+fn provenanceToDomain(value: ?Provenance) tracking.Id.ParseError!?tracking.Provenance {
+    const provenance = value orelse return null;
+    return switch (provenance) {
+        .recommendation => |item| .{ .recommendation = .{
+            .accepted_recommendation_id = try tracking.Id.parse(item.acceptedRecommendationId),
+            .input_fingerprint = item.inputFingerprint,
+            .result_fingerprint = item.resultFingerprint,
+            .methodology_id = try tracking.Id.parse(item.methodologyId),
+            .methodology_version = item.methodologyVersion,
+            .methodology_config_version = item.methodologyConfigVersion,
+            .methodology_state_revision = item.methodologyStateRevision,
+            .methodology_state_fingerprint = item.methodologyStateFingerprint,
+        } },
+        .template => |item| .{ .template = .{ .template_id = try tracking.Id.parse(item.templateId), .template_revision = item.templateRevision } },
     };
 }
 

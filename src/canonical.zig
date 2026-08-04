@@ -97,6 +97,29 @@ pub const CompletedWorkout = struct {
     exercises: []const CompletedExercise,
 };
 
+pub const TemplateSet = struct {
+    kind: ?[]const u8 = null,
+    targetMetrics: []const Metric = &.{},
+};
+
+pub const TemplateExercise = struct {
+    exerciseId: []const u8,
+    sets: []const TemplateSet = &.{},
+    notes: ?[]const u8 = null,
+    tags: []const []const u8 = &.{},
+};
+
+pub const WorkoutTemplate = struct {
+    schemaVersion: u32,
+    id: []const u8,
+    displayName: []const u8,
+    description: ?[]const u8 = null,
+    exercises: []const TemplateExercise,
+    notes: ?[]const u8 = null,
+    tags: []const []const u8 = &.{},
+    revision: u64,
+};
+
 pub const HistorySnapshot = struct {
     workouts: []const CompletedWorkout = &.{},
     summaries: ?std.json.Value = null,

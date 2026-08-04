@@ -1,0 +1,2 @@
+{"schemaVersion":1,"id":"template-1","displayName":"Squat day","description":"Reusable strength session","exercises":[{"exerciseId":"squat","sets":[{"kind":"working","targetMetrics":[{"code":"repetitions","value":{"amount":"8","unit":"count"}}]}],"tags":["strength"]}],"tags":["lower-body"],"revision":7}
+

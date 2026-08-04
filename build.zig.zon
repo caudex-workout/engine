@@ -19,6 +19,7 @@
         "adapters/sqlite/migrations",
         "apps/caudex-cli",
         "tracking",
+        "workflows",
         "src",
         "include",
         "examples/zig",

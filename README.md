@@ -170,6 +170,7 @@ The architecture and implementation sequence are defined by:
 - [Active reference-client implementation plan](docs/implementation-plan.md)
 - [Programming and active-tracking SDK implementation plan](docs/implementation-plans/programming-tracking-sdk.md)
 - [Canonical tracking protocol v1](docs/contracts/tracking-v1.md)
+- [Programming, tracking, and template workflows](docs/tracking/workflows-and-templates.md)
 - [Completed v0.1 implementation plan](docs/implementation-plans/completed/v0.1-library-first-implementation-plan.md)
 
 ADR-0002 supersedes ADR-0001's tracking-first and SQLite-first product

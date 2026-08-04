@@ -67,6 +67,47 @@ pub const ExerciseMembership = struct {
     sets: []const LoggedSet = &.{},
 };
 
+pub const WorkoutOrigin = enum {
+    manual,
+    template,
+    recommendation,
+};
+
+pub const PrescribedSet = struct {
+    set_id: Id,
+    kind: Id,
+    target_metrics: []const Metric = &.{},
+};
+
+pub const PrescribedExercise = struct {
+    membership_id: Id,
+    exercise_id: Id,
+    sets: []const PrescribedSet = &.{},
+    notes: ?[]const u8 = null,
+    tags: []const Id = &.{},
+};
+
+pub const RecommendationProvenance = struct {
+    accepted_recommendation_id: Id,
+    input_fingerprint: []const u8,
+    result_fingerprint: []const u8,
+    methodology_id: Id,
+    methodology_version: []const u8,
+    methodology_config_version: u32,
+    methodology_state_revision: ?[]const u8 = null,
+    methodology_state_fingerprint: ?[]const u8 = null,
+};
+
+pub const TemplateProvenance = struct {
+    template_id: Id,
+    template_revision: u64,
+};
+
+pub const Provenance = union(enum) {
+    recommendation: RecommendationProvenance,
+    template: TemplateProvenance,
+};
+
 /// A semantic insertion point. Numeric persistence positions are private.
 pub const ExerciseAnchor = union(enum) {
     beginning,
@@ -102,6 +143,9 @@ pub const Workout = struct {
     started_at: Timestamp,
     completed_at: ?Timestamp = null,
     exercises: []const ExerciseMembership = &.{},
+    origin: WorkoutOrigin = .manual,
+    provenance: ?Provenance = null,
+    prescription: []const PrescribedExercise = &.{},
 };
 
 pub const StartWorkoutCommand = struct {
@@ -862,6 +906,9 @@ pub fn endWorkout(
             .started_at = workout.started_at,
             .completed_at = ended_at,
             .exercises = workout.exercises,
+            .origin = workout.origin,
+            .provenance = workout.provenance,
+            .prescription = workout.prescription,
         },
         .issues = issues,
     } };
@@ -1425,7 +1472,7 @@ pub fn validateCorrection(workout: Workout, command: CorrectSetCommand, issues: 
         return correctionReject(command.metadata.command_id, issues, setNotFoundIssue());
     if (workout.exercises[membership].sets[set].status == .open or (command.status != .completed and command.status != .partial and command.status != .failed))
         return correctionReject(command.metadata.command_id, issues, .{ .code = issue_codes.correction_invalid_transition, .category = .validation, .severity = .@"error", .message = "A correction must record a completed, partial, or failed set." });
-    return .{ .accepted = .{ .command_id = command.metadata.command_id, .disposition = .applied, .workout = .{ .id = workout.id, .scope = workout.scope, .revision = std.math.add(u64, workout.revision, 1) catch return error.RevisionOverflow, .status = workout.status, .started_at = workout.started_at, .completed_at = workout.completed_at, .exercises = workout.exercises } } };
+    return .{ .accepted = .{ .command_id = command.metadata.command_id, .disposition = .applied, .workout = .{ .id = workout.id, .scope = workout.scope, .revision = std.math.add(u64, workout.revision, 1) catch return error.RevisionOverflow, .status = workout.status, .started_at = workout.started_at, .completed_at = workout.completed_at, .exercises = workout.exercises, .origin = workout.origin, .provenance = workout.provenance, .prescription = workout.prescription } } };
 }
 
 fn correctionReject(command_id: Id, issues: []Issue, issue: Issue) DecisionError!CorrectionResult {
@@ -1545,6 +1592,9 @@ fn acceptExerciseChange(
             .started_at = workout.started_at,
             .completed_at = workout.completed_at,
             .exercises = exercises,
+            .origin = workout.origin,
+            .provenance = workout.provenance,
+            .prescription = workout.prescription,
         },
     } };
 }

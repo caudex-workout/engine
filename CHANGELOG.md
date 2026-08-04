@@ -7,6 +7,16 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Versioned canonical active-workout tracking protocol with bounded atomic
+  batches, replay receipts, deterministic fixtures, and structured results.
+- Pure recommendation/template-to-tracking workflows, immutable prescription
+  provenance, completed-workout evaluation conversion, explicit methodology
+  state acceptance proposals, and structured modification reporting.
+- Minimal versioned workout-template model, canonical JSON schema, optional
+  persistence capability, and deterministic template fixture.
+
 ## [0.1.0] - 2026-07-26
 
 ### Added

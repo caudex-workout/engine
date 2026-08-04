@@ -24,6 +24,10 @@ revisions, command IDs, ordering, target values, actual values, and units are
 explicit. Decimal amounts are canonical base-10 strings and never pass through
 floating point.
 
+Recommendation/template origin, provenance, and the immutable original
+prescription are also snapshot data. Live edits never overwrite prescription
+targets; workflow consumers can derive structured modifications.
+
 The typed batch reducer allocates nothing and writes only to caller workspace.
 Workspace contents are unspecified after rejection, but are never returned;
 the original input snapshot is immutable and remains the result snapshot. Hosts
@@ -40,4 +44,3 @@ provide explicit output capacity.
 Malformed UTF-8/JSON, excessive documents, and unsupported schema versions are
 transport errors. Valid commands rejected for revision, lifecycle, reference,
 or validation reasons return stable structured tracking issues.
-

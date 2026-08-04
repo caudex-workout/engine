@@ -75,5 +75,6 @@ fn unavailable() persistence.AdapterError!void {
 test "optional write capabilities remain separate declarations" {
     try std.testing.expect(@hasDecl(persistence, "RecommendationJournal"));
     try std.testing.expect(@hasDecl(persistence, "CompletedWorkoutSink"));
-    try std.testing.expectEqual(@as(u32, 1), persistence.contract_version);
+    try std.testing.expect(@hasDecl(persistence, "WorkoutTemplateStore"));
+    try std.testing.expectEqual(@as(u32, 2), persistence.contract_version);
 }

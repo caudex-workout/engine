@@ -9,7 +9,7 @@ const std = @import("std");
 const caudex = @import("caudex");
 
 pub const canonical = caudex.canonical;
-pub const contract_version: u32 = 1;
+pub const contract_version: u32 = 2;
 
 pub const AdapterError = error{
     Unavailable,
@@ -156,5 +156,34 @@ pub const CompletedWorkoutSink = struct {
         workout: canonical.CompletedWorkout,
     ) AdapterError!void {
         return self.append_fn(self.context, host_scope_key, workout);
+    }
+};
+
+pub const TemplateKey = struct {
+    host_scope_key: []const u8,
+    template_id: []const u8,
+};
+
+pub const TemplateRecord = struct {
+    host_scope_key: []const u8,
+    template: canonical.WorkoutTemplate,
+};
+
+pub const PutTemplate = struct {
+    record: TemplateRecord,
+    expected_revision: ?u64,
+};
+
+pub const WorkoutTemplateStore = struct {
+    context: *anyopaque,
+    load_fn: *const fn (*anyopaque, std.mem.Allocator, TemplateKey) CapabilityError!?TemplateRecord,
+    put_fn: *const fn (*anyopaque, std.mem.Allocator, PutTemplate) StateStoreError!TemplateRecord,
+
+    pub fn load(self: WorkoutTemplateStore, allocator: std.mem.Allocator, key: TemplateKey) CapabilityError!?TemplateRecord {
+        return self.load_fn(self.context, allocator, key);
+    }
+
+    pub fn put(self: WorkoutTemplateStore, allocator: std.mem.Allocator, change: PutTemplate) StateStoreError!TemplateRecord {
+        return self.put_fn(self.context, allocator, change);
     }
 };

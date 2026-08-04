@@ -81,9 +81,62 @@
         "status": { "enum": ["active", "completed", "cancelled"] },
         "startedAt": { "$ref": "#/$defs/timestamp" },
         "completedAt": { "$ref": "#/$defs/timestamp" },
-        "exercises": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/membership" } }
+        "exercises": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/membership" } },
+        "origin": { "enum": ["manual", "template", "recommendation"] },
+        "provenance": { "$ref": "#/$defs/provenance" },
+        "prescription": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/prescribedExercise" } }
       },
       "additionalProperties": false
+    },
+    "prescribedSet": {
+      "type": "object",
+      "required": ["setId", "kind"],
+      "properties": {
+        "setId": { "$ref": "#/$defs/id" },
+        "kind": { "$ref": "#/$defs/id" },
+        "targetMetrics": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/metric" } }
+      },
+      "additionalProperties": false
+    },
+    "prescribedExercise": {
+      "type": "object",
+      "required": ["membershipId", "exerciseId"],
+      "properties": {
+        "membershipId": { "$ref": "#/$defs/id" },
+        "exerciseId": { "$ref": "#/$defs/id" },
+        "sets": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/prescribedSet" } },
+        "notes": { "type": "string", "maxLength": 2000 },
+        "tags": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/id" } }
+      },
+      "additionalProperties": false
+    },
+    "provenance": {
+      "oneOf": [
+        {
+          "type": "object", "required": ["recommendation"], "additionalProperties": false,
+          "properties": { "recommendation": {
+            "type": "object", "required": ["acceptedRecommendationId", "inputFingerprint", "resultFingerprint", "methodologyId", "methodologyVersion", "methodologyConfigVersion"],
+            "properties": {
+              "acceptedRecommendationId": { "$ref": "#/$defs/id" },
+              "inputFingerprint": { "type": "string", "maxLength": 200 },
+              "resultFingerprint": { "type": "string", "maxLength": 200 },
+              "methodologyId": { "$ref": "#/$defs/id" },
+              "methodologyVersion": { "type": "string", "maxLength": 100 },
+              "methodologyConfigVersion": { "type": "integer", "minimum": 0 },
+              "methodologyStateRevision": { "type": "string", "maxLength": 200 },
+              "methodologyStateFingerprint": { "type": "string", "maxLength": 200 }
+            }, "additionalProperties": false
+          } }
+        },
+        {
+          "type": "object", "required": ["template"], "additionalProperties": false,
+          "properties": { "template": {
+            "type": "object", "required": ["templateId", "templateRevision"],
+            "properties": { "templateId": { "$ref": "#/$defs/id" }, "templateRevision": { "type": "integer", "minimum": 0 } },
+            "additionalProperties": false
+          } }
+        }
+      ]
     },
     "snapshot": {
       "type": "object",

@@ -117,6 +117,21 @@ test "canonical snapshots preserve exact metrics and replay receipts" {
                 .targetMetrics = &.{.{ .code = "load", .value = .{ .amount = "185.00", .unit = "lb" } }},
             }},
         }},
+        .origin = .recommendation,
+        .provenance = .{ .recommendation = .{
+            .acceptedRecommendationId = "accepted-1",
+            .inputFingerprint = "input-fingerprint",
+            .resultFingerprint = "result-fingerprint",
+            .methodologyId = "caudex.double-progression",
+            .methodologyVersion = "1.0.0",
+            .methodologyConfigVersion = 1,
+            .methodologyStateRevision = "state-4",
+        } },
+        .prescription = &.{.{
+            .membershipId = "membership-1",
+            .exerciseId = "squat",
+            .sets = &.{.{ .setId = "set-1", .kind = "working", .targetMetrics = &.{.{ .code = "load", .value = .{ .amount = "185.00", .unit = "lb" } }} }},
+        }},
     };
     const start: protocol.StartWorkout = .{
         .metadata = .{ .commandId = "start-1", .occurredAt = "2026-08-04T12:00:00Z" },
@@ -132,23 +147,34 @@ test "canonical snapshots preserve exact metrics and replay receipts" {
     var receipts: [1]tracking.StartReceipt = undefined;
     var exercises: [1]tracking.ExerciseMembership = undefined;
     var sets: [1]tracking.TrackedSet = undefined;
-    var metrics: [1]tracking.Metric = undefined;
+    var metrics: [2]tracking.Metric = undefined;
+    var typed_prescribed_exercises: [1]tracking.PrescribedExercise = undefined;
+    var typed_prescribed_sets: [1]tracking.PrescribedSet = undefined;
+    var typed_tags: [1]tracking.Id = undefined;
     const typed = try protocol.snapshotToDomain(snapshot, .{
         .workouts = &workouts,
         .receipts = &receipts,
         .exercises = &exercises,
         .sets = &sets,
         .metrics = &metrics,
+        .prescription_exercises = &typed_prescribed_exercises,
+        .prescription_sets = &typed_prescribed_sets,
+        .tags = &typed_tags,
     });
     try std.testing.expectEqual(@as(i64, 18500), typed.workouts[0].exercises[0].sets[0].target_metrics[0].value.value.mantissa);
     try std.testing.expectEqual(tracking.CommandDisposition.applied, typed.start_receipts[0].accepted.disposition);
+    try std.testing.expectEqual(tracking.WorkoutOrigin.recommendation, typed.workouts[0].origin);
+    try std.testing.expectEqualStrings("result-fingerprint", typed.workouts[0].provenance.?.recommendation.result_fingerprint);
 
     var wire_workouts: [1]protocol.TrackedWorkout = undefined;
     var wire_receipts: [1]protocol.StartReceipt = undefined;
     var wire_exercises: [1]protocol.ExerciseMembership = undefined;
     var wire_sets: [1]protocol.TrackedSet = undefined;
-    var wire_metrics: [1]@import("caudex").canonical.Metric = undefined;
-    var amounts: [1][64]u8 = undefined;
+    var wire_metrics: [2]@import("caudex").canonical.Metric = undefined;
+    var amounts: [2][64]u8 = undefined;
+    var wire_prescribed_exercises: [1]protocol.PrescribedExercise = undefined;
+    var wire_prescribed_sets: [1]protocol.PrescribedSet = undefined;
+    var wire_tags: [1][]const u8 = undefined;
     const round_trip = try protocol.snapshotFromDomain(typed, .{
         .workouts = &wire_workouts,
         .receipts = &wire_receipts,
@@ -156,9 +182,14 @@ test "canonical snapshots preserve exact metrics and replay receipts" {
         .sets = &wire_sets,
         .metrics = &wire_metrics,
         .amountBytes = &amounts,
+        .prescription_exercises = &wire_prescribed_exercises,
+        .prescription_sets = &wire_prescribed_sets,
+        .tags = &wire_tags,
     });
     try std.testing.expectEqualStrings("185.00", round_trip.workouts[0].exercises[0].sets[0].targetMetrics[0].value.amount);
     try std.testing.expectEqualStrings("start-1", round_trip.startReceipts[0].command.metadata.commandId);
+    try std.testing.expectEqualStrings("accepted-1", round_trip.workouts[0].provenance.?.recommendation.acceptedRecommendationId);
+    try std.testing.expectEqualStrings("185.00", round_trip.workouts[0].prescription[0].sets[0].targetMetrics[0].value.amount);
 }
 
 test "canonical atomic batch executes through the typed reducer" {
@@ -201,6 +232,9 @@ test "canonical atomic batch executes through the typed reducer" {
     var wire_sets: [8]protocol.TrackedSet = undefined;
     var wire_metrics: [8]@import("caudex").canonical.Metric = undefined;
     var amounts: [8][64]u8 = undefined;
+    var wire_prescribed_exercises: [8]protocol.PrescribedExercise = undefined;
+    var wire_prescribed_sets: [8]protocol.PrescribedSet = undefined;
+    var wire_tags: [8][]const u8 = undefined;
     var wire_outcomes: [commands.len]protocol.CommandOutcome = undefined;
     var wire_accepted: [commands.len]protocol.AcceptedCommand = undefined;
     var wire_rejected: [1]protocol.RejectedCommand = undefined;
@@ -214,6 +248,9 @@ test "canonical atomic batch executes through the typed reducer" {
             .sets = &wire_sets,
             .metrics = &wire_metrics,
             .amountBytes = &amounts,
+            .prescription_exercises = &wire_prescribed_exercises,
+            .prescription_sets = &wire_prescribed_sets,
+            .tags = &wire_tags,
         },
         .outcomes = &wire_outcomes,
         .accepted = &wire_accepted,
@@ -271,13 +308,16 @@ test "canonical rejected batch returns original snapshot and structured issue" {
     var wire_sets: [1]protocol.TrackedSet = undefined;
     var wire_metrics: [1]@import("caudex").canonical.Metric = undefined;
     var amounts: [1][64]u8 = undefined;
+    var wire_prescribed_exercises: [1]protocol.PrescribedExercise = undefined;
+    var wire_prescribed_sets: [1]protocol.PrescribedSet = undefined;
+    var wire_tags: [1][]const u8 = undefined;
     var wire_outcomes: [1]protocol.CommandOutcome = undefined;
     var wire_accepted: [1]protocol.AcceptedCommand = undefined;
     var wire_rejected: [1]protocol.RejectedCommand = undefined;
     var wire_issues: [1]protocol.Issue = undefined;
     var related_ids: [1][]const u8 = undefined;
     const wire_result = try protocol.batchResultFromDomain(result, original, .{
-        .snapshot = .{ .workouts = &wire_workouts, .receipts = &wire_receipts, .exercises = &wire_exercises, .sets = &wire_sets, .metrics = &wire_metrics, .amountBytes = &amounts },
+        .snapshot = .{ .workouts = &wire_workouts, .receipts = &wire_receipts, .exercises = &wire_exercises, .sets = &wire_sets, .metrics = &wire_metrics, .amountBytes = &amounts, .prescription_exercises = &wire_prescribed_exercises, .prescription_sets = &wire_prescribed_sets, .tags = &wire_tags },
         .outcomes = &wire_outcomes,
         .accepted = &wire_accepted,
         .rejected = &wire_rejected,

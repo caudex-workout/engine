@@ -87,6 +87,15 @@ pub fn build(b: *std.Build) void {
             .{ .name = "caudex_tracking", .module = tracking_module },
         },
     });
+    const workflows_module = b.addModule("caudex_workflows", .{
+        .root_source_file = b.path("workflows/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "caudex", .module = module },
+            .{ .name = "caudex_tracking", .module = tracking_module },
+        },
+    });
     const tracking_contract_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("tracking_contract_test.zig"),
@@ -143,6 +152,32 @@ pub fn build(b: *std.Build) void {
     tracking_contract_step.dependOn(&run_tracking_lifecycle_tests.step);
     tracking_contract_step.dependOn(&run_tracking_architecture_tests.step);
     tracking_contract_step.dependOn(&run_tracking_protocol_tests.step);
+
+    const workflow_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("workflow_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "caudex", .module = module },
+                .{ .name = "caudex_tracking", .module = tracking_module },
+                .{ .name = "caudex_workflows", .module = workflows_module },
+            },
+        }),
+    });
+    const run_workflow_tests = b.addRunArtifact(workflow_tests);
+    const workflow_architecture_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("workflow_architecture_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "caudex_workflows", .module = workflows_module }},
+        }),
+    });
+    const run_workflow_architecture_tests = b.addRunArtifact(workflow_architecture_tests);
+    const workflow_test_step = b.step("test-workflows", "Test pure programming, template, tracking, and evaluation workflows");
+    workflow_test_step.dependOn(&run_workflow_tests.step);
+    workflow_test_step.dependOn(&run_workflow_architecture_tests.step);
 
     const persistence_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -961,6 +996,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_tracking_contract_tests.step);
     test_step.dependOn(&run_tracking_lifecycle_tests.step);
     test_step.dependOn(&run_tracking_architecture_tests.step);
+    test_step.dependOn(&run_workflow_tests.step);
+    test_step.dependOn(&run_workflow_architecture_tests.step);
     test_step.dependOn(&run_persistence_tests.step);
     test_step.dependOn(&run_persistence_contract_kit_tests.step);
     test_step.dependOn(&persistence_typescript_test.step);

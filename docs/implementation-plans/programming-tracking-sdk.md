@@ -60,16 +60,28 @@ later phases.
 
 ### 3. Workflow bridge and provenance
 
+**Status:** Completed for the pure Zig workflow bridge
+
 - Pure recommendation/template instantiation and completion conversion preserve
   original prescriptions and validate catalog, units, ordering, IDs, completion,
   provenance, and capacity with structured issues.
 - Manual, template, and recommendation origins round-trip deterministically.
 
+Implemented with explicit host IDs/timestamps, immutable prescriptions,
+structured modification derivation, completion validation/conversion, and
+explicit methodology-state compare-and-set proposals. Cross-language execution
+is scheduled in Phases 5–6.
+
 ### 4. Minimal templates
+
+**Status:** Completed for the pure model, canonical document, and persistence contract
 
 - A bounded versioned model supports identity, description, ordered exercises,
   optional set kinds/targets, notes/tags, and revision; canonical serialization,
   pure instantiation, and adapter contracts pass without scheduling features.
+
+First-party SQLite and IndexedDB storage remains part of Phase 8 rather than
+introducing persistence into this pure phase.
 
 ### 5. C ABI v2 and WASM
 
