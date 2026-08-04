@@ -46,6 +46,50 @@ test "workout started through one instance is read through another" {
     }
 }
 
+test "workflow-instantiated provenance and prescription survive reopen" {
+    var temporary = std.testing.tmpDir(.{});
+    defer temporary.cleanup();
+    const path = try databasePath(temporary, "workflow.sqlite");
+    defer std.testing.allocator.free(path);
+    const target: tracking.Metric = .{
+        .code = .{ .bytes = "load" },
+        .value = .{ .value = .{ .mantissa = 18500, .scale = 2 }, .unit = .lb },
+    };
+    const prescribed_set: tracking.PrescribedSet = .{ .set_id = .{ .bytes = "set-1" }, .kind = .{ .bytes = "working" }, .target_metrics = &.{target} };
+    const prescription: tracking.PrescribedExercise = .{ .membership_id = .{ .bytes = "membership-1" }, .exercise_id = .{ .bytes = "squat" }, .sets = &.{prescribed_set} };
+    const workout: tracking.Workout = .{
+        .id = .{ .bytes = "workflow-workout-1" },
+        .scope = scope,
+        .revision = 1,
+        .status = .active,
+        .started_at = .{ .bytes = "2026-07-26T12:00:00Z" },
+        .exercises = &.{.{ .id = prescription.membership_id, .exercise_id = prescription.exercise_id, .sets = &.{.{ .id = prescribed_set.set_id, .kind = prescribed_set.kind, .target_metrics = prescribed_set.target_metrics }} }},
+        .origin = .recommendation,
+        .provenance = .{ .recommendation = .{
+            .accepted_recommendation_id = .{ .bytes = "accepted-1" },
+            .input_fingerprint = "input-fingerprint",
+            .result_fingerprint = "result-fingerprint",
+            .methodology_id = .{ .bytes = "caudex.double-progression" },
+            .methodology_version = "1.0.0",
+            .methodology_config_version = 1,
+        } },
+        .prescription = &.{prescription},
+    };
+    {
+        const writer = try sqlite.open(path, .{});
+        defer writer.close();
+        try writer.saveInstantiatedWorkout(std.testing.allocator, workout);
+    }
+    const reader = try sqlite.open(path, .{});
+    defer reader.close();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const loaded = (try reader.readWorkout(arena.allocator(), .{ .scope = scope, .workout_id = workout.id })).found;
+    try std.testing.expectEqual(tracking.WorkoutOrigin.recommendation, loaded.origin);
+    try std.testing.expectEqualStrings("result-fingerprint", loaded.provenance.?.recommendation.result_fingerprint);
+    try std.testing.expectEqual(@as(i64, 18500), loaded.prescription[0].sets[0].target_metrics[0].value.value.mantissa);
+}
+
 test "retry returns replay without duplicating or replacing the workout" {
     const database = try sqlite.openInMemory(.{});
     defer database.close();

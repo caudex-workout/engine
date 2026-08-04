@@ -187,3 +187,33 @@ pub const WorkoutTemplateStore = struct {
         return self.put_fn(self.context, allocator, change);
     }
 };
+
+pub const WorkflowRecoveryStatus = enum { pending, completed };
+
+pub const WorkflowRecoveryKey = struct {
+    host_scope_key: []const u8,
+    workflow_id: []const u8,
+};
+
+pub const WorkflowRecoveryRecord = struct {
+    key: WorkflowRecoveryKey,
+    kind: []const u8,
+    status: WorkflowRecoveryStatus,
+    idempotency_key: []const u8,
+    payload_json: []const u8,
+    updated_at: []const u8,
+};
+
+pub const WorkflowRecoveryStore = struct {
+    context: *anyopaque,
+    load_fn: *const fn (*anyopaque, std.mem.Allocator, WorkflowRecoveryKey) CapabilityError!?WorkflowRecoveryRecord,
+    put_fn: *const fn (*anyopaque, WorkflowRecoveryRecord) AdapterError!void,
+
+    pub fn load(self: WorkflowRecoveryStore, allocator: std.mem.Allocator, key: WorkflowRecoveryKey) CapabilityError!?WorkflowRecoveryRecord {
+        return self.load_fn(self.context, allocator, key);
+    }
+
+    pub fn put(self: WorkflowRecoveryStore, record: WorkflowRecoveryRecord) AdapterError!void {
+        return self.put_fn(self.context, record);
+    }
+};

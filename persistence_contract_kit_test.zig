@@ -56,6 +56,31 @@ test "reusable state suite covers round trips and optimistic conflicts" {
     );
 }
 
+test "reusable workflow suite covers templates and recovery records" {
+    var adapter: testing.InMemoryAdapter = .{ .fixture = fixture };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    try testing.verifyTemplateStore(allocator, adapter.templateStore(), .{
+        .host_scope_key = "athlete-1",
+        .template = .{
+            .schemaVersion = 1,
+            .id = "template-1",
+            .displayName = "Strength day",
+            .revision = 1,
+            .exercises = &.{.{ .exerciseId = "incline-dumbbell-press" }},
+        },
+    });
+    try testing.verifyRecoveryStore(allocator, adapter.recoveryStore(), .{
+        .key = .{ .host_scope_key = "athlete-1", .workflow_id = "workflow-1" },
+        .kind = "recommendation_instantiation",
+        .status = .pending,
+        .idempotency_key = "accepted-1",
+        .payload_json = "{\"workoutId\":\"workout-1\"}",
+        .updated_at = "2026-08-04T12:00:00Z",
+    });
+}
+
 test "canonical adapter assembly equals direct snapshot mode" {
     var adapter: testing.InMemoryAdapter = .{ .fixture = fixture };
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

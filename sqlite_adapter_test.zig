@@ -159,7 +159,7 @@ test "newer schema is rejected distinctly" {
         database,
         "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY)",
     );
-    try execRaw(database, "INSERT INTO schema_migrations (version) VALUES (8)");
+    try execRaw(database, "INSERT INTO schema_migrations (version) VALUES (9)");
 
     try std.testing.expectError(
         error.UnsupportedSchema,
@@ -172,6 +172,40 @@ test "integrity report is available through the public adapter" {
     defer adapter.close();
     const report = try adapter.integrity();
     try std.testing.expectEqual(sqlite.IntegrityStatus.ok, report.status);
+}
+
+test "templates and workflow recovery persist through public capabilities" {
+    const adapter = try sqlite.openInMemory(.{});
+    defer adapter.close();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const template: persistence.canonical.WorkoutTemplate = .{
+        .schemaVersion = 1,
+        .id = "template-1",
+        .displayName = "Squat day",
+        .exercises = &.{.{ .exerciseId = "squat" }},
+        .revision = 1,
+    };
+    const saved = try adapter.templateStore().put(allocator, .{
+        .record = .{ .host_scope_key = "scope-1", .template = template },
+        .expected_revision = null,
+    });
+    try std.testing.expectEqualStrings("Squat day", saved.template.displayName);
+    try std.testing.expectError(error.Conflict, adapter.templateStore().put(allocator, .{
+        .record = .{ .host_scope_key = "scope-1", .template = template },
+        .expected_revision = null,
+    }));
+    try adapter.recoveryStore().put(.{
+        .key = .{ .host_scope_key = "scope-1", .workflow_id = "workflow-1" },
+        .kind = "workout_completion",
+        .status = .pending,
+        .idempotency_key = "completion-1",
+        .payload_json = "{\"workoutId\":\"workout-1\"}",
+        .updated_at = "2026-08-04T12:00:00Z",
+    });
+    const recovery = (try adapter.recoveryStore().load(allocator, .{ .host_scope_key = "scope-1", .workflow_id = "workflow-1" })).?;
+    try std.testing.expectEqualStrings("completion-1", recovery.idempotency_key);
 }
 
 test "schema version one migrates forward to current metadata" {
@@ -212,6 +246,14 @@ test "schema version one migrates forward to current metadata" {
         .max_results = 10,
     });
     try std.testing.expectEqual(@as(usize, 1), search.found.len);
+    try std.testing.expect((try migrated.templateStore().load(arena.allocator(), .{
+        .host_scope_key = "legacy",
+        .template_id = "missing",
+    })) == null);
+    try std.testing.expect((try migrated.recoveryStore().load(arena.allocator(), .{
+        .host_scope_key = "legacy",
+        .workflow_id = "missing",
+    })) == null);
 }
 
 test "corrupt database is rejected distinctly" {

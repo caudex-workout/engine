@@ -34,6 +34,10 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Persistence contract v2 and IndexedDB schema v2 add transactional
   revision-aware active workouts, workout templates, and workflow recovery
   records.
+- SQLite schema v8 adds immutable tracking provenance and prescriptions,
+  revision-aware workout templates, and workflow recovery records. Databases at
+  supported schema versions migrate forward automatically; newer schemas remain
+  rejected.
 
 ## [0.1.0] - 2026-07-26
 

@@ -17,9 +17,10 @@ and verifies that only methodology state is written.
 
 ## Choose only the capabilities you need
 
-Implement `CatalogSource`, `HistorySource`, and `MethodologyStateStore`
-independently. A host whose catalog and history already live in application
-services may implement only `MethodologyStateStore`.
+Implement `CatalogSource`, `HistorySource`, `MethodologyStateStore`,
+`WorkoutTemplateStore`, and `WorkflowRecoveryStore` independently. A host whose
+catalog and history already live in application services may implement only the
+write and recovery capabilities it needs.
 
 Do not combine them into a general repository. Keep authentication, tenancy,
 connection management, transactions, and database-specific query options in
@@ -120,13 +121,21 @@ read or calculation call. After the host explicitly accepts a result, it may:
 If the backing system supports transactions, the host may group those writes.
 The common contract does not claim transaction behavior.
 
+Multi-step workflows use stable idempotency keys and explicit recovery records.
+Write a `pending` recovery record before the first externally visible step and
+replace it with `completed` only after all required writes succeed. A custom
+adapter must not claim atomicity across unrelated services; recovery and replay
+are the portable guarantee. An adapter-provided composite operation may offer a
+stronger transaction when all affected records share one database.
+
 ## Contract tests
 
 Zig adapters should run the reusable functions in
 [`adapters/persistence/testing.zig`](../../adapters/persistence/testing.zig).
 The suite checks loading, deterministic chronological history ordering, missing
-scopes, state round trips, optimistic conflicts, and canonical equivalence with
-direct snapshot assembly.
+scopes, state round trips, optimistic conflicts, template compare-and-set,
+workflow recovery transitions, and canonical equivalence with direct snapshot
+assembly.
 
 Pass a `TransactionProbe` only when the adapter advertises transactional
 rollback. Adapters without that guarantee omit it and are not tested against a

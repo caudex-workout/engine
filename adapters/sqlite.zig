@@ -13,7 +13,7 @@ const c = @cImport({
 });
 
 pub const adapter_version = "0.1.0";
-pub const schema_version: u32 = 7;
+pub const schema_version: u32 = 8;
 pub const minimum_schema_version: u32 = 1;
 
 pub const Options = struct {
@@ -146,6 +146,24 @@ pub const Adapter = opaque {
             .load_fn = loadStateCallback,
             .compare_and_set_fn = compareAndSetStateCallback,
         };
+    }
+
+    pub fn templateStore(self: *Adapter) persistence.WorkoutTemplateStore {
+        return .{ .context = self, .load_fn = loadTemplateCallback, .put_fn = putTemplateCallback };
+    }
+
+    pub fn recoveryStore(self: *Adapter) persistence.WorkflowRecoveryStore {
+        return .{ .context = self, .load_fn = loadRecoveryCallback, .put_fn = putRecoveryCallback };
+    }
+
+    /// Persists a pure workflow-instantiated workout and its immutable
+    /// provenance/prescription as one SQLite transaction.
+    pub fn saveInstantiatedWorkout(self: *Adapter, allocator: std.mem.Allocator, workout: tracking.Workout) TrackingError!void {
+        try self.execute("BEGIN IMMEDIATE");
+        errdefer self.execute("ROLLBACK") catch {};
+        try insertTrackedWorkout(self, allocator, workout);
+        try persistWorkoutState(self, allocator, workout);
+        try self.execute("COMMIT");
     }
 
     pub fn startWorkout(
@@ -537,6 +555,10 @@ pub const Adapter = opaque {
             7,
             @embedFile("sqlite/migrations/007_history_queries.sql"),
         );
+        if (current < 8) try self.applyMigration(
+            8,
+            @embedFile("sqlite/migrations/008_workflow_persistence.sql"),
+        );
     }
 
     fn applyMigration(
@@ -713,7 +735,7 @@ fn startTrackedWorkout(
     };
 
     const accepted = try ownAccepted(allocator, proposed);
-    try insertTrackedWorkout(self, accepted.workout);
+    try insertTrackedWorkout(self, allocator, accepted.workout);
     try insertStartReceipt(self, command, accepted);
     try self.execute("COMMIT");
     return .{ .accepted = accepted };
@@ -1276,8 +1298,13 @@ fn persistWorkoutState(
     allocator: std.mem.Allocator,
     workout: tracking.Workout,
 ) persistence.CapabilityError!void {
+    const provenance = if (workout.provenance) |value| try encodeAlloc(allocator, value) else null;
+    defer if (provenance) |value| allocator.free(value);
+    const prescription = try encodeAlloc(allocator, workout.prescription);
+    defer allocator.free(prescription);
     var update = try self.prepare(
-        \\UPDATE tracking_workouts SET revision = ?1, status = ?2, completed_at = ?3
+        \\UPDATE tracking_workouts SET revision = ?1, status = ?2, completed_at = ?3,
+        \\ origin = ?7, provenance_json = ?8, prescription_json = ?9
         \\WHERE host_scope_key = ?4 AND athlete_id = ?5 AND workout_id = ?6
     );
     defer update.finalize();
@@ -1287,6 +1314,9 @@ fn persistWorkoutState(
     try update.bindText(4, workout.scope.host_scope_key.bytes);
     try update.bindText(5, athleteKey(workout.scope));
     try update.bindText(6, workout.id.bytes);
+    try update.bindText(7, workoutOriginText(workout.origin));
+    if (provenance) |value| try update.bindText(8, value) else try update.bindNull(8);
+    try update.bindText(9, prescription);
     try update.done();
 
     var delete_sets = try self.prepare(
@@ -1368,7 +1398,8 @@ fn loadTrackedWorkout(
     workout_id: tracking.Id,
 ) TrackingError!?tracking.Workout {
     var statement = try self.prepare(
-        \\SELECT revision, status, started_at, completed_at
+        \\SELECT revision, status, started_at, completed_at, origin,
+        \\ provenance_json, prescription_json
         \\FROM tracking_workouts
         \\WHERE host_scope_key = ?1 AND athlete_id = ?2 AND workout_id = ?3
     );
@@ -1392,6 +1423,12 @@ fn loadTrackedWorkout(
     else
         null;
     const exercises = try loadTrackedExercises(self, allocator, scope, workout_id);
+    const origin = try parseWorkoutOrigin(column(statement.raw, 4) orelse return error.InvalidData);
+    const provenance: ?tracking.Provenance = if (column(statement.raw, 5) != null)
+        try parseColumn(tracking.Provenance, allocator, statement.raw, 5)
+    else
+        null;
+    const prescription = try parseColumn([]const tracking.PrescribedExercise, allocator, statement.raw, 6);
     return .{
         .id = try ownId(allocator, workout_id),
         .scope = try ownScope(allocator, scope),
@@ -1400,6 +1437,9 @@ fn loadTrackedWorkout(
         .started_at = started_at,
         .completed_at = completed_at,
         .exercises = exercises,
+        .origin = origin,
+        .provenance = provenance,
+        .prescription = prescription,
     };
 }
 
@@ -1558,13 +1598,18 @@ fn loadStartReceipt(
 
 fn insertTrackedWorkout(
     self: *Adapter,
+    allocator: std.mem.Allocator,
     workout: tracking.Workout,
-) persistence.AdapterError!void {
+) persistence.CapabilityError!void {
+    const provenance = if (workout.provenance) |value| try encodeAlloc(allocator, value) else null;
+    defer if (provenance) |value| allocator.free(value);
+    const prescription = try encodeAlloc(allocator, workout.prescription);
+    defer allocator.free(prescription);
     var statement = try self.prepare(
         \\INSERT INTO tracking_workouts
         \\  (host_scope_key, athlete_id, workout_id, revision, status,
-        \\   started_at, completed_at)
-        \\VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)
+        \\   started_at, completed_at, origin, provenance_json, prescription_json)
+        \\VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7, ?8, ?9)
     );
     defer statement.finalize();
     try statement.bindText(1, workout.scope.host_scope_key.bytes);
@@ -1573,6 +1618,9 @@ fn insertTrackedWorkout(
     try statement.bindInt(4, workout.revision);
     try statement.bindText(5, workoutStatusText(workout.status));
     try statement.bindText(6, workout.started_at.bytes);
+    try statement.bindText(7, workoutOriginText(workout.origin));
+    if (provenance) |value| try statement.bindText(8, value) else try statement.bindNull(8);
+    try statement.bindText(9, prescription);
     try statement.done();
 }
 
@@ -1720,6 +1768,21 @@ fn workoutStatusText(status: tracking.WorkoutStatus) []const u8 {
     };
 }
 
+fn workoutOriginText(origin: tracking.WorkoutOrigin) []const u8 {
+    return switch (origin) {
+        .manual => "manual",
+        .template => "template",
+        .recommendation => "recommendation",
+    };
+}
+
+fn parseWorkoutOrigin(value: []const u8) persistence.AdapterError!tracking.WorkoutOrigin {
+    if (std.mem.eql(u8, value, "manual")) return .manual;
+    if (std.mem.eql(u8, value, "template")) return .template;
+    if (std.mem.eql(u8, value, "recommendation")) return .recommendation;
+    return error.InvalidData;
+}
+
 fn parseWorkoutStatus(value: []const u8) persistence.AdapterError!tracking.WorkoutStatus {
     if (std.mem.eql(u8, value, "active")) return .active;
     if (std.mem.eql(u8, value, "completed")) return .completed;
@@ -1795,6 +1858,95 @@ const Statement = struct {
         if (status != c.SQLITE_DONE) return mapStatus(status);
     }
 };
+
+fn loadTemplateCallback(context: *anyopaque, allocator: std.mem.Allocator, key: persistence.TemplateKey) persistence.CapabilityError!?persistence.TemplateRecord {
+    const self: *Adapter = @ptrCast(@alignCast(context));
+    var statement = try self.prepare("SELECT payload_json FROM workout_templates WHERE host_scope_key = ?1 AND template_id = ?2");
+    defer statement.finalize();
+    try statement.bindText(1, key.host_scope_key);
+    try statement.bindText(2, key.template_id);
+    if (!try statement.row()) return null;
+    return .{
+        .host_scope_key = try allocator.dupe(u8, key.host_scope_key),
+        .template = try parseColumn(persistence.canonical.WorkoutTemplate, allocator, statement.raw, 0),
+    };
+}
+
+fn putTemplateCallback(context: *anyopaque, allocator: std.mem.Allocator, change: persistence.PutTemplate) persistence.StateStoreError!persistence.TemplateRecord {
+    const self: *Adapter = @ptrCast(@alignCast(context));
+    try self.execute("BEGIN IMMEDIATE");
+    errdefer self.execute("ROLLBACK") catch {};
+    var query = try self.prepare("SELECT revision FROM workout_templates WHERE host_scope_key = ?1 AND template_id = ?2");
+    defer query.finalize();
+    try query.bindText(1, change.record.host_scope_key);
+    try query.bindText(2, change.record.template.id);
+    const exists = try query.row();
+    const actual: ?u64 = if (exists) @intCast(c.sqlite3_column_int64(query.raw, 0)) else null;
+    if (actual != change.expected_revision) {
+        try self.execute("ROLLBACK");
+        return error.Conflict;
+    }
+    const payload = try encodeAlloc(allocator, change.record.template);
+    defer allocator.free(payload);
+    var statement = try self.prepare(
+        \\INSERT INTO workout_templates (host_scope_key, template_id, revision, payload_json)
+        \\VALUES (?1, ?2, ?3, ?4)
+        \\ON CONFLICT (host_scope_key, template_id) DO UPDATE SET
+        \\ revision = excluded.revision, payload_json = excluded.payload_json
+    );
+    defer statement.finalize();
+    try statement.bindText(1, change.record.host_scope_key);
+    try statement.bindText(2, change.record.template.id);
+    try statement.bindInt(3, change.record.template.revision);
+    try statement.bindText(4, payload);
+    try statement.done();
+    try self.execute("COMMIT");
+    return (try loadTemplateCallback(context, allocator, .{ .host_scope_key = change.record.host_scope_key, .template_id = change.record.template.id })).?;
+}
+
+fn loadRecoveryCallback(context: *anyopaque, allocator: std.mem.Allocator, key: persistence.WorkflowRecoveryKey) persistence.CapabilityError!?persistence.WorkflowRecoveryRecord {
+    const self: *Adapter = @ptrCast(@alignCast(context));
+    var statement = try self.prepare(
+        \\SELECT kind, status, idempotency_key, payload_json, updated_at
+        \\FROM workflow_recovery WHERE host_scope_key = ?1 AND workflow_id = ?2
+    );
+    defer statement.finalize();
+    try statement.bindText(1, key.host_scope_key);
+    try statement.bindText(2, key.workflow_id);
+    if (!try statement.row()) return null;
+    const status_value = column(statement.raw, 1) orelse return error.InvalidData;
+    const status: persistence.WorkflowRecoveryStatus = if (std.mem.eql(u8, status_value, "pending")) .pending else if (std.mem.eql(u8, status_value, "completed")) .completed else return error.InvalidData;
+    return .{
+        .key = .{ .host_scope_key = try allocator.dupe(u8, key.host_scope_key), .workflow_id = try allocator.dupe(u8, key.workflow_id) },
+        .kind = try dupeColumn(allocator, statement.raw, 0),
+        .status = status,
+        .idempotency_key = try dupeColumn(allocator, statement.raw, 2),
+        .payload_json = try dupeColumn(allocator, statement.raw, 3),
+        .updated_at = try dupeColumn(allocator, statement.raw, 4),
+    };
+}
+
+fn putRecoveryCallback(context: *anyopaque, record: persistence.WorkflowRecoveryRecord) persistence.AdapterError!void {
+    const self: *Adapter = @ptrCast(@alignCast(context));
+    var statement = try self.prepare(
+        \\INSERT INTO workflow_recovery
+        \\ (host_scope_key, workflow_id, kind, status, idempotency_key, payload_json, updated_at)
+        \\VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        \\ON CONFLICT (host_scope_key, workflow_id) DO UPDATE SET
+        \\ kind = excluded.kind, status = excluded.status,
+        \\ idempotency_key = excluded.idempotency_key,
+        \\ payload_json = excluded.payload_json, updated_at = excluded.updated_at
+    );
+    defer statement.finalize();
+    try statement.bindText(1, record.key.host_scope_key);
+    try statement.bindText(2, record.key.workflow_id);
+    try statement.bindText(3, record.kind);
+    try statement.bindText(4, if (record.status == .pending) "pending" else "completed");
+    try statement.bindText(5, record.idempotency_key);
+    try statement.bindText(6, record.payload_json);
+    try statement.bindText(7, record.updated_at);
+    try statement.done();
+}
 
 fn loadCatalogCallback(
     context: *anyopaque,

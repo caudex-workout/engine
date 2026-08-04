@@ -122,7 +122,7 @@ requires an explicit compare-and-set call to accept methodology state.
 
 ### 8. Persistence expansion
 
-**Status:** In progress; TypeScript contracts and IndexedDB v2 implemented
+**Status:** In progress; active-workout, template, provenance, and recovery persistence implemented
 
 - Contracts and contract kit cover replay, templates, provenance, acceptance,
   completion, state, recovery, and portable data.
@@ -131,7 +131,12 @@ requires an explicit compare-and-set call to accept methodology state.
 
 The npm persistence contract v2 and IndexedDB schema v2 now persist
 revision-aware active snapshots, templates, and workflow recovery records.
-SQLite provenance/template/workflow migration work remains.
+SQLite schema v8 preserves recommendation/template provenance and immutable
+prescriptions, adds revision-aware templates and workflow recovery records, and
+persists workflow-instantiated workouts transactionally. The reusable contract
+kit now verifies template compare-and-set and pending-to-completed recovery
+semantics. Portable import/export and broader orchestration recovery remain in
+their owning phases.
 
 ### 9. Methodology discovery
 

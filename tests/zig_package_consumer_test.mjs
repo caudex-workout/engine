@@ -49,7 +49,7 @@ try {
   if (!result.stderr.includes("tracking contract v6")) {
     throw new Error(`tracking package was not imported: ${result.stderr}`);
   }
-  if (!result.stderr.includes("SQLite schema v7")) {
+  if (!result.stderr.includes("SQLite schema v8")) {
     throw new Error(`SQLite package was not exercised: ${result.stderr}`);
   }
   console.log("caudex clean Zig package consumer passed");
