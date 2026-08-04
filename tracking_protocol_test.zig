@@ -99,6 +99,45 @@ test "batch and snapshot limits fail before domain execution" {
     );
 }
 
+test "command metric collections are bounded during canonical decoding" {
+    var metrics: [protocol.max_metrics_per_set + 1]@import("caudex").canonical.Metric = undefined;
+    for (&metrics) |*metric| metric.* = .{
+        .code = "repetitions",
+        .value = .{ .amount = "8", .unit = "count" },
+    };
+    const request: protocol.CommandRequest = .{
+        .schemaVersion = protocol.schema_version,
+        .snapshot = .{},
+        .command = .{ .completeSet = .{
+            .metadata = .{ .commandId = "complete-set-1", .occurredAt = "2026-08-04T12:01:00Z" },
+            .scope = .{ .hostScopeKey = "scope-1" },
+            .workoutId = "workout-1",
+            .expectedRevision = 1,
+            .membershipId = "membership-1",
+            .setId = "set-1",
+            .actualMetrics = &metrics,
+            .completedAt = "2026-08-04T12:01:00Z",
+        } },
+    };
+    var json: [16 * 1024]u8 = undefined;
+    const encoded = try protocol.encode(request, &json);
+    try std.testing.expectError(
+        error.SnapshotLimitExceeded,
+        protocol.decodeCommandRequest(std.testing.allocator, encoded, .{}),
+    );
+
+    const batch: protocol.AtomicBatchRequest = .{
+        .schemaVersion = protocol.schema_version,
+        .snapshot = .{},
+        .commands = &.{request.command},
+    };
+    const encoded_batch = try protocol.encode(batch, &json);
+    try std.testing.expectError(
+        error.SnapshotLimitExceeded,
+        protocol.decodeAtomicBatchRequest(std.testing.allocator, encoded_batch, .{}),
+    );
+}
+
 test "snapshot bounds include replay workouts and prescription tags" {
     var too_many_sets: [protocol.max_sets_per_exercise + 1]protocol.TrackedSet = undefined;
     for (&too_many_sets, 0..) |*set, index| {

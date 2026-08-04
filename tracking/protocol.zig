@@ -315,7 +315,8 @@ pub fn decodeCommandRequest(allocator: std.mem.Allocator, input: []const u8, lim
     const parsed = try caudex.canonical_json.decodeValue(CommandRequest, allocator, input, limits.json);
     errdefer parsed.deinit();
     if (parsed.value.schemaVersion != schema_version) return error.UnsupportedVersion;
-    try validateSnapshotBounds(parsed.value.snapshot);
+    try validateSnapshot(parsed.value.snapshot);
+    try validateCommand(parsed.value.command);
     return parsed;
 }
 
@@ -323,7 +324,7 @@ pub fn decodeSnapshotDocument(allocator: std.mem.Allocator, input: []const u8, l
     const parsed = try caudex.canonical_json.decodeValue(SnapshotDocument, allocator, input, limits.json);
     errdefer parsed.deinit();
     if (parsed.value.schemaVersion != schema_version) return error.UnsupportedVersion;
-    try validateSnapshotBounds(parsed.value.snapshot);
+    try validateSnapshot(parsed.value.snapshot);
     return parsed;
 }
 
@@ -333,7 +334,8 @@ pub fn decodeAtomicBatchRequest(allocator: std.mem.Allocator, input: []const u8,
     if (parsed.value.schemaVersion != schema_version) return error.UnsupportedVersion;
     if (parsed.value.commands.len == 0) return error.EmptyBatch;
     if (parsed.value.commands.len > limits.max_commands) return error.BatchLimitExceeded;
-    try validateSnapshotBounds(parsed.value.snapshot);
+    try validateSnapshot(parsed.value.snapshot);
+    for (parsed.value.commands) |command| try validateCommand(command);
     return parsed;
 }
 
@@ -341,7 +343,7 @@ pub fn decodeCommandResult(allocator: std.mem.Allocator, input: []const u8, limi
     const parsed = try caudex.canonical_json.decodeValue(CommandResult, allocator, input, limits.json);
     errdefer parsed.deinit();
     if (parsed.value.schemaVersion != schema_version) return error.UnsupportedVersion;
-    try validateSnapshotBounds(parsed.value.snapshot);
+    try validateSnapshot(parsed.value.snapshot);
     try validateOutcomeBounds(parsed.value.outcome);
     return parsed;
 }
@@ -351,7 +353,7 @@ pub fn decodeAtomicBatchResult(allocator: std.mem.Allocator, input: []const u8, 
     errdefer parsed.deinit();
     if (parsed.value.schemaVersion != schema_version) return error.UnsupportedVersion;
     if (parsed.value.outcomes.len > limits.max_commands) return error.BatchLimitExceeded;
-    try validateSnapshotBounds(parsed.value.snapshot);
+    try validateSnapshot(parsed.value.snapshot);
     for (parsed.value.outcomes) |outcome| try validateOutcomeBounds(outcome);
     try validateIssuesBounds(parsed.value.issues);
     return parsed;
@@ -360,7 +362,7 @@ pub fn decodeAtomicBatchResult(allocator: std.mem.Allocator, input: []const u8, 
 fn validateOutcomeBounds(outcome: CommandOutcome) error{SnapshotLimitExceeded}!void {
     switch (outcome) {
         .accepted => |accepted| {
-            try validateSnapshotBounds(.{ .workouts = &.{accepted.workout} });
+            try validateSnapshot(.{ .workouts = &.{accepted.workout} });
             try validateIssuesBounds(accepted.warnings);
         },
         .rejected => |rejected| try validateIssuesBounds(rejected.issues),
@@ -377,12 +379,33 @@ pub fn encode(value: anytype, output: []u8) caudex.canonical_json.EncodeError![]
     return caudex.canonical_json.encode(value, output);
 }
 
-fn validateSnapshotBounds(snapshot: TrackingSnapshot) error{SnapshotLimitExceeded}!void {
+pub fn validateSnapshot(snapshot: TrackingSnapshot) error{SnapshotLimitExceeded}!void {
     if (snapshot.workouts.len > max_workouts) return error.SnapshotLimitExceeded;
     if (snapshot.startReceipts.len > max_workouts) return error.SnapshotLimitExceeded;
     if (snapshot.exerciseCatalog.len > max_catalog_entries) return error.SnapshotLimitExceeded;
     for (snapshot.workouts) |workout| try validateWorkoutBounds(workout);
     for (snapshot.startReceipts) |receipt| try validateWorkoutBounds(receipt.workout);
+}
+
+/// Validate command-owned collections before allocating typed-domain storage.
+/// Snapshot and command collection violations intentionally share one bounded
+/// protocol error so every valid JSON document is rejected at the boundary.
+pub fn validateCommand(command: Command) error{SnapshotLimitExceeded}!void {
+    const metric_count = switch (command) {
+        .addSet => |value| value.targetMetrics.len,
+        .completeSet => |value| value.actualMetrics.len,
+        .startWorkout,
+        .addExercise,
+        .removeExercise,
+        .reorderExercise,
+        .skipSet,
+        .reopenSet,
+        .removeSet,
+        .reorderSet,
+        .completeWorkout,
+        => 0,
+    };
+    if (metric_count > max_metrics_per_set) return error.SnapshotLimitExceeded;
 }
 
 fn validateWorkoutBounds(workout: TrackedWorkout) error{SnapshotLimitExceeded}!void {
@@ -745,7 +768,7 @@ fn findDomainWorkout(workouts: []const tracking.Workout, id: tracking.Id, scope:
 }
 
 pub fn snapshotToDomain(value: TrackingSnapshot, storage: SnapshotConversionStorage) SnapshotConversionError!tracking.LifecycleSnapshot {
-    try validateSnapshotBounds(value);
+    try validateSnapshot(value);
     if (storage.workouts.len < value.workouts.len) return error.WorkoutBufferTooSmall;
     if (storage.receipts.len < value.startReceipts.len) return error.ReceiptBufferTooSmall;
     if (storage.catalog.len < value.exerciseCatalog.len) return error.ExerciseBufferTooSmall;

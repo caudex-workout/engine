@@ -47,8 +47,10 @@ Default transport limits are 1 MiB input, nesting depth 32, 4,096 structural
 items, and 64 KiB per string. Domain document limits are 128 commands per
 batch, 256 workouts and replay receipts, 128 exercise memberships per workout,
 256 sets per membership, 32 target or actual metrics per set, and 32 tags per
-prescribed exercise. Bounds apply equally to workouts embedded in replay
-receipts. Callers also provide explicit output capacity.
+prescribed exercise. The 32-metric bound also applies to add-set targets and
+complete-set actuals in individual and batched commands. Bounds apply equally
+to workouts embedded in replay receipts. Callers also provide explicit output
+capacity.
 
 Malformed UTF-8/JSON, excessive documents, and unsupported schema versions are
 transport errors. Valid commands rejected for revision, lifecycle, reference,
