@@ -77,3 +77,80 @@ test "command conversion preserves exact target metrics and explicit anchors" {
     try std.testing.expectEqual(@as(u8, 2), typed.add_set.target_metrics[0].value.value.scale);
     try std.testing.expectEqual(tracking.SetAnchor.end, typed.add_set.anchor);
 }
+
+test "canonical snapshots preserve exact metrics and replay receipts" {
+    const workout: protocol.TrackedWorkout = .{
+        .id = "workout-1",
+        .scope = .{ .hostScopeKey = "scope-1" },
+        .revision = 3,
+        .status = .active,
+        .startedAt = "2026-08-04T12:00:00Z",
+        .exercises = &.{.{
+            .id = "membership-1",
+            .exerciseId = "squat",
+            .sets = &.{.{
+                .id = "set-1",
+                .kind = "working",
+                .targetMetrics = &.{.{ .code = "load", .value = .{ .amount = "185.00", .unit = "lb" } }},
+            }},
+        }},
+    };
+    const start: protocol.StartWorkout = .{
+        .metadata = .{ .commandId = "start-1", .occurredAt = "2026-08-04T12:00:00Z" },
+        .scope = workout.scope,
+        .workoutId = workout.id,
+        .startedAt = workout.startedAt,
+    };
+    const snapshot: protocol.TrackingSnapshot = .{
+        .workouts = &.{workout},
+        .startReceipts = &.{.{ .command = start, .disposition = .applied, .workout = workout }},
+    };
+    var workouts: [1]tracking.Workout = undefined;
+    var receipts: [1]tracking.StartReceipt = undefined;
+    var exercises: [1]tracking.ExerciseMembership = undefined;
+    var sets: [1]tracking.TrackedSet = undefined;
+    var metrics: [1]tracking.Metric = undefined;
+    const typed = try protocol.snapshotToDomain(snapshot, .{
+        .workouts = &workouts,
+        .receipts = &receipts,
+        .exercises = &exercises,
+        .sets = &sets,
+        .metrics = &metrics,
+    });
+    try std.testing.expectEqual(@as(i64, 18500), typed.workouts[0].exercises[0].sets[0].target_metrics[0].value.value.mantissa);
+    try std.testing.expectEqual(tracking.CommandDisposition.applied, typed.start_receipts[0].accepted.disposition);
+}
+
+test "canonical atomic batch executes through the typed reducer" {
+    const commands = [_]protocol.Command{
+        .{ .startWorkout = .{
+            .metadata = .{ .commandId = "start-1", .occurredAt = "2026-08-04T12:00:00Z" },
+            .scope = .{ .hostScopeKey = "scope-1" },
+            .workoutId = "workout-1",
+            .startedAt = "2026-08-04T12:00:00Z",
+        } },
+        .{ .addExercise = .{
+            .metadata = .{ .commandId = "add-exercise-1", .occurredAt = "2026-08-04T12:01:00Z" },
+            .scope = .{ .hostScopeKey = "scope-1" },
+            .workoutId = "workout-1",
+            .expectedRevision = 1,
+            .membershipId = "membership-1",
+            .exerciseId = "squat",
+            .anchor = .end,
+        } },
+    };
+    var typed_commands: [commands.len]tracking.Command = undefined;
+    var command_metrics: [1]tracking.Metric = undefined;
+    const converted = try protocol.batchCommandsToDomain(&commands, &typed_commands, &command_metrics);
+    var workouts: [2]tracking.Workout = undefined;
+    var receipts: [2]tracking.StartReceipt = undefined;
+    var exercises: [2]tracking.ExerciseMembership = undefined;
+    var sets: [2]tracking.TrackedSet = undefined;
+    var issues: [commands.len]tracking.Issue = undefined;
+    const result = try tracking.applyAtomicBatch(
+        .{ .exercise_catalog = &.{.{ .exercise_id = .{ .bytes = "squat" }, .availability = .active }} },
+        converted,
+        .{ .workouts = &workouts, .start_receipts = &receipts, .exercises = &exercises, .sets = &sets, .issues = &issues },
+    );
+    try std.testing.expectEqual(@as(u64, 2), result.accepted.snapshot.workouts[0].revision);
+}

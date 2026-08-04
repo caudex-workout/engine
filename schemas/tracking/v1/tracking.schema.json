@@ -88,7 +88,18 @@
     "snapshot": {
       "type": "object",
       "properties": {
-        "workouts": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/workout" } }
+        "workouts": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/workout" } },
+        "startReceipts": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/startReceipt" } }
+      },
+      "additionalProperties": false
+    },
+    "startReceipt": {
+      "type": "object",
+      "required": ["command", "disposition", "workout"],
+      "properties": {
+        "command": { "type": "object" },
+        "disposition": { "enum": ["applied", "replayed"] },
+        "workout": { "$ref": "#/$defs/workout" }
       },
       "additionalProperties": false
     },
@@ -169,4 +180,3 @@
     }
   }
 }
-

@@ -62,6 +62,7 @@ pub const TrackedWorkout = struct {
 
 pub const TrackingSnapshot = struct {
     workouts: []const TrackedWorkout = &.{},
+    startReceipts: []const StartReceipt = &.{},
 };
 
 pub const Anchor = union(enum) {
@@ -76,6 +77,12 @@ pub const StartWorkout = struct {
     scope: Scope,
     workoutId: []const u8,
     startedAt: []const u8,
+};
+
+pub const StartReceipt = struct {
+    command: StartWorkout,
+    disposition: CommandDisposition,
+    workout: TrackedWorkout,
 };
 
 pub const WorkoutRevision = struct {
@@ -269,6 +276,7 @@ pub fn encode(value: anytype, output: []u8) caudex.canonical_json.EncodeError![]
 
 fn validateSnapshotBounds(snapshot: TrackingSnapshot) error{SnapshotLimitExceeded}!void {
     if (snapshot.workouts.len > max_workouts) return error.SnapshotLimitExceeded;
+    if (snapshot.startReceipts.len > max_workouts) return error.SnapshotLimitExceeded;
     for (snapshot.workouts) |workout| {
         if (workout.exercises.len > max_exercises_per_workout) return error.SnapshotLimitExceeded;
         for (workout.exercises) |exercise| {
@@ -285,9 +293,117 @@ pub const ConversionError = tracking.Id.ParseError || error{InvalidTimestamp};
 
 pub const CommandConversionError = ConversionError || caudex.primitives.Decimal.ParseError || error{
     UnknownUnit,
+    CommandBufferTooSmall,
     MetricBufferTooSmall,
     UnsupportedSetStatus,
 };
+
+pub const SnapshotConversionError = CommandConversionError || error{
+    WorkoutBufferTooSmall,
+    ReceiptBufferTooSmall,
+    ExerciseBufferTooSmall,
+    SetBufferTooSmall,
+    MetricBufferTooSmall,
+    SnapshotLimitExceeded,
+};
+
+pub const SnapshotConversionStorage = struct {
+    workouts: []tracking.Workout,
+    receipts: []tracking.StartReceipt,
+    exercises: []tracking.ExerciseMembership,
+    sets: []tracking.TrackedSet,
+    metrics: []tracking.Metric,
+};
+
+pub fn snapshotToDomain(value: TrackingSnapshot, storage: SnapshotConversionStorage) SnapshotConversionError!tracking.LifecycleSnapshot {
+    try validateSnapshotBounds(value);
+    if (storage.workouts.len < value.workouts.len) return error.WorkoutBufferTooSmall;
+    if (storage.receipts.len < value.startReceipts.len) return error.ReceiptBufferTooSmall;
+    var exercise_offset: usize = 0;
+    var set_offset: usize = 0;
+    var metric_offset: usize = 0;
+    for (value.workouts, 0..) |workout, workout_index| {
+        storage.workouts[workout_index] = try workoutToDomain(
+            workout,
+            storage,
+            &exercise_offset,
+            &set_offset,
+            &metric_offset,
+        );
+    }
+    for (value.startReceipts, 0..) |receipt, receipt_index| {
+        const command = try startWorkoutToDomain(receipt.command);
+        const workout_index = findWireWorkout(value.workouts, receipt.workout.id, receipt.workout.scope) orelse
+            return error.SnapshotLimitExceeded;
+        storage.receipts[receipt_index] = .{
+            .command = command,
+            .accepted = .{
+                .command_id = command.metadata.command_id,
+                .disposition = dispositionToDomain(receipt.disposition),
+                .workout = storage.workouts[workout_index],
+            },
+        };
+    }
+    return .{
+        .workouts = storage.workouts[0..value.workouts.len],
+        .start_receipts = storage.receipts[0..value.startReceipts.len],
+    };
+}
+
+fn workoutToDomain(value: TrackedWorkout, storage: SnapshotConversionStorage, exercise_offset: *usize, set_offset: *usize, metric_offset: *usize) SnapshotConversionError!tracking.Workout {
+    const exercise_end = std.math.add(usize, exercise_offset.*, value.exercises.len) catch return error.SnapshotLimitExceeded;
+    if (exercise_end > storage.exercises.len) return error.ExerciseBufferTooSmall;
+    const exercise_start = exercise_offset.*;
+    for (value.exercises, exercise_start..) |exercise, exercise_index| {
+        const set_end = std.math.add(usize, set_offset.*, exercise.sets.len) catch return error.SnapshotLimitExceeded;
+        if (set_end > storage.sets.len) return error.SetBufferTooSmall;
+        const set_start = set_offset.*;
+        for (exercise.sets, set_start..) |set, set_index| {
+            const target_end = std.math.add(usize, metric_offset.*, set.targetMetrics.len) catch return error.SnapshotLimitExceeded;
+            if (target_end > storage.metrics.len) return error.MetricBufferTooSmall;
+            const targets = try metricsToDomain(set.targetMetrics, storage.metrics[metric_offset.*..target_end]);
+            metric_offset.* = target_end;
+            const actual_end = std.math.add(usize, metric_offset.*, set.actualMetrics.len) catch return error.SnapshotLimitExceeded;
+            if (actual_end > storage.metrics.len) return error.MetricBufferTooSmall;
+            const actuals = try metricsToDomain(set.actualMetrics, storage.metrics[metric_offset.*..actual_end]);
+            metric_offset.* = actual_end;
+            storage.sets[set_index] = .{
+                .id = try tracking.Id.parse(set.id),
+                .kind = try tracking.Id.parse(set.kind),
+                .target_metrics = targets,
+                .actual_metrics = actuals,
+                .status = setStatusToDomain(set.status),
+                .recorded_at = if (set.recordedAt) |at| try tracking.Timestamp.parse(at) else null,
+            };
+        }
+        storage.exercises[exercise_index] = .{
+            .id = try tracking.Id.parse(exercise.id),
+            .exercise_id = try tracking.Id.parse(exercise.exerciseId),
+            .sets = storage.sets[set_start..set_end],
+        };
+        set_offset.* = set_end;
+    }
+    exercise_offset.* = exercise_end;
+    return .{
+        .id = try tracking.Id.parse(value.id),
+        .scope = try scopeToDomain(value.scope),
+        .revision = value.revision,
+        .status = workoutStatusToDomain(value.status),
+        .started_at = try tracking.Timestamp.parse(value.startedAt),
+        .completed_at = if (value.completedAt) |at| try tracking.Timestamp.parse(at) else null,
+        .exercises = storage.exercises[exercise_start..exercise_end],
+    };
+}
+
+fn findWireWorkout(workouts: []const TrackedWorkout, id: []const u8, scope: Scope) ?usize {
+    for (workouts, 0..) |workout, index| {
+        if (std.mem.eql(u8, workout.id, id) and std.mem.eql(u8, workout.scope.hostScopeKey, scope.hostScopeKey) and
+            ((workout.scope.athleteId == null and scope.athleteId == null) or
+                (workout.scope.athleteId != null and scope.athleteId != null and std.mem.eql(u8, workout.scope.athleteId.?, scope.athleteId.?))))
+            return index;
+    }
+    return null;
+}
 
 pub fn commandToDomain(value: Command, metric_storage: []tracking.Metric) CommandConversionError!tracking.Command {
     return switch (value) {
@@ -359,6 +475,29 @@ pub fn commandToDomain(value: Command, metric_storage: []tracking.Metric) Comman
             .expected_revision = command.expectedRevision,
             .completed_at = try tracking.Timestamp.parse(command.completedAt),
         } },
+    };
+}
+
+pub fn batchCommandsToDomain(values: []const Command, command_storage: []tracking.Command, metric_storage: []tracking.Metric) CommandConversionError![]const tracking.Command {
+    if (values.len == 0) return command_storage[0..0];
+    if (values.len > max_commands_per_batch or command_storage.len < values.len)
+        return error.CommandBufferTooSmall;
+    var metric_offset: usize = 0;
+    for (values, 0..) |command, index| {
+        const metric_count = commandMetricCount(command);
+        const metric_end = std.math.add(usize, metric_offset, metric_count) catch return error.MetricBufferTooSmall;
+        if (metric_end > metric_storage.len) return error.MetricBufferTooSmall;
+        command_storage[index] = try commandToDomain(command, metric_storage[metric_offset..metric_end]);
+        metric_offset = metric_end;
+    }
+    return command_storage[0..values.len];
+}
+
+fn commandMetricCount(command: Command) usize {
+    return switch (command) {
+        .addSet => |value| value.targetMetrics.len,
+        .completeSet => |value| value.actualMetrics.len,
+        else => 0,
     };
 }
 
@@ -515,6 +654,13 @@ pub fn issueSeverityFromDomain(value: tracking.IssueSeverity) IssueSeverity {
 }
 
 pub fn dispositionFromDomain(value: tracking.CommandDisposition) CommandDisposition {
+    return switch (value) {
+        .applied => .applied,
+        .replayed => .replayed,
+    };
+}
+
+pub fn dispositionToDomain(value: CommandDisposition) tracking.CommandDisposition {
     return switch (value) {
         .applied => .applied,
         .replayed => .replayed,
