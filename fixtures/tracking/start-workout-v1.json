@@ -1,0 +1,2 @@
+{"schemaVersion":1,"snapshot":{"workouts":[]},"command":{"startWorkout":{"metadata":{"commandId":"command-start-1","occurredAt":"2026-08-04T12:00:00Z"},"scope":{"hostScopeKey":"local-profile","athleteId":"athlete-1"},"workoutId":"workout-1","startedAt":"2026-08-04T12:00:00Z"}}}
+

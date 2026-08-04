@@ -30,7 +30,7 @@ pub fn decodeRecommendationRequest(
     input: []const u8,
     limits: Limits,
 ) DecodeError!std.json.Parsed(canonical.RecommendationRequest) {
-    const parsed = try decode(
+    const parsed = try decodeValue(
         canonical.RecommendationRequest,
         allocator,
         input,
@@ -48,7 +48,7 @@ pub fn decodeEvaluationRequest(
     input: []const u8,
     limits: Limits,
 ) DecodeError!std.json.Parsed(canonical.EvaluationRequest) {
-    const parsed = try decode(
+    const parsed = try decodeValue(
         canonical.EvaluationRequest,
         allocator,
         input,
@@ -66,7 +66,7 @@ pub fn decodeRecommendationResult(
     input: []const u8,
     limits: Limits,
 ) DecodeError!std.json.Parsed(canonical.RecommendationResult) {
-    const parsed = try decode(
+    const parsed = try decodeValue(
         canonical.RecommendationResult,
         allocator,
         input,
@@ -84,7 +84,7 @@ pub fn decodeEvaluationResult(
     input: []const u8,
     limits: Limits,
 ) DecodeError!std.json.Parsed(canonical.EvaluationResult) {
-    const parsed = try decode(
+    const parsed = try decodeValue(
         canonical.EvaluationResult,
         allocator,
         input,
@@ -107,7 +107,7 @@ pub fn encode(value: anytype, out: []u8) EncodeError![]const u8 {
     return writer.buffered();
 }
 
-fn decode(
+pub fn decodeValue(
     comptime T: type,
     allocator: std.mem.Allocator,
     input: []const u8,

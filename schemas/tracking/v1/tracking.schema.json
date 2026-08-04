@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://caudex.dev/schemas/tracking/v1/tracking.schema.json",
+  "title": "Caudex canonical tracking protocol v1",
+  "oneOf": [
+    { "$ref": "#/$defs/commandRequest" },
+    { "$ref": "#/$defs/atomicBatchRequest" },
+    { "$ref": "#/$defs/commandResult" },
+    { "$ref": "#/$defs/atomicBatchResult" }
+  ],
+  "$defs": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "timestamp": { "type": "string", "format": "date-time", "maxLength": 64 },
+    "decimal": { "type": "string", "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$", "maxLength": 40 },
+    "scope": {
+      "type": "object",
+      "required": ["hostScopeKey"],
+      "properties": {
+        "hostScopeKey": { "$ref": "#/$defs/id" },
+        "athleteId": { "$ref": "#/$defs/id" }
+      },
+      "additionalProperties": false
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["commandId", "occurredAt"],
+      "properties": {
+        "commandId": { "$ref": "#/$defs/id" },
+        "occurredAt": { "$ref": "#/$defs/timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "measurement": {
+      "type": "object",
+      "required": ["amount", "unit"],
+      "properties": {
+        "amount": { "$ref": "#/$defs/decimal" },
+        "unit": { "$ref": "#/$defs/id" }
+      },
+      "additionalProperties": false
+    },
+    "metric": {
+      "type": "object",
+      "required": ["code", "value"],
+      "properties": {
+        "code": { "$ref": "#/$defs/id" },
+        "value": { "$ref": "#/$defs/measurement" }
+      },
+      "additionalProperties": false
+    },
+    "set": {
+      "type": "object",
+      "required": ["id", "kind", "status"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "kind": { "$ref": "#/$defs/id" },
+        "targetMetrics": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/metric" } },
+        "actualMetrics": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/metric" } },
+        "status": { "enum": ["open", "completed", "partial", "failed", "skipped"] },
+        "recordedAt": { "$ref": "#/$defs/timestamp" }
+      },
+      "additionalProperties": false
+    },
+    "membership": {
+      "type": "object",
+      "required": ["id", "exerciseId"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "exerciseId": { "$ref": "#/$defs/id" },
+        "sets": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/set" } }
+      },
+      "additionalProperties": false
+    },
+    "workout": {
+      "type": "object",
+      "required": ["id", "scope", "revision", "status", "startedAt"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "scope": { "$ref": "#/$defs/scope" },
+        "revision": { "type": "integer", "minimum": 0 },
+        "status": { "enum": ["active", "completed", "cancelled"] },
+        "startedAt": { "$ref": "#/$defs/timestamp" },
+        "completedAt": { "$ref": "#/$defs/timestamp" },
+        "exercises": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/membership" } }
+      },
+      "additionalProperties": false
+    },
+    "snapshot": {
+      "type": "object",
+      "properties": {
+        "workouts": { "type": "array", "maxItems": 256, "items": { "$ref": "#/$defs/workout" } }
+      },
+      "additionalProperties": false
+    },
+    "anchor": {
+      "oneOf": [
+        { "type": "string", "enum": ["beginning", "end"] },
+        { "type": "object", "required": ["before"], "properties": { "before": { "$ref": "#/$defs/id" } }, "additionalProperties": false },
+        { "type": "object", "required": ["after"], "properties": { "after": { "$ref": "#/$defs/id" } }, "additionalProperties": false }
+      ]
+    },
+    "command": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "propertyNames": {
+        "enum": ["startWorkout", "addExercise", "removeExercise", "reorderExercise", "addSet", "completeSet", "skipSet", "reopenSet", "removeSet", "reorderSet", "completeWorkout"]
+      }
+    },
+    "issue": {
+      "type": "object",
+      "required": ["code", "category", "severity", "message"],
+      "properties": {
+        "code": { "type": "string", "maxLength": 200 },
+        "category": { "enum": ["validation", "not_found", "conflict"] },
+        "severity": { "enum": ["warning", "error"] },
+        "path": { "type": "string", "maxLength": 500 },
+        "message": { "type": "string", "maxLength": 1000 },
+        "relatedIds": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/id" } }
+      },
+      "additionalProperties": false
+    },
+    "outcome": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "propertyNames": { "enum": ["accepted", "rejected"] }
+    },
+    "commandRequest": {
+      "type": "object",
+      "required": ["schemaVersion", "snapshot", "command"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "snapshot": { "$ref": "#/$defs/snapshot" },
+        "command": { "$ref": "#/$defs/command" }
+      },
+      "additionalProperties": false
+    },
+    "atomicBatchRequest": {
+      "type": "object",
+      "required": ["schemaVersion", "snapshot", "commands"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "snapshot": { "$ref": "#/$defs/snapshot" },
+        "commands": { "type": "array", "minItems": 1, "maxItems": 128, "items": { "$ref": "#/$defs/command" } }
+      },
+      "additionalProperties": false
+    },
+    "commandResult": {
+      "type": "object",
+      "required": ["schemaVersion", "outcome"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "outcome": { "$ref": "#/$defs/outcome" }
+      },
+      "additionalProperties": false
+    },
+    "atomicBatchResult": {
+      "type": "object",
+      "required": ["schemaVersion", "applied", "outcomes", "snapshot"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "applied": { "type": "boolean" },
+        "outcomes": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/outcome" } },
+        "snapshot": { "$ref": "#/$defs/snapshot" },
+        "issues": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/issue" } }
+      },
+      "additionalProperties": false
+    }
+  }
+}
+
