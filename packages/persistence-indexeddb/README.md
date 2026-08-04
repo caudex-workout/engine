@@ -4,7 +4,7 @@ Optional IndexedDB implementation of the Caudex persistence capabilities. It
 is packaged separately and is never imported or linked by
 `@caudex-workout/engine`.
 
-## Private schema v1
+## Private schema v2
 
 | Store | Compound key | Indexes |
 | --- | --- | --- |
@@ -12,14 +12,21 @@ is packaged separately and is never imported or linked by
 | `history` | `[hostScopeKey, completedAt, workoutId]` | `by_scope_completed(hostScopeKey, completedAt)` |
 | `methodology_state` | `[key.hostScopeKey, key.methodologyId]` | none |
 | `recommendation_journal` | `[hostScopeKey, acceptedAt, id]` | `by_scope_accepted(hostScopeKey, acceptedAt)` |
+| `active_workouts` | `[hostScopeKey, workoutId]` | none |
+| `workout_templates` | `[hostScopeKey, template.id]` | none |
+| `workflow_recovery` | `[hostScopeKey, workflowId]` | none |
 
-The database version is `1`. Future released schema changes must increment the
+The database version is `2`. Version 2 adds active tracking snapshots,
+templates, and workflow recovery records without rewriting v1 stores. Future
+released schema changes must increment the
 version and upgrade stores in `onupgradeneeded`; released upgrade steps are
 forward-only. This physical schema is adapter-private and is not the canonical
 Caudex computation schema.
 
 `compareAndSetState` reads the current record, validates the opaque revision,
 and writes the next revision in one IndexedDB readwrite transaction.
+`saveActiveWorkout` and `saveTemplate` likewise keep their read/compare/write
+sequence in one transaction and expose revision conflicts.
 
 ## Lifecycle and quota
 

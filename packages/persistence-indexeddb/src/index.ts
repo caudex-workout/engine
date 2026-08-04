@@ -1,6 +1,9 @@
 import {
   PersistenceAdapterError,
   PersistenceConflictError,
+  PersistenceRevisionConflictError,
+  type ActiveWorkoutRecord,
+  type ActiveWorkoutStore,
   type AcceptedRecommendationRecord,
   type CatalogScope,
   type CatalogSource,
@@ -13,18 +16,25 @@ import {
   type MethodologyStateRecord,
   type MethodologyStateStore,
   type RecommendationJournal,
+  type WorkoutTemplateRecord,
+  type WorkoutTemplateStore,
+  type WorkflowRecoveryRecord,
+  type WorkflowRecoveryStore,
 } from "@caudex/persistence";
 import type {
   CompletedWorkout,
   Exercise,
 } from "@caudex-workout/engine";
 
-export const INDEXEDDB_SCHEMA_VERSION = 1;
+export const INDEXEDDB_SCHEMA_VERSION = 2;
 
 const CATALOG_STORE = "catalog";
 const HISTORY_STORE = "history";
 const STATE_STORE = "methodology_state";
 const JOURNAL_STORE = "recommendation_journal";
+const ACTIVE_WORKOUT_STORE = "active_workouts";
+const TEMPLATE_STORE = "workout_templates";
+const RECOVERY_STORE = "workflow_recovery";
 
 interface CatalogRow {
   hostScopeKey: string;
@@ -44,6 +54,9 @@ interface StateRow extends MethodologyStateRecord {
 }
 
 interface JournalRow extends AcceptedRecommendationRecord {}
+interface ActiveWorkoutRow extends ActiveWorkoutRecord { revision: number }
+interface TemplateRow extends WorkoutTemplateRecord { revision: number }
+interface RecoveryRow extends WorkflowRecoveryRecord {}
 
 export interface IndexedDbAdapterOptions {
   databaseName?: string;
@@ -56,7 +69,10 @@ export class IndexedDbPersistenceAdapter
     HistorySource,
     MethodologyStateStore,
     RecommendationJournal,
-    CompletedWorkoutSink
+    CompletedWorkoutSink,
+    ActiveWorkoutStore,
+    WorkoutTemplateStore,
+    WorkflowRecoveryStore
 {
   readonly databaseName: string;
   readonly #factory: IDBFactory;
@@ -212,6 +228,81 @@ export class IndexedDbPersistenceAdapter
     await transactionDone(transaction, "appendCompletedWorkout");
   }
 
+  async loadActiveWorkout(hostScopeKey: string, workoutId: string): Promise<ActiveWorkoutRecord | null> {
+    const database = await this.#open();
+    const transaction = database.transaction(ACTIVE_WORKOUT_STORE, "readonly");
+    const row = await request<ActiveWorkoutRow | undefined>(transaction.objectStore(ACTIVE_WORKOUT_STORE).get([hostScopeKey, workoutId]));
+    await transactionDone(transaction, "loadActiveWorkout");
+    return row ? { hostScopeKey: row.hostScopeKey, workoutId: row.workoutId, snapshot: row.snapshot } : null;
+  }
+
+  async saveActiveWorkout(record: ActiveWorkoutRecord, expectedRevision: number | null): Promise<void> {
+    const database = await this.#open();
+    const transaction = database.transaction(ACTIVE_WORKOUT_STORE, "readwrite");
+    const store = transaction.objectStore(ACTIVE_WORKOUT_STORE);
+    try {
+      const existing = await request<ActiveWorkoutRow | undefined>(store.get([record.hostScopeKey, record.workoutId]));
+      const actualRevision = existing?.revision ?? null;
+      if (actualRevision !== expectedRevision) {
+        transaction.abort();
+        throw new PersistenceRevisionConflictError("active_workout", record.workoutId, expectedRevision, actualRevision);
+      }
+      const workout = record.snapshot.workouts?.find((candidate) => candidate.id === record.workoutId);
+      if (!workout) {
+        transaction.abort();
+        throw new PersistenceAdapterError("invalid_data", "saveActiveWorkout", "The active-workout snapshot does not contain its workout ID.");
+      }
+      store.put({ ...record, revision: workout.revision } satisfies ActiveWorkoutRow);
+      await transactionDone(transaction, "saveActiveWorkout");
+    } catch (error) {
+      if (error instanceof PersistenceRevisionConflictError || error instanceof PersistenceAdapterError) throw error;
+      throw adapterError("saveActiveWorkout", error);
+    }
+  }
+
+  async loadTemplate(hostScopeKey: string, templateId: string): Promise<WorkoutTemplateRecord | null> {
+    const database = await this.#open();
+    const transaction = database.transaction(TEMPLATE_STORE, "readonly");
+    const row = await request<TemplateRow | undefined>(transaction.objectStore(TEMPLATE_STORE).get([hostScopeKey, templateId]));
+    await transactionDone(transaction, "loadTemplate");
+    return row ? { hostScopeKey: row.hostScopeKey, template: row.template } : null;
+  }
+
+  async saveTemplate(record: WorkoutTemplateRecord, expectedRevision: number | null): Promise<void> {
+    const database = await this.#open();
+    const transaction = database.transaction(TEMPLATE_STORE, "readwrite");
+    const store = transaction.objectStore(TEMPLATE_STORE);
+    try {
+      const key = [record.hostScopeKey, record.template.id];
+      const existing = await request<TemplateRow | undefined>(store.get(key));
+      const actualRevision = existing?.revision ?? null;
+      if (actualRevision !== expectedRevision) {
+        transaction.abort();
+        throw new PersistenceRevisionConflictError("workout_template", record.template.id, expectedRevision, actualRevision);
+      }
+      store.put({ ...record, revision: record.template.revision } satisfies TemplateRow);
+      await transactionDone(transaction, "saveTemplate");
+    } catch (error) {
+      if (error instanceof PersistenceRevisionConflictError) throw error;
+      throw adapterError("saveTemplate", error);
+    }
+  }
+
+  async loadWorkflowRecovery(hostScopeKey: string, workflowId: string): Promise<WorkflowRecoveryRecord | null> {
+    const database = await this.#open();
+    const transaction = database.transaction(RECOVERY_STORE, "readonly");
+    const row = await request<RecoveryRow | undefined>(transaction.objectStore(RECOVERY_STORE).get([hostScopeKey, workflowId]));
+    await transactionDone(transaction, "loadWorkflowRecovery");
+    return row ?? null;
+  }
+
+  async saveWorkflowRecovery(record: WorkflowRecoveryRecord): Promise<void> {
+    const database = await this.#open();
+    const transaction = database.transaction(RECOVERY_STORE, "readwrite");
+    transaction.objectStore(RECOVERY_STORE).put(record satisfies RecoveryRow);
+    await transactionDone(transaction, "saveWorkflowRecovery");
+  }
+
   async close(): Promise<void> {
     this.#closed = true;
     if (this.#databasePromise) {
@@ -277,6 +368,15 @@ function openDatabase(
           "by_scope_accepted",
           ["hostScopeKey", "acceptedAt"],
         );
+      }
+      if (!database.objectStoreNames.contains(ACTIVE_WORKOUT_STORE)) {
+        database.createObjectStore(ACTIVE_WORKOUT_STORE, { keyPath: ["hostScopeKey", "workoutId"] });
+      }
+      if (!database.objectStoreNames.contains(TEMPLATE_STORE)) {
+        database.createObjectStore(TEMPLATE_STORE, { keyPath: ["hostScopeKey", "template.id"] });
+      }
+      if (!database.objectStoreNames.contains(RECOVERY_STORE)) {
+        database.createObjectStore(RECOVERY_STORE, { keyPath: ["hostScopeKey", "workflowId"] });
       }
     };
     open.onerror = () => reject(adapterError("open", open.error));

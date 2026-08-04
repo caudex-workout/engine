@@ -19,6 +19,13 @@ The required capabilities are independently implementable:
 capabilities. Calculating a recommendation never invokes either capability.
 The host must explicitly accept a result before writing it.
 
+Contract version 2 also defines independently implementable
+`ActiveWorkoutStore`, `WorkoutTemplateStore`, and `WorkflowRecoveryStore`
+capabilities. Active-workout saves compare the supplied expected workout
+revision; conflicts remain visible to the host. Recovery records use explicit
+workflow and idempotency IDs and do not imply a universal cross-adapter
+transaction.
+
 Direct snapshot mode remains the fundamental integration:
 
 ```ts

@@ -50,7 +50,7 @@ try {
   IndexedDbPersistenceAdapter,
   INDEXEDDB_SCHEMA_VERSION,
 } from "@caudex/persistence-indexeddb";
-if (INDEXEDDB_SCHEMA_VERSION !== 1 ||
+if (INDEXEDDB_SCHEMA_VERSION !== 2 ||
     typeof IndexedDbPersistenceAdapter !== "function") {
   throw new Error("IndexedDB package runtime exports failed");
 }
@@ -63,14 +63,20 @@ if (INDEXEDDB_SCHEMA_VERSION !== 1 ||
   IndexedDbPersistenceAdapter,
   INDEXEDDB_SCHEMA_VERSION,
 } from "@caudex/persistence-indexeddb";
-import type { CatalogSource, MethodologyStateStore } from "@caudex/persistence";
+import type { ActiveWorkoutStore, CatalogSource, MethodologyStateStore, WorkoutTemplateStore, WorkflowRecoveryStore } from "@caudex/persistence";
 
 const adapter = new IndexedDbPersistenceAdapter({ databaseName: "smoke" });
 const catalog: CatalogSource = adapter;
 const states: MethodologyStateStore = adapter;
-if (INDEXEDDB_SCHEMA_VERSION !== 1) throw new Error("schema version mismatch");
+const active: ActiveWorkoutStore = adapter;
+const templates: WorkoutTemplateStore = adapter;
+const recovery: WorkflowRecoveryStore = adapter;
+if (INDEXEDDB_SCHEMA_VERSION !== 2) throw new Error("schema version mismatch");
 void catalog;
 void states;
+void active;
+void templates;
+void recovery;
 `,
   );
   await writeFile(

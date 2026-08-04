@@ -31,6 +31,9 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The npm package provides an injected/default clock and secure-ID workflow
   facade with active-workout reload, revision-aware optional persistence,
   idempotent low-level retries, and explicit methodology-state acceptance.
+- Persistence contract v2 and IndexedDB schema v2 add transactional
+  revision-aware active workouts, workout templates, and workflow recovery
+  records.
 
 ## [0.1.0] - 2026-07-26
 

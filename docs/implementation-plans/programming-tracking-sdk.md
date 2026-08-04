@@ -122,10 +122,16 @@ requires an explicit compare-and-set call to accept methodology state.
 
 ### 8. Persistence expansion
 
+**Status:** In progress; TypeScript contracts and IndexedDB v2 implemented
+
 - Contracts and contract kit cover replay, templates, provenance, acceptance,
   completion, state, recovery, and portable data.
 - SQLite migration/transaction/rollback/reopen tests and IndexedDB connection,
   upgrade, abort, conflict, delete, reopen, scope, and round-trip tests pass.
+
+The npm persistence contract v2 and IndexedDB schema v2 now persist
+revision-aware active snapshots, templates, and workflow recovery records.
+SQLite provenance/template/workflow migration work remains.
 
 ### 9. Methodology discovery
 
