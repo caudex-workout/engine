@@ -492,6 +492,203 @@ pub const DecisionError = error{
 };
 pub const QueryError = error{OutputBufferTooSmall};
 
+pub const BatchWorkspace = struct {
+    workouts: []Workout,
+    start_receipts: []StartReceipt,
+    exercises: []ExerciseMembership,
+    sets: []TrackedSet,
+    issues: []Issue,
+};
+
+pub const AcceptedBatch = struct {
+    snapshot: LifecycleSnapshot,
+    applied_commands: u16,
+};
+
+pub const BatchResult = union(enum) {
+    accepted: AcceptedBatch,
+    rejected: RejectedCommand,
+};
+
+pub const BatchError = DecisionError || error{
+    EmptyBatch,
+    BatchLimitExceeded,
+    WorkoutBufferTooSmall,
+    ReceiptBufferTooSmall,
+};
+
+pub const max_batch_commands: usize = 128;
+
+/// Applies a bounded sequence as one all-or-nothing state proposal.
+///
+/// Workspace may be modified on rejection, but the returned rejected result
+/// never exposes it and the supplied snapshot is never mutated. Hosts persist
+/// only an accepted snapshot.
+pub fn applyAtomicBatch(
+    snapshot: LifecycleSnapshot,
+    commands: []const Command,
+    workspace: BatchWorkspace,
+) BatchError!BatchResult {
+    if (commands.len == 0) return error.EmptyBatch;
+    if (commands.len > max_batch_commands) return error.BatchLimitExceeded;
+    if (workspace.workouts.len < snapshot.workouts.len + countStarts(commands))
+        return error.WorkoutBufferTooSmall;
+    if (workspace.start_receipts.len < snapshot.start_receipts.len + countStarts(commands))
+        return error.ReceiptBufferTooSmall;
+    if (workspace.issues.len < commands.len) return error.IssueBufferTooSmall;
+
+    @memcpy(workspace.workouts[0..snapshot.workouts.len], snapshot.workouts);
+    @memcpy(workspace.start_receipts[0..snapshot.start_receipts.len], snapshot.start_receipts);
+    var workout_len = snapshot.workouts.len;
+    var receipt_len = snapshot.start_receipts.len;
+    var exercise_offset: usize = 0;
+    var set_offset: usize = 0;
+
+    for (commands, 0..) |command, command_index| {
+        const current: LifecycleSnapshot = .{
+            .workouts = workspace.workouts[0..workout_len],
+            .start_receipts = workspace.start_receipts[0..receipt_len],
+            .exercise_catalog = snapshot.exercise_catalog,
+        };
+        const result = try applyCommand(
+            current,
+            command,
+            workspace.exercises[exercise_offset..],
+            workspace.sets[set_offset..],
+            workspace.issues[command_index .. command_index + 1],
+        );
+        switch (result) {
+            .rejected => |rejected| return .{ .rejected = rejected },
+            .accepted => |accepted| {
+                const existing = findWorkoutIndex(
+                    workspace.workouts[0..workout_len],
+                    accepted.workout.scope,
+                    accepted.workout.id,
+                );
+                if (existing) |index| {
+                    workspace.workouts[index] = accepted.workout;
+                } else {
+                    workspace.workouts[workout_len] = accepted.workout;
+                    workout_len += 1;
+                }
+                if (std.meta.activeTag(command) == .start_workout and accepted.disposition == .applied) {
+                    workspace.start_receipts[receipt_len] = .{
+                        .command = command.start_workout,
+                        .accepted = accepted,
+                    };
+                    receipt_len += 1;
+                }
+                if (commandWritesExercises(command)) {
+                    exercise_offset = try checkedAdvance(
+                        exercise_offset,
+                        accepted.workout.exercises.len,
+                        workspace.exercises.len,
+                        .exercise,
+                    );
+                }
+                if (setCommandMembershipId(command)) |membership_id| {
+                    for (accepted.workout.exercises) |membership| {
+                        if (!membership.id.eql(membership_id)) continue;
+                        set_offset = try checkedAdvance(
+                            set_offset,
+                            membership.sets.len,
+                            workspace.sets.len,
+                            .set,
+                        );
+                        break;
+                    }
+                }
+            },
+        }
+    }
+    return .{ .accepted = .{
+        .snapshot = .{
+            .workouts = workspace.workouts[0..workout_len],
+            .start_receipts = workspace.start_receipts[0..receipt_len],
+            .exercise_catalog = snapshot.exercise_catalog,
+        },
+        .applied_commands = @intCast(commands.len),
+    } };
+}
+
+pub fn applyCommand(snapshot: LifecycleSnapshot, command: Command, exercises: []ExerciseMembership, sets: []TrackedSet, issues: []Issue) DecisionError!CommandResult {
+    return switch (command) {
+        .start_workout => |value| startWorkout(snapshot, value, issues),
+        .add_exercise => |value| addExercise(snapshot, value, exercises, issues),
+        .remove_exercise => |value| removeExercise(snapshot, value, exercises, issues),
+        .reorder_exercise => |value| reorderExercise(snapshot, value, exercises, issues),
+        .add_set => |value| addSet(snapshot, value, exercises, sets, issues),
+        .log_set => |value| logSet(snapshot, value, exercises, sets, issues),
+        .complete_set => |value| completeSet(snapshot, value, exercises, sets, issues),
+        .skip_set => |value| skipSet(snapshot, value, exercises, sets, issues),
+        .reopen_set => |value| reopenSet(snapshot, value, exercises, sets, issues),
+        .remove_set => |value| removeSet(snapshot, value, exercises, sets, issues),
+        .reorder_set => |value| reorderSet(snapshot, value, exercises, sets, issues),
+        .complete_workout => |value| endWorkout(snapshot, .{ .complete = value }, issues),
+        .cancel_workout => |value| endWorkout(snapshot, .{ .cancel = value }, issues),
+    };
+}
+
+fn countStarts(commands: []const Command) usize {
+    var count: usize = 0;
+    for (commands) |command| if (std.meta.activeTag(command) == .start_workout) {
+        count += 1;
+    };
+    return count;
+}
+
+fn commandWritesExercises(command: Command) bool {
+    return switch (command) {
+        .add_exercise,
+        .remove_exercise,
+        .reorder_exercise,
+        .add_set,
+        .log_set,
+        .complete_set,
+        .skip_set,
+        .reopen_set,
+        .remove_set,
+        .reorder_set,
+        => true,
+        else => false,
+    };
+}
+
+const BufferKind = enum { exercise, set };
+
+fn checkedAdvance(current: usize, amount: usize, capacity: usize, kind: BufferKind) DecisionError!usize {
+    const next = std.math.add(usize, current, amount) catch return bufferError(kind);
+    if (next > capacity) return bufferError(kind);
+    return next;
+}
+
+fn bufferError(kind: BufferKind) DecisionError {
+    return switch (kind) {
+        .exercise => error.ExerciseBufferTooSmall,
+        .set => error.SetBufferTooSmall,
+    };
+}
+
+fn findWorkoutIndex(workouts: []const Workout, scope: Scope, id: Id) ?usize {
+    for (workouts, 0..) |workout, index| {
+        if (workout.id.eql(id) and scopesEqual(workout.scope, scope)) return index;
+    }
+    return null;
+}
+
+fn setCommandMembershipId(command: Command) ?Id {
+    return switch (command) {
+        .add_set => |value| value.membership_id,
+        .log_set => |value| value.membership_id,
+        .complete_set => |value| value.membership_id,
+        .skip_set => |value| value.membership_id,
+        .reopen_set => |value| value.membership_id,
+        .remove_set => |value| value.membership_id,
+        .reorder_set => |value| value.membership_id,
+        else => null,
+    };
+}
+
 /// Proposes a new active workout or returns a structured rejection.
 ///
 /// The function does not allocate, mutate the snapshot, persist a receipt, or

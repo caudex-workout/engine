@@ -86,3 +86,73 @@ test "tracking contract exposes no execution or persistence API" {
     }
     try std.testing.expectEqual(@as(u32, 6), tracking.contract_version);
 }
+
+test "atomic batch publishes only the final sequential snapshot" {
+    const commands = [_]tracking.Command{
+        .{ .start_workout = start_command },
+        .{ .add_exercise = .{
+            .metadata = .{ .command_id = .{ .bytes = "command-add-exercise" }, .occurred_at = started_at },
+            .scope = scope,
+            .workout_id = start_command.workout_id,
+            .expected_revision = 1,
+            .membership_id = .{ .bytes = "membership-1" },
+            .exercise_id = .{ .bytes = "squat" },
+            .anchor = .end,
+        } },
+        .{ .add_set = .{
+            .metadata = .{ .command_id = .{ .bytes = "command-add-set" }, .occurred_at = started_at },
+            .scope = scope,
+            .workout_id = start_command.workout_id,
+            .expected_revision = 2,
+            .membership_id = .{ .bytes = "membership-1" },
+            .set_id = .{ .bytes = "set-1" },
+            .kind = .{ .bytes = "working" },
+            .anchor = .end,
+        } },
+    };
+    var workouts: [3]tracking.Workout = undefined;
+    var receipts: [3]tracking.StartReceipt = undefined;
+    var exercises: [8]tracking.ExerciseMembership = undefined;
+    var sets: [8]tracking.TrackedSet = undefined;
+    var issues: [commands.len]tracking.Issue = undefined;
+    const result = try tracking.applyAtomicBatch(
+        .{ .exercise_catalog = &.{.{ .exercise_id = .{ .bytes = "squat" }, .availability = .active }} },
+        &commands,
+        .{ .workouts = &workouts, .start_receipts = &receipts, .exercises = &exercises, .sets = &sets, .issues = &issues },
+    );
+    try std.testing.expectEqual(@as(u16, 3), result.accepted.applied_commands);
+    try std.testing.expectEqual(@as(u64, 3), result.accepted.snapshot.workouts[0].revision);
+    try std.testing.expectEqualStrings("set-1", result.accepted.snapshot.workouts[0].exercises[0].sets[0].id.bytes);
+}
+
+test "atomic batch rejection does not expose partial workspace state" {
+    const commands = [_]tracking.Command{
+        .{ .start_workout = start_command },
+        .{ .add_exercise = .{
+            .metadata = .{ .command_id = .{ .bytes = "command-invalid-revision" }, .occurred_at = started_at },
+            .scope = scope,
+            .workout_id = start_command.workout_id,
+            .expected_revision = 99,
+            .membership_id = .{ .bytes = "membership-1" },
+            .exercise_id = .{ .bytes = "squat" },
+            .anchor = .end,
+        } },
+    };
+    var workouts: [2]tracking.Workout = undefined;
+    var receipts: [2]tracking.StartReceipt = undefined;
+    var exercises: [2]tracking.ExerciseMembership = undefined;
+    var sets: [2]tracking.TrackedSet = undefined;
+    var issues: [commands.len]tracking.Issue = undefined;
+    const original: tracking.LifecycleSnapshot = .{
+        .exercise_catalog = &.{.{ .exercise_id = .{ .bytes = "squat" }, .availability = .active }},
+    };
+    const result = try tracking.applyAtomicBatch(original, &commands, .{
+        .workouts = &workouts,
+        .start_receipts = &receipts,
+        .exercises = &exercises,
+        .sets = &sets,
+        .issues = &issues,
+    });
+    try std.testing.expectEqualStrings(tracking.issue_codes.revision_conflict, result.rejected.issues[0].code);
+    try std.testing.expectEqual(@as(usize, 0), original.workouts.len);
+}
