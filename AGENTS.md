@@ -245,6 +245,14 @@ zig fmt --check .
 git diff --check
 ```
 
+Deep validation also includes bounded fuzz and mutation smoke tests through
+`zig build check-release`. Full fuzz targets and the curated mutation suite are
+manual targets (`zig build fuzz-json`, `zig build mutation-test`) and must not
+be added to the ordinary fast or pull-request path. Fuzz inputs and mutation
+workspaces must remain bounded and reproducible. Surviving actionable mutants
+require investigation and must not be automatically suppressed as equivalent;
+equivalence declarations require a checked-in reason.
+
 `zig build check` is the CI source of truth. Use commands that actually exist
 in the repository, and do not claim a check passed unless it ran successfully.
 

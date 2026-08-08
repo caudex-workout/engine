@@ -1,0 +1,1 @@
+--format json --scope local workout show --workout id

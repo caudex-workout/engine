@@ -824,6 +824,13 @@ fn parseGlobalOptions(args: []const []const u8) !GlobalOptions {
     return options;
 }
 
+/// Small, allocation-free parser probe used by the bounded fuzz harness.
+/// It intentionally returns only the stable fact the harness needs, keeping
+/// CLI option representation private to the reference client.
+pub fn fuzzParseGlobalOptions(args: []const []const u8) !usize {
+    return (try parseGlobalOptions(args)).command_index;
+}
+
 const SetAction = tui_actions.SetAction;
 const EndAction = tui_actions.WorkoutEndAction;
 

@@ -1150,6 +1150,21 @@ test "initial prescription is explicit and warns about missing history" {
     );
 }
 
+test "session cap equal to prescription is a no-op" {
+    const recommendation = try recommendExerciseWithConstraints(
+        validConfig(&.{}),
+        null,
+        .{},
+        try .parse("squat"),
+        .{ .max_working_sets = 3 },
+    );
+    try std.testing.expectEqual(@as(u16, 3), recommendation.working_sets);
+    try std.testing.expectEqualStrings(
+        "double-progression.initial-prescription",
+        recommendation.session_explanation.rule_id,
+    );
+}
+
 test "successful sets advance repetitions then load" {
     var performance: TestPerformance = undefined;
     try performance.init(.completed, 45, 10, 10, .lb);

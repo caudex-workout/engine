@@ -14,9 +14,12 @@
 - `examples/`: Node/TypeScript, browser, C, and Zig consumer examples.
 - `tests/`: cross-language, CLI, docs, package, and adapter integration tests.
 - `tools/dev/`: read-only developer diagnostics.
+- `tools/mutation/`: isolated curated mutation runner and report tooling.
 - `tools/repo/`: repository-owned validation and contract tooling.
 - `tools/release/`: release validation, staging/package, and artifact verification.
 - `docs/adr/`: accepted architectural decisions; `docs/contracts/`: public contracts.
+- `tests/fuzz/`: bounded boundary drivers, smoke cases, and small seed corpus.
+- `tests/mutation/`: reviewed mutation descriptors and equivalence declarations.
 
 The public API is any intentionally documented Zig module/export, C declaration
 or symbol, npm export/declaration, CLI command/option/output/exit code, JSON

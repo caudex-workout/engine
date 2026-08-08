@@ -641,6 +641,60 @@ pub fn build(b: *std.Build) void {
     });
     const run_cli_tests = b.addRunArtifact(cli_tests);
 
+    const fuzz_driver_module = b.createModule(.{
+        .root_source_file = b.path("tests/fuzz/runner.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "caudex", .module = module },
+            .{ .name = "caudex_c_api", .module = c_api_module },
+            .{ .name = "caudex_cli", .module = cli_module },
+            .{ .name = "caudex_sqlite", .module = sqlite_module },
+        },
+    });
+    const fuzz_steps = [_][]const u8{
+        "fuzz-json",
+        "fuzz-decimal",
+        "fuzz-c-abi",
+        "fuzz-cli-args",
+        "fuzz-sqlite",
+        "fuzz-methodology-config",
+    };
+    const fuzz_targets = [_][]const u8{ "json", "decimal", "c_abi", "cli_args", "sqlite", "methodology_config" };
+    for (fuzz_steps, fuzz_targets) |step_name, fuzz_target| {
+        const fuzz_executable = b.addExecutable(.{ .name = step_name, .root_module = fuzz_driver_module });
+        const run_fuzz = b.addRunArtifact(fuzz_executable);
+        run_fuzz.addArg(b.fmt("--target={s}", .{fuzz_target}));
+        run_fuzz.addArg("--iterations=10000");
+        if (b.args) |args| run_fuzz.addArgs(args);
+        const step = b.step(step_name, "Run a bounded seeded fuzz target with a reproducible input stream");
+        step.dependOn(&run_fuzz.step);
+    }
+
+    const fuzz_smoke_module = b.createModule(.{
+        .root_source_file = b.path("tests/fuzz/smoke.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "caudex", .module = module },
+            .{ .name = "caudex_c_api", .module = c_api_module },
+            .{ .name = "caudex_cli", .module = cli_module },
+            .{ .name = "caudex_sqlite", .module = sqlite_module },
+        },
+    });
+    const fuzz_smoke_tests = b.addTest(.{ .name = "fuzz-smoke", .root_module = fuzz_smoke_module });
+    const run_fuzz_smoke = b.addRunArtifact(fuzz_smoke_tests);
+    const fuzz_smoke_step = b.step("fuzz-smoke", "Run deterministic bounded smoke cases for every fuzz driver");
+    fuzz_smoke_step.dependOn(&run_fuzz_smoke.step);
+
+    const mutation_smoke = b.addSystemCommand(&.{ "node", "tools/mutation/run.mjs", "--smoke" });
+    const mutation_smoke_step = b.step("mutation-smoke", "Run the representative bounded mutation subset");
+    mutation_smoke_step.dependOn(&mutation_smoke.step);
+    const mutation_test = b.addSystemCommand(&.{ "node", "tools/mutation/run.mjs" });
+    if (b.args) |args| mutation_test.addArgs(args);
+    const mutation_test_step = b.step("mutation-test", "Run the curated methodology mutation suite");
+    mutation_test_step.dependOn(&mutation_test.step);
+
     const tui_lifecycle_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("apps/caudex-cli/src/tui/terminal.zig"),
         .target = target,
@@ -1237,6 +1291,8 @@ pub fn build(b: *std.Build) void {
     check_release.dependOn(&release_metadata_validation.step);
     check_release.dependOn(&release_workflow_validation.step);
     check_release.dependOn(&compatibility_validation.step);
+    check_release.dependOn(fuzz_smoke_step);
+    check_release.dependOn(mutation_smoke_step);
 
     const release_validate_step = b.step(
         "release-validate",

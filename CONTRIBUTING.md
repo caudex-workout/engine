@@ -12,6 +12,9 @@ changes.
 2. Run `./tools/dev/doctor` (use `--strict` to require the CI Node major).
 3. Run `zig build check-fast` for the short loop.
 4. Run `zig build check` before opening a pull request.
+5. For release/deep validation, run `zig build check-release`; it includes the
+   bounded fuzz and mutation smoke checks. Full sessions are manual:
+   `zig build fuzz-json` (or another target) and `zig build mutation-test`.
 
 The full setup, test matrix, and repository map are in
 [`docs/development/setup.md`](docs/development/setup.md),
@@ -42,6 +45,11 @@ classification, tests, documentation, generated files, migrations/schemas,
 and release-note impact. The pull-request template is a checklist, not a
 substitute for explaining the design. CI is authoritative; optional local hooks
 must never rewrite unrelated files or replace the canonical checks.
+
+See [`docs/development/fuzzing.md`](docs/development/fuzzing.md) and
+[`docs/development/mutation-testing.md`](docs/development/mutation-testing.md).
+Surviving actionable mutants require investigation and must not be silently
+suppressed as equivalent.
 
 ## Common failures
 

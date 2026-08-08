@@ -2650,6 +2650,21 @@ fn parseColumn(
     ) catch return error.InvalidData;
 }
 
+/// Exercises the same persisted JSON decoder used by adapter row readers.
+/// This is intentionally narrow: fuzzing SQLite's SQL engine is out of scope.
+pub fn fuzzDecodePersistedExercise(
+    allocator: std.mem.Allocator,
+    payload: []const u8,
+) persistence.CapabilityError!void {
+    if (payload.len > 1024 * 1024) return error.InvalidData;
+    _ = std.json.parseFromSliceLeaky(
+        persistence.canonical.Exercise,
+        allocator,
+        payload,
+        .{ .allocate = .alloc_always },
+    ) catch return error.InvalidData;
+}
+
 fn encodeAlloc(
     allocator: std.mem.Allocator,
     value: anytype,
