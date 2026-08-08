@@ -2147,7 +2147,11 @@ fn portableSnapshotForWorkout(self: *Adapter, allocator: std.mem.Allocator, work
     var metric_count: usize = 0;
     for (workout.exercises) |exercise| for (exercise.sets) |set| {
         set_count = std.math.add(usize, set_count, 1) catch return error.InvalidData;
-        metric_count = std.math.add(usize, metric_count, set.target_metrics.len + set.actual_metrics.len) catch return error.InvalidData;
+        metric_count = checkedMetricCount(
+            metric_count,
+            set.target_metrics.len,
+            set.actual_metrics.len,
+        ) catch return error.InvalidData;
     };
     var prescription_set_count: usize = 0;
     var tag_count: usize = 0;
@@ -2561,10 +2565,8 @@ fn compareAndSetStateCallback(
         self.execute("ROLLBACK") catch {};
         return error.Conflict;
     }
-    const next_revision: u64 = if (actual_revision) |revision|
-        (std.fmt.parseInt(u64, revision, 10) catch return error.InvalidData) + 1
-    else
-        1;
+    const next_revision = nextMethodologyStateRevision(actual_revision) catch
+        return error.InvalidData;
     const state_json = try encodeAlloc(allocator, change.next_state);
     defer allocator.free(state_json);
     var statement = try self.prepare(
@@ -2601,6 +2603,53 @@ fn compareAndSetStateCallback(
         .revision = revision,
         .updated_at = try allocator.dupe(u8, change.updated_at),
     };
+}
+
+fn checkedMetricCount(
+    current_count: usize,
+    target_count: usize,
+    actual_count: usize,
+) error{Overflow}!usize {
+    const set_metric_count = std.math.add(usize, target_count, actual_count) catch
+        return error.Overflow;
+    return std.math.add(usize, current_count, set_metric_count) catch
+        return error.Overflow;
+}
+
+fn nextMethodologyStateRevision(
+    current_revision: ?[]const u8,
+) error{ InvalidRevision, RevisionOverflow }!u64 {
+    const revision_text = current_revision orelse return 1;
+    const revision = std.fmt.parseInt(u64, revision_text, 10) catch
+        return error.InvalidRevision;
+    return std.math.add(u64, revision, 1) catch error.RevisionOverflow;
+}
+
+test "methodology state revisions and metric counts reject overflow" {
+    try std.testing.expectEqual(
+        @as(u64, 1),
+        try nextMethodologyStateRevision(null),
+    );
+    try std.testing.expectEqual(
+        @as(u64, 2),
+        try nextMethodologyStateRevision("1"),
+    );
+    try std.testing.expectError(
+        error.InvalidRevision,
+        nextMethodologyStateRevision("invalid"),
+    );
+    try std.testing.expectError(
+        error.RevisionOverflow,
+        nextMethodologyStateRevision("18446744073709551615"),
+    );
+    try std.testing.expectError(
+        error.Overflow,
+        checkedMetricCount(0, std.math.maxInt(usize), 1),
+    );
+    try std.testing.expectError(
+        error.Overflow,
+        checkedMetricCount(std.math.maxInt(usize), 1, 0),
+    );
 }
 
 fn readStateRecord(

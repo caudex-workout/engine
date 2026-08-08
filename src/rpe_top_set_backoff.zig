@@ -1216,6 +1216,44 @@ test "top-set recommendation rejects conflicting exertion and units" {
     );
 }
 
+test "RPE arithmetic validates units, boundaries, and zero results" {
+    try std.testing.expectError(
+        error.InvalidHistory,
+        effectiveRepetitionsFromRpe(5, .{
+            .value = .{ .mantissa = 8, .scale = 0 },
+            .unit = .rir,
+        }),
+    );
+    try std.testing.expectError(
+        error.InvalidConfig,
+        divideRoundHalfAwayFromZero(1, 0),
+    );
+    try std.testing.expectEqual(
+        @as(i128, 1),
+        try divideRoundHalfAwayFromZero(1, 2),
+    );
+
+    const zero_load: primitives.Measurement = .{
+        .value = .{ .mantissa = 0, .scale = 0 },
+        .unit = .lb,
+    };
+    const zero_estimate = try estimateOneRepMax(
+        zero_load,
+        .{ .mantissa = 1, .scale = 0 },
+    );
+    try std.testing.expectEqual(@as(i64, 0), zero_estimate.value.mantissa);
+
+    const adjusted_to_zero = try adjustPercentage(
+        .{
+            .value = .{ .mantissa = 100, .scale = 0 },
+            .unit = .lb,
+        },
+        .{ .mantissa = 100, .scale = 0 },
+        false,
+    );
+    try std.testing.expectEqual(@as(i64, 0), adjusted_to_zero.value.mantissa);
+}
+
 test "top-set load rounding obeys every configured mode" {
     const load: primitives.Measurement = .{
         .value = .{ .mantissa = 182432, .scale = 3 },

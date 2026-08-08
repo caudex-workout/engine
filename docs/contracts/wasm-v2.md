@@ -11,7 +11,10 @@ as the native C boundary. There is no separate evaluation export.
 
 Request and result bytes are allocated with `caudex_wasm_alloc` and released
 with `caudex_wasm_free`. There is no runtime-owned result or disposal export.
-The npm facade handles this ownership automatically.
+The npm facade handles this ownership automatically. A single allocation is
+bounded to 4 MiB plus 1 KiB, matching the largest portable payload and its
+execution envelope. Zero-length or larger requests return zero without
+allocating.
 
 One runtime requires external serialization. Independent runtimes share no
 mutable state. Runtime destruction does not invalidate caller-owned results.

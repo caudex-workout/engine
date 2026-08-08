@@ -17,8 +17,48 @@ if (!zon.includes(`.version = "${packageJson.version}"`)) fail("package and Zig 
 if (lockJson.version !== packageJson.version || lockJson.packages?.[""]?.version !== packageJson.version) fail("npm lockfile version drifted");
 if (Number(packageJson.engines?.node?.match(/\d+/)?.[0]) !== Number(versions.node_min)) fail("npm engine and supported Node minimum drifted");
 
-for (const file of ["README.md", "CONTRIBUTING.md", "docs/development/setup.md", "docs/development/testing.md", "docs/development/repository-map.md"]) {
+for (const file of [
+  "README.md",
+  "CONTRIBUTING.md",
+  "docs/development/setup.md",
+  "docs/development/testing.md",
+  "docs/development/repository-map.md",
+  "docs/development/engineering-style.md",
+]) {
   if (!fs.existsSync(path.join(root, file))) fail(`required contributor file is missing: ${file}`);
+}
+
+const styleExceptionsPath = path.join(
+  root,
+  "docs/development/engineering-style-exceptions.json",
+);
+const styleExceptions = JSON.parse(fs.readFileSync(styleExceptionsPath, "utf8"));
+if (!Array.isArray(styleExceptions)) {
+  fail("engineering-style exceptions must be a JSON array");
+} else {
+  const exceptionKeys = new Set();
+  for (const exception of styleExceptions) {
+    const { rule, file, symbol, reason } = exception ?? {};
+    if (
+      ![rule, file, symbol, reason].every(
+        (value) => typeof value === "string" && value.trim().length > 0,
+      )
+    ) {
+      fail("every engineering-style exception must name a rule, file, symbol, and reason");
+      continue;
+    }
+    const key = `${rule}:${file}:${symbol}`;
+    if (exceptionKeys.has(key)) fail(`duplicate engineering-style exception: ${key}`);
+    exceptionKeys.add(key);
+    const sourcePath = path.join(root, file);
+    if (!fs.existsSync(sourcePath)) {
+      fail(`engineering-style exception references a missing file: ${file}`);
+      continue;
+    }
+    if (!fs.readFileSync(sourcePath, "utf8").includes(symbol)) {
+      fail(`engineering-style exception references a stale symbol: ${file}:${symbol}`);
+    }
+  }
 }
 
 for (const file of fs.readdirSync(path.join(root, ".github/workflows"))) {

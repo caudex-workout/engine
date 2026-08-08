@@ -33,6 +33,14 @@ const request = new Uint8Array(await readFile(fixturePath));
 const runtime = exports.caudex_wasm_runtime_create();
 const requestPointer = exports.caudex_wasm_alloc(request.length);
 const requiredPointer = exports.caudex_wasm_alloc(4);
+const maximumPointer = exports.caudex_wasm_alloc(4 * 1024 * 1024 + 1024);
+if (maximumPointer === 0) {
+  throw new Error("WASM allocation rejected the execution-envelope limit");
+}
+exports.caudex_wasm_free(maximumPointer, 4 * 1024 * 1024 + 1024);
+if (exports.caudex_wasm_alloc(4 * 1024 * 1024 + 1025) !== 0) {
+  throw new Error("WASM allocation exceeded the execution-envelope limit");
+}
 if (!runtime || !requestPointer || !requiredPointer) {
   throw new Error("WASM allocation or runtime creation failed");
 }

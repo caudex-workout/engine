@@ -1,5 +1,10 @@
 const std = @import("std");
 const c_api = @import("c_api.zig");
+const portable = @import("caudex_portable");
+
+/// Largest caller-owned request or result buffer accepted in linear memory.
+/// The additional bytes cover the execution envelope around a portable payload.
+pub const max_allocation_bytes: usize = portable.max_input_bytes + 1024;
 
 comptime {
     _ = c_api.caudex_abi_version;
@@ -10,7 +15,7 @@ comptime {
 
 /// Allocates host-visible linear memory. Zero is returned on failure.
 pub export fn caudex_wasm_alloc(len: usize) usize {
-    if (len == 0) return 0;
+    if (len == 0 or len > max_allocation_bytes) return 0;
     const bytes = std.heap.wasm_allocator.alloc(u8, len) catch return 0;
     return @intFromPtr(bytes.ptr);
 }

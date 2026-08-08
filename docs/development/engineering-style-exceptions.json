@@ -1,0 +1,14 @@
+[
+  {
+    "rule": "production-function-size",
+    "file": "build.zig",
+    "symbol": "pub fn build",
+    "reason": "The root build function is a declarative build graph. Its named steps and local dependency wiring are easier to audit together than through forwarding helpers."
+  },
+  {
+    "rule": "production-function-size",
+    "file": "adapters/sqlite.zig",
+    "symbol": "fn importPortableCallback",
+    "reason": "Portable import is one atomic transaction spanning explicitly ordered record kinds. A later split must preserve rollback ownership and cross-kind conflict semantics; size alone does not justify that risk."
+  }
+]

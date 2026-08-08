@@ -20,6 +20,8 @@ The full setup, test matrix, and repository map are in
 [`docs/development/setup.md`](docs/development/setup.md),
 [`docs/development/testing.md`](docs/development/testing.md), and
 [`docs/development/repository-map.md`](docs/development/repository-map.md).
+Code and review conventions are defined by the
+[`Caudex engineering style`](docs/development/engineering-style.md).
 
 ## Change boundaries
 

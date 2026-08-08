@@ -25,6 +25,8 @@ pub const IssueWriter = struct {
         }
         self.storage[self.len] = issue;
         self.len += 1;
+        std.debug.assert(self.len <= self.storage.len);
+        std.debug.assert(self.len <= max_issues);
     }
 
     pub fn items(self: *const IssueWriter) []const canonical.ValidationIssue {
@@ -64,6 +66,8 @@ pub const ExplanationWriter = struct {
         }
         self.storage[self.len] = explanation;
         self.len += 1;
+        std.debug.assert(self.len <= self.storage.len);
+        std.debug.assert(self.len <= max_explanations);
     }
 
     pub fn items(self: *const ExplanationWriter) []const canonical.Explanation {
