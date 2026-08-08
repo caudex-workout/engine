@@ -218,6 +218,26 @@ CLI/TUI, catalog, SQLite implementation, or Vaxis dependency.
   dispatch in `c-release.yml`; no workflow contains a scheduled trigger.
 - The release workflows retain separate native C and CLI artifact paths.
 
+### 14. Public documentation and examples
+
+**Status:** Complete
+
+The root, Zig, C, persistence, tracking, methodology, catalog, release, npm,
+Node, and browser guides use packaged public APIs. Browser examples include
+both the deterministic recommendation playground and an IndexedDB active-workout
+resume/evaluate flow.
+
+### 15. Verification depth
+
+**Status:** Complete for the implemented product surface
+
+The tracking, workflow, persistence, boundary, catalog, and cross-runtime
+suites cover replay/idempotency, revision conflicts, rejected-command
+immutability, exact-decimal round trips, migration/rollback behavior, catalog
+drift, C/WASM/npm fixture equivalence, and clean consumers. The full
+`zig build test` suite is the aggregate gate; C release targets are additionally
+link-tested by host-only and release-matrix commands.
+
 ## Sequencing
 
 Phases are independently reviewable and follow dependency order. No phase
