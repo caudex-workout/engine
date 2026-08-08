@@ -225,6 +225,15 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const run_tracking_protocol_tests = b.addRunArtifact(tracking_protocol_tests);
+    const tracking_model_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("tracking_model_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "caudex_tracking", .module = tracking_module }},
+    }) });
+    const run_tracking_model_tests = b.addRunArtifact(tracking_model_tests);
+    const tracking_model_step = b.step("test-tracking-model", "Compare bounded command sequences with an independent reference model");
+    tracking_model_step.dependOn(&run_tracking_model_tests.step);
     const tracking_contract_step = b.step(
         "test-tracking-contract",
         "Test the public host-owned tracking contract",
@@ -233,6 +242,7 @@ pub fn build(b: *std.Build) void {
     tracking_contract_step.dependOn(&run_tracking_lifecycle_tests.step);
     tracking_contract_step.dependOn(&run_tracking_architecture_tests.step);
     tracking_contract_step.dependOn(&run_tracking_protocol_tests.step);
+    tracking_contract_step.dependOn(&run_tracking_model_tests.step);
 
     const workflow_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -1121,6 +1131,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_contract_tests.step);
     test_step.dependOn(&run_architecture_tests.step);
     test_step.dependOn(&run_tracking_contract_tests.step);
+    test_step.dependOn(&run_tracking_model_tests.step);
     test_step.dependOn(&run_tracking_lifecycle_tests.step);
     test_step.dependOn(&run_tracking_architecture_tests.step);
     test_step.dependOn(&run_workflow_tests.step);
