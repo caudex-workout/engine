@@ -1,0 +1,107 @@
+name: Required CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux comprehensive suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: packages/npm/workout-engine/package-lock.json
+
+      - name: Format check
+        run: zig fmt --check .
+
+      - name: Install locked JavaScript test tools
+        run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: packages/npm/workout-engine
+
+      - name: Install persistence adapter workspace links
+        run: npm install --ignore-scripts --no-audit --no-fund
+        working-directory: packages/persistence-indexeddb
+
+      - name: Core and architecture tests
+        run: |
+          zig build test-core
+          zig build test
+
+      - name: Tracking and workflow tests
+        run: |
+          zig build test-tracking-contract
+          zig build test-workflows
+          zig build test-portable
+
+      - name: Persistence contract and adapter tests
+        run: |
+          zig build test-persistence-contracts
+          zig build test-persistence-contract-kit
+          zig build test-persistence-sqlite
+          zig build test-persistence-indexeddb
+
+      - name: Native C, WASM, and npm tests
+        run: |
+          zig build test-c-api
+          zig build test-c-release
+          zig build test-typescript
+          zig build test-npm-clean
+          zig build test-npm-examples
+
+      - name: Catalog and clean package tests
+        run: |
+          zig build test-exercise-catalog
+          zig build test-zig-package
+
+      - name: Documentation and reference applications
+        run: |
+          zig build test-docs-quickstart
+          zig build test-caudex-cli
+
+  native-compatibility:
+    name: Native compatibility (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Native core and C link coverage
+        run: |
+          zig fmt --check .
+          zig build test-core
+          zig build test-c-release

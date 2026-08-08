@@ -85,7 +85,7 @@ introducing persistence into this pure phase.
 
 ### 5. C ABI v2 and WASM
 
-**Status:** In progress; safe caller-owned output is implemented
+**Status:** Completed
 
 - One registry-backed executor covers programming, tracking, workflows,
   discovery, and portable data with safe output ownership.
@@ -96,9 +96,8 @@ ABI v2 removed caller-mutable allocator metadata and result disposal. Native C,
 WASM, and npm now use required-size discovery plus exact caller-owned output.
 Recommendation and evaluation share one versioned operation dispatcher;
 canonical tracking commands and atomic batches now use that dispatcher too.
-Recommendation/template instantiation and completion conversion use the same
-canonical workflow protocol. Discovery and portable-data operations remain to
-complete this phase in their owning phases.
+Recommendation/template instantiation, completion conversion, discovery, and
+portable-data operations use the same canonical workflow protocol.
 
 ### 6. npm APIs
 
@@ -209,12 +208,15 @@ CLI/TUI, catalog, SQLite implementation, or Vaxis dependency.
 
 ### 13. CI, docs, and verification
 
-- Linux PR CI covers architecture/core/tracking/workflow/persistence/SQLite/
-  IndexedDB/npm/WASM/catalog/docs/packages/native C; macOS/Windows cover focused
-  native compatibility.
-- Packaged Zig/C/Node/browser examples show the full workflow.
-- Conformance, model-based, fuzz/mutation, failure-injection, and property tests
-  cover every new boundary, and all existing required commands pass.
+**Status:** Complete
+
+- Required CI now runs the formatting, architecture/core, tracking, workflow,
+  portable, persistence, SQLite, IndexedDB, C/WASM, npm, catalog, clean-package,
+  documentation, and CLI checks on Linux pull requests. macOS and Windows run
+  focused native compatibility and C-link checks.
+- The full C target matrix remains restricted to tags and explicit manual
+  dispatch in `c-release.yml`; no workflow contains a scheduled trigger.
+- The release workflows retain separate native C and CLI artifact paths.
 
 ## Sequencing
 
