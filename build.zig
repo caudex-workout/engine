@@ -1202,4 +1202,62 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&npm_examples_test.step);
     test_step.dependOn(&zig_package_consumer_test.step);
     test_step.dependOn(&c_release_test.step);
+
+    const format_check = b.addSystemCommand(&.{ "zig", "fmt", "--check", "." });
+    const diff_check = b.addSystemCommand(&.{ "git", "diff", "--check" });
+    const repository_validation = b.addSystemCommand(&.{ "node", "tools/repo/validate-repository.mjs" });
+    const public_contract_validation = b.addSystemCommand(&.{ "node", "tools/repo/public-contract-snapshot.mjs" });
+    const fast_check = b.step(
+        "check-fast",
+        "Run fast local checks: formatting, repository metadata, and core tests",
+    );
+    fast_check.dependOn(&format_check.step);
+    fast_check.dependOn(&diff_check.step);
+    fast_check.dependOn(&repository_validation.step);
+    fast_check.dependOn(&public_contract_validation.step);
+    fast_check.dependOn(&run_library_tests.step);
+
+    const check = b.step(
+        "check",
+        "Run the canonical pull-request verification suite",
+    );
+    check.dependOn(fast_check);
+    check.dependOn(test_step);
+
+    const release_validation = b.addSystemCommand(&.{ "node", "tools/release/validate-npm-release.mjs", "v0.1.0" });
+    const release_metadata_validation = b.addSystemCommand(&.{ "node", "tools/release/validate-release-metadata.mjs" });
+    const release_workflow_validation = b.addSystemCommand(&.{ "node", "tests/cli_release_workflow_test.mjs" });
+    const compatibility_validation = b.addSystemCommand(&.{ "node", "tools/repo/compatibility-check.mjs" });
+    const check_release = b.step(
+        "check-release",
+        "Run canonical checks plus release metadata and artifact workflow validation",
+    );
+    check_release.dependOn(check);
+    check_release.dependOn(&release_validation.step);
+    check_release.dependOn(&release_metadata_validation.step);
+    check_release.dependOn(&release_workflow_validation.step);
+    check_release.dependOn(&compatibility_validation.step);
+
+    const release_validate_step = b.step(
+        "release-validate",
+        "Validate release metadata, compatibility records, and release workflow expectations without publishing",
+    );
+    release_validate_step.dependOn(check_release);
+
+    const release_stage_step = b.step(
+        "release-stage",
+        "Build release candidate packages and artifacts after release validation; never publish",
+    );
+    release_stage_step.dependOn(release_validate_step);
+    release_stage_step.dependOn(npm_package_step);
+    release_stage_step.dependOn(zig_package_archive_step);
+    release_stage_step.dependOn(&c_release_package.step);
+
+    const clean = b.addSystemCommand(&.{ "rm", "-rf", ".zig-cache", "zig-out" });
+    const clean_step = b.step("clean", "Remove generated Zig cache and build output");
+    clean_step.dependOn(&clean.step);
+
+    const clean_all = b.addSystemCommand(&.{ "rm", "-rf", ".zig-cache", "zig-out", "packages/npm/workout-engine/dist", "packages/exercise-catalog/dist", "packages/persistence/dist", "packages/persistence-indexeddb/dist" });
+    const clean_all_step = b.step("clean-all", "Remove all repository-generated build and package output");
+    clean_all_step.dependOn(&clean_all.step);
 }

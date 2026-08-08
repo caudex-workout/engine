@@ -1,6 +1,29 @@
 # Caudex Workout Engine
 
-Current release: **0.1.0**
+[![Required CI](https://github.com/caudex-workout/engine/actions/workflows/ci.yml/badge.svg)](https://github.com/caudex-workout/engine/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+Current release: **0.1.0** · supported Zig: **0.16.x**
+
+Caudex is an open-source, embeddable strength and hypertrophy programming
+engine for developers. It accepts complete host-owned snapshots and returns
+deterministic recommendations, evaluations, structured explanations, and
+proposed methodology state. The core is stateless, persistence-independent,
+and designed for Zig, C, and npm/WebAssembly consumers.
+
+It is not a hosted fitness service, account system, synchronization layer,
+medical coach, or required database. Hosts own users, UI, history, persistence,
+and whether a proposal is accepted or stored.
+
+## Choose your path
+
+- [npm/TypeScript and browser usage](#npm-quickstart)
+- [Zig package integration](#zig-package)
+- [C integration and release artifacts](docs/release/c.md)
+- [CLI and TUI reference client](apps/caudex-cli/README.md)
+- [Browser playground](examples/browser/README.md)
+- [Architecture and contracts](#architecture)
+- [Contributor setup and checks](CONTRIBUTING.md)
 
 ## npm quickstart
 

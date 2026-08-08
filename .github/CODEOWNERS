@@ -1,0 +1,6 @@
+* @caudex-workout/maintainers
+/.github/ @caudex-workout/maintainers
+/include/ @caudex-workout/maintainers
+/schemas/ @caudex-workout/maintainers
+/adapters/sqlite/migrations/ @caudex-workout/maintainers
+/tools/release/ @caudex-workout/maintainers

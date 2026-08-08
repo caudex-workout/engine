@@ -27,10 +27,10 @@ jobs:
           - { os: windows-latest, target: x86_64-windows-gnu, archive: caudex-workout-cli-0.1.0-x86_64-windows-gnu.zip, windows: true }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-      - uses: mlugg/setup-zig@v2
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
           version: 0.16.0
       - name: Build ReleaseSafe CLI
@@ -89,12 +89,12 @@ jobs:
             --sqlite-linkage 'bundled official sqlite3.dll' `
             --sqlite-source $sqliteUrl `
             --sqlite-dll $dll.FullName
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ matrix.archive }}
           path: ${{ matrix.archive }}
           if-no-files-found: error
-      - uses: actions/attest-build-provenance@v3
+      - uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
         with:
           subject-path: ${{ matrix.archive }}
 
@@ -103,10 +103,10 @@ jobs:
     needs: package
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: assets
           merge-multiple: true
@@ -123,7 +123,7 @@ jobs:
             caudex-workout-cli-0.1.0-x86_64-windows-gnu.zip > SHA256SUMS
       - name: Verify every archive, metadata, and checksum
         run: python3 tools/release/verify_cli_release.py assets
-      - uses: actions/attest-build-provenance@v3
+      - uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
         with:
           subject-path: assets/SHA256SUMS
       - name: Create immutable draft release

@@ -1,0 +1,17 @@
+name: Persistence adapter proposal
+description: Propose a host-owned persistence adapter or adapter contract change
+title: "adapter: "
+labels: [adapter]
+body:
+  - type: textarea
+    id: host_boundary
+    attributes: {label: Host persistence concern, description: Describe ownership, transactions, conflicts, and failure behavior.}
+    validations: {required: true}
+  - type: textarea
+    id: core_boundary
+    attributes: {label: Core boundary, description: Explain why no domain recommendation behavior belongs in the adapter.}
+    validations: {required: true}
+  - type: textarea
+    id: compatibility
+    attributes: {label: Schema, migration, import/export, and compatibility implications}
+    validations: {required: true}

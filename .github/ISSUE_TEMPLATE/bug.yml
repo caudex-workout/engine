@@ -1,0 +1,40 @@
+name: Bug report
+description: Report a reproducible defect in Caudex
+title: "bug: "
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Caudex version or commit
+      placeholder: v0.1.0 or SHA
+    validations: {required: true}
+  - type: input
+    id: surface
+    attributes:
+      label: Consumption surface
+      placeholder: Zig / C / npm / WASM / CLI / SQLite
+    validations: {required: true}
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include Zig, Node, browser, compiler, SQLite, OS, and target triple.
+    validations: {required: true}
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal request, fixture, command, or database
+      render: shell
+    validations: {required: true}
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and actual result
+      description: Include issue/explanation codes and determinism observations.
+    validations: {required: true}
+  - type: textarea
+    id: persistence
+    attributes:
+      label: Persistence involvement
+      description: State whether SQLite, IndexedDB, or another adapter is involved.

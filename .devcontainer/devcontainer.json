@@ -1,0 +1,15 @@
+{
+  "name": "Caudex development",
+  "build": {"dockerfile": "Dockerfile"},
+  "remoteUser": "vscode",
+  "postCreateCommand": "./tools/dev/doctor",
+  "forwardPorts": [8080],
+  "customizations": {
+    "vscode": {
+      "extensions": ["ziglang.vscode-zig", "ms-vscode.cpptools", "ms-python.python"],
+      "settings": {
+        "zig.path": "/opt/zig/zig"
+      }
+    }
+  }
+}

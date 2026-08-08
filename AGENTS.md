@@ -224,17 +224,29 @@ unless the user explicitly requests it.
 
 ## Required checks
 
-Once the build system supports them, run:
+The canonical hierarchy is:
 
 ```bash
-zig build
-zig build test
+zig build check-fast   # short local loop
+zig build check        # pull-request and pre-merge source of truth
+zig build check-release # release-only metadata and compatibility additions
+```
+
+The individual leaf targets remain useful for focused development. Run the
+strongest applicable command after changes. The build system also provides
+`zig build clean` and `zig build clean-all` for generated output.
+
+The canonical checks include:
+
+```bash
+zig build check
+zig build check-release
 zig fmt --check .
 git diff --check
 ```
 
-Use commands that actually exist in the repository. Do not claim a check passed
-unless it ran successfully.
+`zig build check` is the CI source of truth. Use commands that actually exist
+in the repository, and do not claim a check passed unless it ran successfully.
 
 For documentation-only tasks before the Zig build exists, run applicable
 read-only link/path checks and `git diff --check`.

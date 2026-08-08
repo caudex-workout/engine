@@ -3,8 +3,7 @@ name: Required CI
 on:
   pull_request:
   push:
-    branches:
-      - main
+    branches: [main]
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -14,73 +13,69 @@ permissions:
   contents: read
 
 jobs:
-  linux:
-    name: Linux comprehensive suite
+  quality:
+    name: Quality and fast checks
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-
       - name: Set up Zig
-        uses: mlugg/setup-zig@v2
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
           version: 0.16.0
-
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Run fast checks
+        run: zig build check-fast --summary all
+      - name: Write summary
+        if: always()
+        run: |
+          {
+            echo '### Quality'
+            echo '- `zig build check-fast` is the fast local guardrail.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  canonical-check:
+    name: Canonical pull-request check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Set up Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: packages/npm/workout-engine/package-lock.json
-
-      - name: Format check
-        run: zig fmt --check .
-
       - name: Install locked JavaScript test tools
         run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: packages/npm/workout-engine
-
       - name: Install persistence adapter workspace links
         run: npm install --ignore-scripts --no-audit --no-fund
         working-directory: packages/persistence-indexeddb
-
-      - name: Core and architecture tests
+      - name: Run canonical check
+        run: zig build check --summary all
+      - name: Write summary
+        if: always()
         run: |
-          zig build test-core
-          zig build test
-
-      - name: Tracking and workflow tests
-        run: |
-          zig build test-tracking-contract
-          zig build test-workflows
-          zig build test-portable
-
-      - name: Persistence contract and adapter tests
-        run: |
-          zig build test-persistence-contracts
-          zig build test-persistence-contract-kit
-          zig build test-persistence-sqlite
-          zig build test-persistence-indexeddb
-
-      - name: Native C, WASM, and npm tests
-        run: |
-          zig build test-c-api
-          zig build test-c-release
-          zig build test-typescript
-          zig build test-npm-clean
-          zig build test-npm-examples
-
-      - name: Catalog and clean package tests
-        run: |
-          zig build test-exercise-catalog
-          zig build test-zig-package
-
-      - name: Documentation and reference applications
-        run: |
-          zig build test-docs-quickstart
-          zig build test-caudex-cli
+          {
+            echo '### Canonical check'
+            echo '- `zig build check` is the branch-protection candidate.'
+            echo '- Required subsystems: core, contracts, methodologies, adapters, C/WASM/npm consumers, CLI, catalog, and executable documentation.'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   native-compatibility:
     name: Native compatibility (${{ matrix.os }})
@@ -89,19 +84,24 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-
       - name: Set up Zig
-        uses: mlugg/setup-zig@v2
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
           version: 0.16.0
-
-      - name: Native core and C link coverage
-        run: |
-          zig fmt --check .
-          zig build test-core
-          zig build test-c-release
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Run native C compatibility checks
+        run: zig build test-core test-c-release --summary all
+      - name: Write summary
+        if: always()
+        shell: bash
+        run: echo "- Native C compatibility completed on ${{ matrix.os }}." >> "$GITHUB_STEP_SUMMARY"

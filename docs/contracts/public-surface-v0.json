@@ -1,0 +1,150 @@
+{
+  "format": "caudex.public-surface.v0",
+  "packageVersion": "0.1.0",
+  "zig": {
+    "module": "caudex",
+    "exports": [
+      "canonical",
+      "canonical_json",
+      "diagnostics",
+      "discovery",
+      "double_progression",
+      "duration",
+      "engine",
+      "filtering",
+      "history",
+      "load_math",
+      "methodology",
+      "ordering",
+      "primitives",
+      "rpe_top_set_backoff",
+      "training"
+    ]
+  },
+  "cAbi": {
+    "version": "2",
+    "constants": [
+      "CAUDEX_ABI_VERSION=2u"
+    ],
+    "statusValues": [
+      "CAUDEX_STATUS_INSUFFICIENT_OUTPUT=7",
+      "CAUDEX_STATUS_INTERNAL_ERROR=255",
+      "CAUDEX_STATUS_INVALID_ARGUMENT=1",
+      "CAUDEX_STATUS_INVALID_REQUEST=3",
+      "CAUDEX_STATUS_OK=0",
+      "CAUDEX_STATUS_OUTPUT_LIMIT_REACHED=6",
+      "CAUDEX_STATUS_OUT_OF_MEMORY=2",
+      "CAUDEX_STATUS_UNSUPPORTED_METHODOLOGY=5",
+      "CAUDEX_STATUS_UNSUPPORTED_VERSION=4"
+    ],
+    "symbols": [
+      "caudex_abi_version",
+      "caudex_runtime_create",
+      "caudex_runtime_destroy",
+      "caudex_runtime_execute"
+    ]
+  },
+  "npm": {
+    "name": "@caudex-workout/engine",
+    "version": "0.1.0",
+    "exports": [
+      ".",
+      "./methodologies",
+      "./schema/canonical",
+      "./schema/discovery",
+      "./schema/double-progression-config",
+      "./schema/double-progression-state",
+      "./schema/evaluation-request",
+      "./schema/evaluation-result",
+      "./schema/execution-request",
+      "./schema/portable",
+      "./schema/recommendation-request",
+      "./schema/recommendation-result",
+      "./schema/rpe-top-set-backoff-config",
+      "./schema/rpe-top-set-backoff-state",
+      "./testing"
+    ]
+  },
+  "cli": [
+    "batch",
+    "command-reference",
+    "completion",
+    "config",
+    "database",
+    "doctor",
+    "exercise",
+    "history",
+    "set",
+    "workout"
+  ],
+  "schemas": [
+    "schemas/discovery/v1/discovery.schema.json",
+    "schemas/methodologies/double-progression-config-v1.schema.json",
+    "schemas/methodologies/double-progression-state-v1.schema.json",
+    "schemas/methodologies/rpe-top-set-backoff-config-v1.schema.json",
+    "schemas/methodologies/rpe-top-set-backoff-state-v1.schema.json",
+    "schemas/operations/v1/execution-request.schema.json",
+    "schemas/portable/v1/portable.schema.json",
+    "schemas/templates/v1/workout-template.schema.json",
+    "schemas/tracking/v1/atomic-batch-request.schema.json",
+    "schemas/tracking/v1/atomic-batch-result.schema.json",
+    "schemas/tracking/v1/command-request.schema.json",
+    "schemas/tracking/v1/command-result.schema.json",
+    "schemas/tracking/v1/snapshot.schema.json",
+    "schemas/tracking/v1/tracking.schema.json",
+    "schemas/v0/canonical.schema.json",
+    "schemas/v0/evaluation-request.schema.json",
+    "schemas/v0/evaluation-result.schema.json",
+    "schemas/v0/recommendation-request.schema.json",
+    "schemas/v0/recommendation-result.schema.json",
+    "schemas/workflows/v1/workflow.schema.json"
+  ],
+  "migrations": [
+    "adapters/sqlite/migrations/001_initial.sql",
+    "adapters/sqlite/migrations/002_tracking_start.sql",
+    "adapters/sqlite/migrations/003_tracking_exercises.sql",
+    "adapters/sqlite/migrations/004_tracking_sets.sql",
+    "adapters/sqlite/migrations/005_tracking_workout_end.sql",
+    "adapters/sqlite/migrations/006_catalog_management.sql",
+    "adapters/sqlite/migrations/007_history_queries.sql",
+    "adapters/sqlite/migrations/008_workflow_persistence.sql",
+    "adapters/sqlite/migrations/009_accepted_recommendations.sql"
+  ],
+  "methodologyIds": [
+    "caudex.double-progression",
+    "caudex.rpe-top-set-backoff"
+  ],
+  "issueAndExplanationCodes": [
+    "alternative.ranked.stable_tiebreak",
+    "athlete.restriction_invalid",
+    "catalog.duplicate_exercise_id",
+    "catalog.exercise_reference_missing",
+    "exercise.excluded.equipment_unavailable",
+    "exercise.excluded.host_restriction",
+    "exercise.excluded.user_disliked",
+    "exercise.selected.available_equipment",
+    "exercise.selected.preference",
+    "exercise.selected.required",
+    "history.exercise_reference_missing",
+    "history.insufficient_evidence",
+    "load.held.partial_completion",
+    "load.increased.rep_range_completed",
+    "measurement.incompatible_units",
+    "measurement.invalid_decimal",
+    "measurement.unsupported_unit",
+    "methodology.config_invalid",
+    "methodology.state.advanced",
+    "methodology.state.initialized",
+    "methodology.state_unsupported_version",
+    "methodology.unknown",
+    "progression.held.insufficient_evidence",
+    "repetitions.selected.methodology_target",
+    "request.conflicting_constraints",
+    "request.missing_required_input",
+    "schema.unsupported_version",
+    "session.required_exercise_unavailable",
+    "session.shortened.minimum_viable_policy",
+    "session.time_budget_unsatisfied",
+    "sets.reduced.available_time"
+  ]
+}

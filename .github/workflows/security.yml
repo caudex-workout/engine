@@ -1,0 +1,51 @@
+name: Workflow security review
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - "tools/repo/validate-repository.mjs"
+
+permissions:
+  contents: read
+
+jobs:
+  workflow-review:
+    name: Pinned workflow and permission review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Validate immutable action pins and schemas
+        run: node tools/repo/validate-repository.mjs
+      - name: Run actionlint when installed by the runner image
+        run: |
+          if command -v actionlint >/dev/null 2>&1; then
+            actionlint
+          else
+            echo 'actionlint is not installed on this runner; run actionlint locally or add it to the maintainer tool image.'
+          fi
+      - name: Run zizmor when installed by the runner image
+        run: |
+          if command -v zizmor >/dev/null 2>&1; then
+            zizmor .github/workflows
+          else
+            echo 'zizmor is not installed on this runner; run zizmor locally or add it to the maintainer tool image.'
+          fi
+      - name: Write summary
+        if: always()
+        run: |
+          {
+            echo '### Workflow security review'
+            echo '- Immutable action pins and repository-owned schema checks are required.'
+            echo '- actionlint and zizmor are optional local/release-tool checks until installed in the maintainer image.'
+          } >> "$GITHUB_STEP_SUMMARY"

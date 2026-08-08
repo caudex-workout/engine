@@ -1,0 +1,21 @@
+name: Methodology proposal
+description: Propose a deterministic programming methodology
+title: "methodology: "
+labels: [methodology]
+body:
+  - type: textarea
+    id: behavior
+    attributes: {label: Intended programming behavior and rationale}
+    validations: {required: true}
+  - type: textarea
+    id: contract
+    attributes: {label: Configuration, persistent state, progression/failure rules, validation, tie-breaks, and explanation codes}
+    validations: {required: true}
+  - type: textarea
+    id: tests
+    attributes: {label: Representative request/result fixtures and test cases}
+    validations: {required: true}
+  - type: textarea
+    id: evidence
+    attributes: {label: Evidence or rationale, including known limitations}
+    validations: {required: true}

@@ -1,0 +1,23 @@
+{
+  "recordFormat": "caudex.compatibility-record.v0",
+  "release": "0.1.0",
+  "tag": "v0.1.0",
+  "status": "historical",
+  "surfaces": [
+    "zig",
+    "c-abi-v2",
+    "npm-typescript",
+    "cli",
+    "json-v0",
+    "methodology-state-v1",
+    "sqlite-migrations-001-009",
+    "issue-explanation-codes"
+  ],
+  "fixtureSources": [
+    "fixtures/requests/recommendation.json",
+    "fixtures/results/recommendation-no-history.json",
+    "fixtures/methodologies/double-progression-state-v1.json",
+    "adapters/sqlite/migrations"
+  ],
+  "immutability": "Do not rewrite this record or its source fixtures. Correct an invalid historical fixture only with an explanatory change and compatibility note."
+}

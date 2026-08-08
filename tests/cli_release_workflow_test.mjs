@@ -20,7 +20,7 @@ for (const phrase of [
   "package_cli.py",
   "verify_cli_release.py",
   "SHA256SUMS",
-  "actions/attest-build-provenance@v3",
+  "actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3",
   "--draft",
   "gh release edit v0.1.0 --draft=false",
   "test-tui-lifecycle",
