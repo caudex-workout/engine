@@ -13,7 +13,9 @@ both methodologies, tracking and portable protocols, workflow conversion,
 SQLite and browser persistence adapters, the C and WASM boundaries, npm
 facades, CLI/TUI, schemas and fixtures, compatibility snapshots, fuzz drivers,
 mutation tooling, model/property tests, benchmarks, release tools, and CI
-workflows. `AGENTS.md` was read as historical context and was not changed.
+workflows. The historical root `AGENTS.md` was read as context; the current
+root and nested instruction hierarchy is maintained separately from this
+descriptive audit.
 
 Before refactoring:
 

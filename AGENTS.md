@@ -1,270 +1,97 @@
-# Caudex Workout Engine Codex Instructions
+# Caudex agent instructions
 
-## Project purpose
+## Product and boundaries
 
-Caudex Workout Engine is an open-source, embeddable exercise-programming and
-active-workout tracking SDK written in Zig 0.16.0. It accepts explicit
-host-supplied snapshots and returns deterministic recommendations, performance
-evaluations, tracking transitions, workflow results, and proposed methodology
-state.
+Caudex is an embeddable workout programming and active-workout tracking engine
+for developers. It is a stateless library with Zig, C, WebAssembly/npm, and
+first-party reference-client surfaces. Hosts supply complete snapshots and
+commands; Caudex returns deterministic recommendations, evaluations, tracking
+transitions, explanations, diagnostics, and proposed state.
 
-The initial product is a developer-facing, stateless engine/library. The host
-owns users, UI, persistence, workout history, synchronization, and the decision
-to accept or store a result.
+The engine does not own accounts, UI, synchronization, a hosted service,
+medical coaching, or required persistence. Hosts decide whether proposals are
+accepted and stored. The CLI/TUI and persistence adapters are optional outer
+layers, not engine behavior.
 
-The SDK includes programming and pure tracking domains plus first-party
-reference applications. It does not include required persistence, hosted
-services, mobile or web frontends, full periodization, or long-term calendar
-generation.
+## Architecture
 
-Read these documents before making architectural or domain changes:
-
-- `docs/adr/ADR-0001-workout-engine-core-architecture.md`
-- `docs/adr/ADR-0002-library-first-product-and-distribution.md`
-- `docs/adr/ADR-0003-persistence-as-optional-adapter.md`
-- `docs/adr/ADR-0006-programming-and-active-tracking-sdk.md`
-- `docs/implementation-plan.md`
-- `README.md`
-
-Accepted ADRs are authoritative. Apply them in decision order: ADR-0002
-supersedes ADR-0001's tracking-first scope, SQLite-first MVP, event-journal
-requirements, and implementation sequence; ADR-0003 supersedes any remaining
-implication that the core owns persistence or durable state; ADR-0006 supersedes
-ADR-0002's programming-only scope. ADR-0001 remains
-authoritative for the functional-core discipline, explicit idiomatic Zig shell,
-deterministic calculations, C ABI principles, and rejection of generalized
-functional-programming frameworks.
-
-Report a material conflict before implementing around it.
-
-## Architectural discipline
-
-Caudex uses functional programming as an architectural discipline rather than
-adopting a generalized functional-programming abstraction framework.
-
-Domain and methodology calculations are deterministic and effect-free.
-Application orchestration, allocation, serialization, package loading,
-protocol handling, and ABI handling use explicit idiomatic Zig.
-
-The dependency direction is inward:
+Keep dependencies directed inward:
 
 ```text
-host or optional adapter -> facade/canonical schemas -> stateless core
+host/reference client -> public facades and adapters -> tracking/workflows -> deterministic core
 ```
 
-The core never depends on a persistence adapter, repository interface, database,
-host lifecycle, or platform service.
+Use the actual module boundary being changed. `src/` contains the programming
+core, canonical models, methodologies, diagnostics, and C/WASM facades;
+`tracking/`, `workflows/`, and `portable/` contain persistence-independent
+public protocols; `adapters/` contains optional persistence contracts and
+SQLite; `apps/caudex-cli/` is a reference client; `packages/` contains
+publishable ecosystem packages; `schemas/` and `fixtures/` are public contract
+data; `tools/` and `.github/` validate, test, package, and release the system.
 
-### Core domain rules
+Outer layers may depend on inner layers. Core and protocol semantics must not
+depend on databases, adapters, CLI/TUI code, host frameworks, filesystems,
+network services, wall-clock reads, or hidden randomness.
 
-These rules apply to the inner deterministic core, whether the current code is
-located under `core/src/model`, `core/src/validation`, `core/src/history`,
-`core/src/recommendation`, `core/src/methodology`, or a future directory named
-`src/domain`.
+## Engineering policy
 
-Core domain and methodology calculations must not:
+[`docs/development/engineering-style.md`](docs/development/engineering-style.md)
+is the detailed style standard. Its priorities are correctness/safety,
+determinism/compatibility, developer experience, predictable performance, and
+then terseness. Apply bounded work, checked arithmetic, explicit ownership,
+simple control flow, explicit invariants, and no speculative abstraction.
 
-- Access SQLite or other persistence
-- Depend on repository interfaces, migrations, or transaction managers
-- Read files or environment variables
-- Access the network
-- Read a clock; time must be an explicit input
-- Use hidden randomness; any seed must be an explicit input
-- Generate nondeterministic values or IDs
-- Access global mutable state
-- Parse public JSON protocols
-- Depend on the C ABI or platform APIs
-- Log as part of domain behavior
-- Persist, accept, or automatically apply recommendations
-- Hide allocation inside decision or recommendation functions
+Use the language and ecosystem idioms of the edited surface: `snake_case` and
+explicit fixed-width domain values in Zig, idiomatic TypeScript/JavaScript in
+npm packages, and restrained, justified, pinned dependencies. Do not weaken a
+public contract or rewrite functioning Node/Python tooling for style reasons.
 
-Prefer:
+## Public contracts
 
-- Structs
-- Tagged unions
-- Error unions
-- Optional values
-- Explicit loops
-- Explicit `switch` statements
-- Slices and caller-provided buffers
-- Explicit allocators outside domain decisions
-- `defer` and `errdefer`
-- Checked arithmetic
-- Compile-time generics only when they make concrete code clearer
+Treat documented Zig exports, C declarations/symbols, WASM behavior, npm
+exports/declarations and artifact contents, schemas, fixtures, methodology
+IDs/versions, issue and explanation codes, CLI commands/output/exit codes,
+tracking/protocol versions, and released migrations as compatibility surfaces.
+Classify intentional changes and update the relevant snapshots, schemas,
+fixtures, tests, documentation, changelog, and migration/release metadata.
+Never silently reinterpret existing fields, expected results, or released
+migrations. Keep validation/domain issues distinct from runtime, adapter,
+ABI, npm, and CLI failures.
 
-Do not introduce:
+## Dependencies and changes
 
-- `zig-cats`
-- Monad, functor, applicative, lens, or typeclass emulation
-- A generalized map/filter/reduce abstraction hierarchy
-- Free-monad or effect-system interpreters
-- Persistent immutable collection frameworks by default
-- Runtime dependency-injection containers
-- Framework-wide currying
-- Generic pipeline abstractions that obscure control flow or allocation
+Prefer Zig/std and existing repository tooling; then existing pinned
+dependencies; add a production dependency only with a clear capability,
+security/lifecycle/license, and maintenance rationale. Inspect surrounding
+architecture and current tests before editing, preserve behavior unless the
+change is intentional, and update tests/docs with behavior changes. Do not
+modify unrelated files, hide failures by weakening tests or snapshots, or
+commit, push, rewrite history, or publish unless explicitly requested.
 
-A domain-specific higher-order helper is acceptable when it clearly simplifies
-a real repeated operation. A runtime function table is acceptable for the
-methodology registry because runtime methodology selection is a concrete
-product requirement.
+## Canonical validation
 
-## Inputs, results, and effects
+Use the strongest applicable current build step:
 
-The host supplies complete request snapshots, including history, catalog data,
-methodology configuration and state, session constraints, and explicit time or
-tie-break inputs when needed.
+- `zig build check-fast` for the short local loop;
+- `zig build check` for the canonical pull-request/pre-merge suite;
+- `zig build check-release` for release metadata, compatibility, artifact
+  workflow, bounded fuzz smoke, and mutation smoke in addition to `check`.
 
-The core validates those values and returns recommendations, evaluations,
-structured explanations, warnings, and proposed next state. A rejected request
-produces no accepted result or hidden mutation. A calculated recommendation is
-a proposal; the host explicitly decides whether to accept or persist it.
+Focused leaf steps are useful when developing in a subsystem. Full bounded
+fuzz sessions and the curated mutation suite are manual targets; follow the
+guides under `docs/development/` and preserve seeds/reproducer artifacts.
+Report exact commands and failures honestly. `build.zig` is the source of
+truth for the build graph; do not invent or duplicate a stale command list.
 
-Persistence adapters are optional downstream packages. Adapter operations may
-load snapshots and persist an explicitly accepted result, but they must not
-change recommendation semantics. SQLite, PostgreSQL, IndexedDB, custom
-repositories, remote APIs, and no persistence are all valid host choices.
+## Instruction hierarchy
 
-## Issue and error rules
+Read this file and the closest applicable nested `AGENTS.md` before editing.
+Child files add only rules specific to their subtree. A child rule may narrow
+these instructions but must not contradict the current source, tests, accepted
+architecture documents, or the engineering-style standard. The closest file
+wins when a rule is genuinely more specific.
 
-Keep expected calculation outcomes distinct from failures to execute:
-
-- Validation and methodology issues are structured result values with stable
-  machine-readable codes. They describe input or domain conditions the core
-  safely rejected.
-- Engine/runtime errors mean calculation could not complete safely, such as
-  allocation failure, corrupt artifacts, serialization failure, or an internal
-  invariant violation.
-- Persistence conflicts and adapter failures belong to the adapter/application
-  layer. They must not masquerade as core validation or methodology issues.
-
-`DomainIssue` and `EngineError` in ADR-0001 are conceptual categories, not
-mandatory public Zig type names. CWE-002 and CWE-004 define the canonical public
-models and naming before those contracts are implemented.
-
-## Storage and API rules
-
-- The core and core npm/WASM package must not link a database.
-- Persistence adapters are post-v0.1 optional packages unless a specific issue
-  explicitly changes their schedule.
-- An optional SQLite adapter must use prepared statements and bound parameters.
-- Released adapter migrations are immutable and forward-only.
-- Prefer narrow adapter capabilities and concrete implementations.
-- Do not create a broad runtime-polymorphic repository framework.
-- Implement and stabilize the typed Zig API before adapting it to the C ABI.
-- Do not expose private core representations through a public API.
-- Authoritative measurements use exact decimal values and explicit unit codes,
-  not floating-point values.
-- Material recommendation decisions include structured explanation codes.
-
-## Scope constraints
-
-Do not add the following unless the current issue explicitly requires it:
-
-- Tracker application
-- CLI as a product
-- Mobile, desktop, or web frontend
-- Hosted HTTP service
-- User accounts, authentication, or cloud synchronization
-- Required persistence or persistence inside the core
-- Event sourcing
-- Full periodization or long-term calendar generation
-- Cardio or mobility programming
-- Muscle recovery or fatigue modeling beyond explicit v0.1 inputs
-- HealthKit or Health Connect integration
-- Comprehensive exercise database
-- Arbitrary runtime plugins or a methodology bytecode/DSL
-- AI/LLM-generated recommendations
-- Medical or rehabilitation logic
-
-Do not build speculative abstractions solely for future capabilities.
-
-## Implementation prerequisites
-
-Follow the issue order and acceptance criteria in `docs/implementation-plan.md`.
-In particular:
-
-- CWE-001 establishes current product positioning.
-- CWE-002 defines and reviews the canonical v0 request/result model before code
-  implements that model.
-- CWE-003 defines the npm-first quickstart as an executable documentation target.
-- CWE-004 defines stable issue and explanation conventions.
-- CWE-010 is the first code implementation issue.
-
-Do not invent the unresolved public API, schemas, or issue catalog as part of an
-unrelated scaffolding task. If a prerequisite is incomplete and materially
-blocks the requested issue, report it and complete only when it is in scope.
-
-## Implementation workflow
-
-For every task:
-
-1. Read the relevant ADRs, plan sections, and neighboring code.
-2. Inspect the current Git status.
-3. State a concise implementation plan before editing.
-4. Identify conflicts or ambiguity that materially affect correctness.
-5. Implement only the requested issue.
-6. Add tests for new behavior.
-7. Run formatting and all relevant tests.
-8. Inspect the final diff for unrelated changes.
-9. Report:
-   - Summary
-   - Files changed
-   - Tests and exact commands run
-   - Public API or schema changes
-   - Architectural decisions
-   - Known limitations
-
-Do not modify unrelated files.
-
-Do not add a production dependency without explaining its purpose, license, and
-why the standard library or a direct implementation is insufficient.
-
-Do not commit, push, create branches, rewrite Git history, or open pull requests
-unless the user explicitly requests it.
-
-## Required checks
-
-The canonical hierarchy is:
-
-```bash
-zig build check-fast   # short local loop
-zig build check        # pull-request and pre-merge source of truth
-zig build check-release # release-only metadata and compatibility additions
-```
-
-The individual leaf targets remain useful for focused development. Run the
-strongest applicable command after changes. The build system also provides
-`zig build clean` and `zig build clean-all` for generated output.
-
-The canonical checks include:
-
-```bash
-zig build check
-zig build check-release
-zig fmt --check .
-git diff --check
-```
-
-Deep validation also includes bounded fuzz and mutation smoke tests through
-`zig build check-release`. Full fuzz targets and the curated mutation suite are
-manual targets (`zig build fuzz-json`, `zig build mutation-test`) and must not
-be added to the ordinary fast or pull-request path. Fuzz inputs and mutation
-workspaces must remain bounded and reproducible. Surviving actionable mutants
-require investigation and must not be automatically suppressed as equivalent;
-equivalence declarations require a checked-in reason.
-
-`zig build check` is the CI source of truth. Use commands that actually exist
-in the repository, and do not claim a check passed unless it ran successfully.
-
-For documentation-only tasks before the Zig build exists, run applicable
-read-only link/path checks and `git diff --check`.
-
-## Task sizing
-
-Work on one independently testable issue at a time.
-
-Do not implement an entire epic or the complete implementation plan in one task.
-
-Prefer the smallest coherent change that satisfies the current acceptance
-criteria. Do not create empty directories merely to match the proposed final
-repository tree.
+Accepted architectural decisions are in `docs/adr/`; public contracts are in
+`docs/contracts/`; repository setup/testing/release guidance is under `docs/`.
+When those sources conflict with historical notes, report the conflict and
+follow the current code, tests, and accepted decisions.

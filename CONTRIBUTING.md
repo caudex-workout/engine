@@ -1,9 +1,9 @@
 # Contributing to Caudex
 
 Caudex is a deterministic, explainable library. The core owns calculation;
-hosts own persistence, lifecycle, and acceptance of proposals. Read
-`AGENTS.md` and the accepted ADRs before making architectural or public-contract
-changes.
+hosts own persistence, lifecycle, and acceptance of proposals. Read the root
+`AGENTS.md`, the closest applicable nested `AGENTS.md`, and the accepted ADRs
+before making architectural or public-contract changes.
 
 ## Start here
 
