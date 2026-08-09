@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
 import {
   chmod,
   cp,
@@ -13,6 +12,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
+import { compilerLinkerTimeoutMs, run as runProcess } from "./subprocess.mjs";
 
 const matrix = [
   { target: "x86_64-linux-gnu", os: "linux", arch: "x86_64" },
@@ -34,7 +34,7 @@ if (selected.length !== 1 && hostOnly) {
 await rm(outputRoot, { recursive: true, force: true });
 await mkdir(outputRoot, { recursive: true });
 
-const zigVersion = run("zig", ["version"], undefined, true).stdout.trim();
+const zigVersion = run("zig", ["version"]).stdout.trim();
 const packageManifest = await readFile(resolve("build.zig.zon"), "utf8");
 const packageVersion = packageManifest.match(/\.version = "([^"]+)"/)?.[1];
 const engineSource = await readFile(resolve("src/engine.zig"), "utf8");
@@ -180,7 +180,12 @@ function buildLibrary(target, linkage, output, importLibrary) {
     args.push("-install_name", "@rpath/libcaudex.dylib");
   }
   if (importLibrary) args.push(`-femit-implib=${importLibrary}`);
-  run("zig", args);
+  run("zig", args, {
+    timeoutMs: compilerLinkerTimeoutMs,
+    operation: "compiler invocation",
+    platform: targetPlatform(target),
+    context: `target: ${target}\nlink mode: ${linkage}`,
+  });
 }
 
 async function normalizeDarwinArchive(archive) {
@@ -188,7 +193,7 @@ async function normalizeDarwinArchive(archive) {
   // Apple ld64 also requires 64-bit Mach-O archive members to use Darwin alignment,
   // so rebuild macOS archives before checksums, packaging, and native-link tests.
   const originalMembers = archiveMemberNames(
-    run("zig", ["ar", "t", archive], undefined, true).stdout,
+    run("zig", ["ar", "t", archive]).stdout,
   );
   const objectMembers = originalMembers.filter(
     (member) => !member.startsWith("__.SYMDEF"),
@@ -236,7 +241,7 @@ async function normalizeDarwinArchive(archive) {
       ...expectedMembers.map((member) => join(membersDirectory, member)),
     ]);
     const normalizedMembers = archiveMemberNames(
-      run("zig", ["ar", "t", replacement], undefined, true).stdout,
+      run("zig", ["ar", "t", replacement]).stdout,
     ).filter((member) => !member.startsWith("__.SYMDEF"));
     if (
       normalizedMembers.length !== expectedMembers.length ||
@@ -335,7 +340,12 @@ async function testLinks(entry, directory, names, execute) {
     if (linkage === "shared" && entry.os !== "windows") {
       args.push(`-Wl,-rpath,${library}`);
     }
-    run("zig", args);
+    run("zig", args, {
+      timeoutMs: compilerLinkerTimeoutMs,
+      operation: "compiler invocation",
+      platform: platformLabel(entry),
+      context: `target: ${entry.target}\nlink mode: ${linkage}`,
+    });
     if (execute) {
       const environment = { ...process.env };
       if (entry.os === "linux") environment.LD_LIBRARY_PATH = library;
@@ -343,7 +353,7 @@ async function testLinks(entry, directory, names, execute) {
       if (entry.os === "windows") {
         environment.PATH = `${library};${environment.PATH ?? ""}`;
       }
-      run(executable, [fixture], undefined, false, environment);
+      run(executable, [fixture], { env: environment });
     }
     await rm(executable, { force: true });
   }
@@ -374,13 +384,12 @@ async function testNativeCompiler(entry, directory, names) {
     if (entry.os === "linux") args.push("-lm");
     args.push("-O2", "-o", executable);
     if (linkage === "shared") args.push(`-Wl,-rpath,${library}`);
-    run(
-      compiler,
-      args,
-      undefined,
-      false,
-      process.env,
-      [
+    run(compiler, args, {
+      timeoutMs: compilerLinkerTimeoutMs,
+      operation: "compiler invocation",
+      platform: platformLabel(entry),
+      env: process.env,
+      context: [
         `target: ${entry.target}`,
         `host: ${process.platform}-${process.arch}`,
         `artifact: ${artifact}`,
@@ -390,11 +399,11 @@ async function testNativeCompiler(entry, directory, names) {
           ? ["archive normalization: applied before native-link validation"]
           : []),
       ].join("\n"),
-    );
+    });
     const environment = { ...process.env };
     if (entry.os === "linux") environment.LD_LIBRARY_PATH = library;
     if (entry.os === "macos") environment.DYLD_LIBRARY_PATH = library;
-    run(executable, [fixture], undefined, false, environment);
+    run(executable, [fixture], { env: environment });
     await rm(executable, { force: true });
   }
 }
@@ -411,6 +420,15 @@ function libraryNames(os) {
     static: "libcaudex.a",
     shared: os === "macos" ? "libcaudex.dylib" : "libcaudex.so",
   };
+}
+
+function platformLabel(entry) {
+  return `${entry.os}-${entry.arch}`;
+}
+
+function targetPlatform(target) {
+  const [arch, os] = target.split("-");
+  return `${os}-${arch}`;
 }
 
 function isHostTarget(entry) {
@@ -450,38 +468,6 @@ async function sha256(path) {
   return createHash("sha256").update(await readFile(path)).digest("hex");
 }
 
-function run(command, args, cwd, capture = false, env = process.env, context = "") {
-  const result = spawnSync(command, args, {
-    cwd,
-    env,
-    encoding: "utf8",
-    stdio: "pipe",
-    timeout: 120_000,
-  });
-  if (result.error || result.signal || result.status !== 0) {
-    throw new Error(
-      `${contract}: ${context ? `${context}\n` : ""}` +
-        `failed command:\n  ${shellCommand(command, args)}\n` +
-        `exit status:\n  ${result.status ?? "unknown"}${result.signal ? ` (${result.signal})` : ""}\n` +
-        (result.error ? `launcher error:\n  ${result.error.message}\n` : "") +
-        outputBlock("stdout", result.stdout) +
-        outputBlock("stderr", result.stderr),
-    );
-  }
-  return result;
-}
-
-function shellCommand(command, args) {
-  return [command, ...args].map((value) => {
-    if (/^[A-Za-z0-9_./:=+-]+$/.test(value)) return value;
-    return `'${value.replaceAll("'", "'\\''")}'`;
-  }).join(" ");
-}
-
-function outputBlock(label, value) {
-  const text = value ?? "";
-  if (text.length === 0) return `${label}:\n  <empty>\n`;
-  const maximum = 12000;
-  const bounded = text.length > maximum ? `${text.slice(0, maximum)}\n  [... output truncated at ${maximum} bytes]` : text;
-  return `${label}:\n${bounded}\n`;
+function run(command, args, options = {}) {
+  return runProcess(command, args, { contract, ...options });
 }

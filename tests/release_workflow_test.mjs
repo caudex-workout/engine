@@ -3,7 +3,57 @@ import { mkdtemp, cp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { releaseAssetManifest } from "../tools/release/artifact-manifest.mjs";
+import {
+  compilerLinkerTimeoutMs,
+  fastCommandTimeoutMs,
+  run,
+} from "../tools/release/subprocess.mjs";
 import { parseReleaseTag, validateRelease } from "../tools/release/validate-release.mjs";
+
+if (fastCommandTimeoutMs !== 120_000 || compilerLinkerTimeoutMs !== 300_000) {
+  throw new Error("release subprocess timeout categories changed unexpectedly");
+}
+if (fastCommandTimeoutMs >= compilerLinkerTimeoutMs) {
+  throw new Error("compiler/linker timeout must exceed fast command timeout");
+}
+
+try {
+  run(process.execPath, ["-e", "setTimeout(() => {}, 1000)"], {
+    timeoutMs: 20,
+    operation: "compiler invocation",
+    platform: "windows-x86_64",
+    contract: "C native-consumer compatibility",
+  });
+  throw new Error("timed-out compiler invocation unexpectedly succeeded");
+} catch (error) {
+  if (
+    !error.message.includes("C native-consumer compatibility: compiler invocation timed out") ||
+    !error.message.includes("platform:\n  windows-x86_64") ||
+    !error.message.includes("timeout:\n  0.02s") ||
+    !error.message.includes("spawnSync")
+  ) {
+    throw new Error(`compiler timeout diagnostics regressed:\n${error.message}`);
+  }
+}
+
+try {
+  run(process.execPath, ["-e", "console.error('compiler failed'); process.exit(3)"], {
+    timeoutMs: 1000,
+    operation: "compiler invocation",
+    platform: "windows-x86_64",
+    contract: "C native-consumer compatibility",
+  });
+  throw new Error("failed compiler invocation unexpectedly succeeded");
+} catch (error) {
+  if (
+    !error.message.includes("failed command:") ||
+    !error.message.includes("exit status:\n  3") ||
+    !error.message.includes("compiler failed") ||
+    error.message.includes("timed out")
+  ) {
+    throw new Error(`compiler failure diagnostics regressed:\n${error.message}`);
+  }
+}
 
 const workflow = await fs.readFile(".github/workflows/release.yml", "utf8");
 const parsed = [
