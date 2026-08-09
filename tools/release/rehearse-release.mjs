@@ -20,9 +20,17 @@ const pack = run("npm", [
   "--pack-destination",
   path.join(output, "npm"),
 ], false);
-const tarballName = JSON.parse(pack.stdout)[0].filename;
+const packManifest = JSON.parse(pack.stdout)[0];
+if (typeof packManifest.integrity !== "string") {
+  throw new Error("release rehearsal: npm pack did not report artifact integrity");
+}
+const tarballName = packManifest.filename;
 const tarball = path.join(output, "npm", tarballName);
-run("node", ["tests/npm_clean_smoke.mjs", "--tarball", tarball]);
+run("node", [
+  "tests/npm_clean_smoke.mjs",
+  "--tarball", tarball,
+  "--integrity", packManifest.integrity,
+]);
 run("npm", ["publish", tarball, "--dry-run", "--ignore-scripts", "--access", "public", "--tag", release.npmTag]);
 
 run("node", ["tools/release/build-zig-packages.mjs", path.join(output, "zig")]);

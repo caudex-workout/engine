@@ -77,6 +77,7 @@ for (const phrase of [
   "validate-release.mjs",
   "npm publish",
   "--dry-run",
+  "--integrity",
   "--provenance",
   "gh release create",
   "--draft",

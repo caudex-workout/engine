@@ -3,29 +3,41 @@ import {
   cp,
   mkdir,
   mkdtemp,
-  readdir,
+  readFile,
   rm,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { canonicalNpmArtifact } from "../tools/release/npm-artifact.mjs";
 
 const packageRoot = resolve("packages/npm/workout-engine");
 const contract = "npm clean-consumer packaging";
 const fixturePath = resolve("fixtures/requests/recommendation.json");
+const packageMetadata = JSON.parse(
+  await readFile(join(packageRoot, "package.json"), "utf8"),
+);
+const expectedArtifactFilename = `caudex-workout-engine-${packageMetadata.version}.tgz`;
 const keep = process.argv.includes("--keep");
 const suppliedTarballIndex = process.argv.indexOf("--tarball");
-const suppliedTarball = suppliedTarballIndex === -1 ? undefined : resolve(process.argv[suppliedTarballIndex + 1]);
-const temporary = await mkdtemp(join(tmpdir(), "caudex-npm-smoke-"));
+const suppliedIntegrityIndex = process.argv.indexOf("--integrity");
+const suppliedTarball = suppliedTarballIndex === -1
+  ? undefined
+  : resolve(process.argv[suppliedTarballIndex + 1]);
+const suppliedIntegrity = suppliedIntegrityIndex === -1
+  ? undefined
+  : process.argv[suppliedIntegrityIndex + 1];
+const temporary = await mkdtemp(join(tmpdir(), "caudex npm smoke-"));
 const packDirectory = join(temporary, "pack");
 const project = join(temporary, "project");
 await mkdir(packDirectory);
 await mkdir(project);
 
 try {
-  let tarball = suppliedTarball;
-  if (!tarball) {
-    run("npm", [
+  let artifactPath = suppliedTarball;
+  let artifactIntegrity = suppliedIntegrity;
+  if (!artifactPath) {
+    const packResult = run("npm", [
       "pack",
       "--json",
       "--ignore-scripts",
@@ -33,13 +45,33 @@ try {
       packDirectory,
       packageRoot,
     ], undefined, "pack engine package");
-    const [tarballName] = await readdir(packDirectory);
-    tarball = join(packDirectory, tarballName);
+    const [packManifest] = JSON.parse(packResult.stdout);
+    if (packManifest?.filename !== expectedArtifactFilename) {
+      throw new Error(
+        `${contract}: npm pack produced unexpected artifact filename: ` +
+          `${packManifest?.filename ?? "<missing>"}; expected ${expectedArtifactFilename}`,
+      );
+    }
+    if (typeof packManifest.integrity !== "string") {
+      throw new Error(`${contract}: npm pack did not report artifact integrity`);
+    }
+    artifactPath = join(packDirectory, packManifest.filename);
+    artifactIntegrity = packManifest.integrity;
   }
-  await writeFile(
-    join(project, "package.json"),
-    JSON.stringify({ private: true, type: "module" }),
+  const artifact = await canonicalNpmArtifact(
+    artifactPath,
+    expectedArtifactFilename,
+    artifactIntegrity,
   );
+  const consumerPackage = {
+    private: true,
+    type: "module",
+    dependencies: { [packageMetadata.name]: artifact.artifactFileUrl },
+  };
+  if (consumerPackage.dependencies[packageMetadata.name] !== artifact.artifactFileUrl) {
+    throw new Error(`${contract}: generated dependency did not retain the local file URL`);
+  }
+  await writeFile(join(project, "package.json"), JSON.stringify(consumerPackage));
   run(
     "npm",
     [
@@ -47,11 +79,36 @@ try {
       "--ignore-scripts",
       "--no-audit",
       "--no-fund",
-      tarball,
     ],
     project,
-    "install packed npm consumer dependencies",
+    "install exact packed artifact",
+    artifact,
   );
+  const consumerManifest = JSON.parse(
+    await readFile(join(project, "package.json"), "utf8"),
+  );
+  const dependencySpec = consumerManifest.dependencies?.[packageMetadata.name];
+  if (typeof dependencySpec !== "string" || !dependencySpec.startsWith("file:")) {
+    throw new Error(
+      `${contract}: npm rewrote the exact artifact dependency ambiguously: ` +
+        `${dependencySpec ?? "<missing>"}`,
+    );
+  }
+  const consumerLockfile = JSON.parse(
+    await readFile(join(project, "package-lock.json"), "utf8"),
+  );
+  const lockedPackage = consumerLockfile.packages?.[`node_modules/${packageMetadata.name}`];
+  if (typeof lockedPackage?.resolved !== "string" || !lockedPackage.resolved.startsWith("file:")) {
+    throw new Error(
+      `${contract}: package lock does not retain a local exact-artifact resolution`,
+    );
+  }
+  if (lockedPackage.version !== packageMetadata.version) {
+    throw new Error(
+      `${contract}: installed artifact version mismatch: ` +
+        `${lockedPackage.version ?? "<missing>"}; expected ${packageMetadata.version}`,
+    );
+  }
   await cp(fixturePath, join(project, "request.json"));
 
   await writeFile(
@@ -200,7 +257,8 @@ try {
 
   console.log(
     `${contract}: Node ESM, TypeScript 5.9, ` +
-      `Rollup 4.62; browser fixture ${browser}`,
+      `Rollup 4.62; artifact ${artifact.artifactPath}; ` +
+      `browser fixture ${browser}`,
   );
   if (keep) {
     console.log(`CAUDEX_BROWSER_FIXTURE=${browser}`);
@@ -209,13 +267,19 @@ try {
   if (!keep) await rm(temporary, { recursive: true, force: true });
 }
 
-function run(command, args, cwd = undefined, phase = "consumer command") {
+function run(
+  command,
+  args,
+  cwd = undefined,
+  phase = "consumer command",
+  artifact = undefined,
+) {
   const result = spawnSync(command, args, {
     cwd,
     encoding: "utf8",
     timeout: 30_000,
   });
-  if (result.status === 0) return;
+  if (result.status === 0) return result;
 
   const commandText = [command, ...args].map(shellQuote).join(" ");
   const details = [
@@ -226,6 +290,17 @@ function run(command, args, cwd = undefined, phase = "consumer command") {
   ];
   if (result.signal) details.push(`signal: ${result.signal}`);
   if (result.error) details.push(`launcher error: ${result.error.message}`);
+  if (artifact !== undefined) {
+    details.push(`artifact:\n  ${artifact.artifactPath}`);
+    details.push(`npm spec:\n  ${artifact.artifactFileUrl}`);
+    details.push(`fixture:\n  ${cwd ?? process.cwd()}`);
+    const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+    if (output.includes("git ls-remote") || output.includes("github.com")) {
+      details.push(
+        "invariant violation: npm attempted Git/GitHub resolution for the local release artifact",
+      );
+    }
+  }
   details.push(outputBlock("stdout", result.stdout));
   details.push(outputBlock("stderr", result.stderr));
   throw new Error(details.join("\n"));

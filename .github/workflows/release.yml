@@ -116,13 +116,14 @@ jobs:
           mkdir -p release
           zig build package-npm
           npm pack packages/npm/workout-engine --json --ignore-scripts --pack-destination release > release/pack.json
-          RELEASE_VERSION='${{ needs.validate.outputs.version }}' node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync("release/pack.json"))[0]; if (p.filename !== `caudex-workout-engine-${process.env.RELEASE_VERSION}.tgz`) throw new Error(`unexpected npm filename: ${p.filename}`)'
+          npm_integrity="$(RELEASE_VERSION='${{ needs.validate.outputs.version }}' node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync("release/pack.json"))[0]; if (p.filename !== `caudex-workout-engine-${process.env.RELEASE_VERSION}.tgz`) throw new Error(`unexpected npm filename: ${p.filename}`); if (typeof p.integrity !== "string") throw new Error("npm pack did not report artifact integrity"); process.stdout.write(p.integrity)')"
+          printf '%s\n' "$npm_integrity" > release/npm-integrity
       - name: Verify exact npm artifact and clean consumer
         shell: bash
         run: |
           set -euo pipefail
           tarball="release/caudex-workout-engine-${{ needs.validate.outputs.version }}.tgz"
-          node tests/npm_clean_smoke.mjs --tarball "$PWD/$tarball"
+          node tests/npm_clean_smoke.mjs --tarball "$PWD/$tarball" --integrity "$(cat release/npm-integrity)"
           npm publish "$tarball" --dry-run --ignore-scripts --access public --tag '${{ needs.validate.outputs.npm_tag }}'
       - name: Upload exact npm tarball
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
