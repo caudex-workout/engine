@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname "$0")/test_diagnostics.sh"
-test_diagnostics_init "CLI ergonomics"
+test_diagnostics_init "CLI ergonomics" "test-cli-ergonomics"
 
 cli=$1
 temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/caudex-cli-ergonomics.XXXXXX")
@@ -25,36 +25,54 @@ case "$(uname -s)" in
 esac
 
 if [[ "$expected" == "$home/.local/share/caudex/config" ]]; then
-  path=$(HOME="$home" env -u XDG_DATA_HOME "$cli" config path)
+  test_diagnostics_run_capture "config path" env -u XDG_DATA_HOME HOME="$home" "$cli" config path
 else
-  path=$(HOME="$home" LOCALAPPDATA="${local_app_data:-}" env -u XDG_DATA_HOME "$cli" config path)
+  test_diagnostics_run_capture "config path" env -u XDG_DATA_HOME HOME="$home" LOCALAPPDATA="${local_app_data:-}" "$cli" config path
 fi
+test_diagnostics_assert_status "config path" 0 "$test_diagnostics_last_status"
+path=$test_diagnostics_last_stdout
 test_diagnostics_assert_equal "config path" "$expected" "$path"
-test ! -e "${home}/.local/share/caudex/caudex.sqlite"
-test ! -e "$home/Library/Application Support/Caudex/caudex.sqlite"
+test_diagnostics_assert_not_exists "config path database side effect" "${home}/.local/share/caudex/caudex.sqlite"
+test_diagnostics_assert_not_exists "config path database side effect" "$home/Library/Application Support/Caudex/caudex.sqlite"
 
 xdg_home="$temporary_directory/xdg-data"
 if [[ "$expected" == "$home/.local/share/caudex/config" ]]; then
-  xdg_path=$(HOME="$home" XDG_DATA_HOME="$xdg_home" "$cli" config path)
+  test_diagnostics_run_capture "XDG config path" env HOME="$home" XDG_DATA_HOME="$xdg_home" "$cli" config path
+  test_diagnostics_assert_status "XDG config path" 0 "$test_diagnostics_last_status"
+  xdg_path=$test_diagnostics_last_stdout
   test_diagnostics_assert_equal "XDG config path" "$xdg_home/caudex/config" "$xdg_path"
-  test ! -e "$xdg_home/caudex/caudex.sqlite"
+  test_diagnostics_assert_not_exists "XDG config path database side effect" "$xdg_home/caudex/caudex.sqlite"
 fi
 
 if [[ "$expected" == "$home/.local/share/caudex/config" ]]; then
-  HOME="$home" env -u XDG_DATA_HOME "$cli" config set color never >/dev/null
-  shown=$(HOME="$home" env -u XDG_DATA_HOME "$cli" config show)
+  test_diagnostics_run_capture "set config color" env -u XDG_DATA_HOME HOME="$home" "$cli" config set color never
 else
-  HOME="$home" LOCALAPPDATA="${local_app_data:-}" env -u XDG_DATA_HOME "$cli" config set color never >/dev/null
-  shown=$(HOME="$home" LOCALAPPDATA="${local_app_data:-}" env -u XDG_DATA_HOME "$cli" config show)
+  test_diagnostics_run_capture "set config color" env -u XDG_DATA_HOME HOME="$home" LOCALAPPDATA="${local_app_data:-}" "$cli" config set color never
 fi
-grep -q '^color=never$' <<<"$shown"
-grep -q '^table=compact$' <<<"$shown"
+test_diagnostics_assert_status "set config color" 0 "$test_diagnostics_last_status"
 
-help=$(HOME="$home" "$cli" history --help)
-grep -q 'history correct-set' <<<"$help"
+if [[ "$expected" == "$home/.local/share/caudex/config" ]]; then
+  test_diagnostics_run_capture "show config" env -u XDG_DATA_HOME HOME="$home" "$cli" config show
+else
+  test_diagnostics_run_capture "show config" env -u XDG_DATA_HOME HOME="$home" LOCALAPPDATA="${local_app_data:-}" "$cli" config show
+fi
+test_diagnostics_assert_status "show config" 0 "$test_diagnostics_last_status"
+shown=$test_diagnostics_last_stdout
+test_diagnostics_assert_contains "config color" 'color=never' "$shown"
+test_diagnostics_assert_contains "config table" 'table=compact' "$shown"
+
+test_diagnostics_run_capture "history help" env HOME="$home" "$cli" history --help
+test_diagnostics_assert_status "history help" 0 "$test_diagnostics_last_status"
+help=$test_diagnostics_last_stdout
+test_diagnostics_assert_contains "history help command" 'history correct-set' "$help"
 help_database="$temporary_directory/missing-parent/database.sqlite"
-help_with_missing_database=$(HOME="$home" "$cli" --database "$help_database" history --help)
-grep -q 'history correct-set' <<<"$help_with_missing_database"
-test ! -e "$help_database"
-alias_output=$("$cli" --database :memory: e list --limit 1)
-test "$alias_output" = 'No exercises.'
+test_diagnostics_run_capture "history help with missing database" env HOME="$home" "$cli" --database "$help_database" history --help
+test_diagnostics_assert_status "history help with missing database" 0 "$test_diagnostics_last_status"
+help_with_missing_database=$test_diagnostics_last_stdout
+test_diagnostics_assert_contains "history help with missing database" 'history correct-set' "$help_with_missing_database"
+test_diagnostics_assert_not_exists "history help database side effect" "$help_database"
+
+test_diagnostics_run_capture "exercise alias" "$cli" --database :memory: e list --limit 1
+test_diagnostics_assert_status "exercise alias" 0 "$test_diagnostics_last_status"
+alias_output=$test_diagnostics_last_stdout
+test_diagnostics_assert_equal "exercise alias output" 'No exercises.' "$alias_output"

@@ -967,7 +967,7 @@ pub fn build(b: *std.Build) void {
     cli_set_commands_test.addArtifactArg(cli);
     cli_set_commands_test.addArtifactArg(cli_catalog_seed);
 
-    const cli_workout_end_test = namedSystemCommand(b, "CLI workout end", &.{
+    const cli_workout_end_test = namedSystemCommand(b, "CLI workout completion", &.{
         "bash",
         "tests/cli_workout_end_test.sh",
     });
@@ -1034,6 +1034,24 @@ pub fn build(b: *std.Build) void {
         "tests/private_import_boundary_test.mjs",
     });
     private_import_check.addFileArg(private_import_probe);
+
+    const cli_workout_end_step = b.step(
+        "test-cli-workout-end",
+        "Run the CLI workout completion and cancellation contract",
+    );
+    cli_workout_end_step.dependOn(&cli_workout_end_test.step);
+
+    const cli_history_step = b.step(
+        "test-cli-history",
+        "Run the CLI completed-workout history contract",
+    );
+    cli_history_step.dependOn(&cli_history_commands_test.step);
+
+    const cli_ergonomics_step = b.step(
+        "test-cli-ergonomics",
+        "Run the CLI path, configuration, help, and alias ergonomics contract",
+    );
+    cli_ergonomics_step.dependOn(&cli_ergonomics_test.step);
 
     const cli_test_step = b.step("test-caudex-cli", "Test the caudex reference client");
     cli_test_step.dependOn(&run_cli_tests.step);

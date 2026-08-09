@@ -30,7 +30,7 @@ await mkdir(packDirectory);
 await mkdir(project);
 
 try {
-  for (const root of Object.values(roots)) {
+  for (const [packageName, root] of Object.entries(roots)) {
     run("npm", [
       "pack",
       "--json",
@@ -38,7 +38,7 @@ try {
       "--pack-destination",
       packDirectory,
       root,
-    ]);
+    ], undefined, `pack ${packageName}`);
   }
   const tarballs = (await readdir(packDirectory))
     .map((name) => join(packDirectory, name));
@@ -56,7 +56,7 @@ try {
     "--no-audit",
     "--no-fund",
     ...tarballs,
-  ], project);
+  ], project, "install packed consumer dependencies");
   await writeFile(
     join(project, "runtime-smoke.mjs"),
     `import {
@@ -69,7 +69,7 @@ if (INDEXEDDB_SCHEMA_VERSION !== 4 ||
 }
 `,
   );
-  run(process.execPath, ["runtime-smoke.mjs"], project);
+  run(process.execPath, ["runtime-smoke.mjs"], project, "run consumer runtime smoke");
   await writeFile(
     join(project, "smoke.ts"),
     `import {
@@ -112,7 +112,7 @@ void portable;
     join(project, "node_modules/typescript/bin/tsc"),
     "--project",
     join(project, "tsconfig.json"),
-  ]);
+  ], undefined, "typecheck consumer project");
   console.log(
     `${contract}: packed peers and DOM types passed`,
   );
@@ -120,26 +120,37 @@ void portable;
   await rm(temporary, { recursive: true, force: true });
 }
 
-function run(command, args, cwd = undefined) {
+function run(command, args, cwd = undefined, phase = "subprocess") {
   const result = spawnSync(command, args, {
     cwd,
     encoding: "utf8",
-    stdio: "inherit",
+    stdio: "pipe",
     timeout: 30_000,
   });
-  if (result.error) {
+  const commandLine = [command, ...args].map(shellQuote).join(" ");
+  if (result.error || result.signal || result.status !== 0) {
     throw new Error(
-      `${contract}: ${command} ${args.join(" ")} could not start: ${result.error.message}`,
+      `${contract}: ${phase} failed\n` +
+        `package: @caudex-workout/persistence-indexeddb\n` +
+        `project: ${project}\n` +
+        `command:\n  ${commandLine}\n` +
+        `exit status: ${result.status ?? "unknown"}${result.signal ? ` (${result.signal})` : ""}\n` +
+        (result.error ? `launcher error: ${result.error.message}\n` : "") +
+        outputBlock("stdout", result.stdout) +
+        outputBlock("stderr", result.stderr),
     );
   }
-  if (result.signal) {
-    throw new Error(
-      `${contract}: ${command} ${args.join(" ")} terminated with ${result.signal}`,
-    );
-  }
-  if (result.status !== 0) {
-    throw new Error(
-      `${contract}: ${command} ${args.join(" ")} failed with status ${result.status}`,
-    );
-  }
+}
+
+function shellQuote(value) {
+  if (/^[A-Za-z0-9_./:=+-]+$/.test(value)) return value;
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function outputBlock(label, value) {
+  const text = value ?? "";
+  if (text.length === 0) return `${label}:\n  <empty>\n`;
+  const maximum = 12000;
+  const bounded = text.length > maximum ? `${text.slice(0, maximum)}\n  [... output truncated at ${maximum} bytes]` : text;
+  return `${label}:\n${bounded}\n`;
 }

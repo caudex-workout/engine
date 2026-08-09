@@ -383,9 +383,13 @@ async function testNativeCompiler(entry, directory, names) {
       process.env,
       [
         `target: ${entry.target}`,
+        `host: ${process.platform}-${process.arch}`,
         `artifact: ${artifact}`,
         `compiler: ${compiler}`,
         `link mode: ${linkage} library into native executable`,
+        ...(entry.os === "macos" && linkage === "static"
+          ? ["archive normalization: applied before native-link validation"]
+          : []),
       ].join("\n"),
     );
     const environment = { ...process.env };
@@ -457,12 +461,28 @@ function run(command, args, cwd, capture = false, env = process.env, context = "
   });
   if (result.error || result.signal || result.status !== 0) {
     throw new Error(
-        `${contract}: ${context ? `${context}\n` : ""}` +
-        `failed command: ${basename(command)} ${args.join(" ")}\n` +
-        `exit: ${result.status ?? "unknown"}${result.signal ? ` (${result.signal})` : ""}\n` +
-        (result.error ? `launcher error: ${result.error.message}\n` : "") +
-        `${result.stdout ?? ""}${result.stderr ?? ""}`,
+      `${contract}: ${context ? `${context}\n` : ""}` +
+        `failed command:\n  ${shellCommand(command, args)}\n` +
+        `exit status:\n  ${result.status ?? "unknown"}${result.signal ? ` (${result.signal})` : ""}\n` +
+        (result.error ? `launcher error:\n  ${result.error.message}\n` : "") +
+        outputBlock("stdout", result.stdout) +
+        outputBlock("stderr", result.stderr),
     );
   }
   return result;
+}
+
+function shellCommand(command, args) {
+  return [command, ...args].map((value) => {
+    if (/^[A-Za-z0-9_./:=+-]+$/.test(value)) return value;
+    return `'${value.replaceAll("'", "'\\''")}'`;
+  }).join(" ");
+}
+
+function outputBlock(label, value) {
+  const text = value ?? "";
+  if (text.length === 0) return `${label}:\n  <empty>\n`;
+  const maximum = 12000;
+  const bounded = text.length > maximum ? `${text.slice(0, maximum)}\n  [... output truncated at ${maximum} bytes]` : text;
+  return `${label}:\n${bounded}\n`;
 }

@@ -32,7 +32,7 @@ try {
       "--pack-destination",
       packDirectory,
       packageRoot,
-    ]);
+    ], undefined, "pack engine package");
     const [tarballName] = await readdir(packDirectory);
     tarball = join(packDirectory, tarballName);
   }
@@ -50,6 +50,7 @@ try {
       tarball,
     ],
     project,
+    "install packed npm consumer dependencies",
   );
   await cp(fixturePath, join(project, "request.json"));
 
@@ -82,7 +83,7 @@ if (discoverySchema.$id !== "https://caudex.dev/schemas/discovery/v1/discovery.s
 }
 `,
   );
-  run(process.execPath, ["node-smoke.mjs"], project);
+  run(process.execPath, ["node-smoke.mjs"], project, "run npm consumer runtime smoke");
 
   await writeFile(
     join(project, "smoke.ts"),
@@ -145,7 +146,7 @@ void check;
     resolve(packageRoot, "node_modules/typescript/bin/tsc"),
     "--project",
     join(project, "tsconfig.json"),
-  ]);
+  ], undefined, "typecheck npm consumer project");
 
   const browser = join(project, "browser");
   await mkdir(join(browser, "dist"), { recursive: true });
@@ -195,7 +196,7 @@ try {
     "esm",
     "--file",
     join(browser, "dist/app.js"),
-  ]);
+  ], undefined, "bundle npm browser consumer");
 
   console.log(
     `${contract}: Node ESM, TypeScript 5.9, ` +
@@ -208,17 +209,37 @@ try {
   if (!keep) await rm(temporary, { recursive: true, force: true });
 }
 
-function run(command, args, cwd = undefined) {
+function run(command, args, cwd = undefined, phase = "consumer command") {
   const result = spawnSync(command, args, {
     cwd,
     encoding: "utf8",
-    stdio: "inherit",
     timeout: 30_000,
   });
-  if (result.status !== 0) {
-    throw new Error(
-      `${contract}: ${command} ${args.join(" ")} failed with status ${result.status}` +
-        (result.error ? `: ${result.error.message}` : ""),
-    );
-  }
+  if (result.status === 0) return;
+
+  const commandText = [command, ...args].map(shellQuote).join(" ");
+  const details = [
+    `${contract}: ${phase} failed`,
+    `project: ${cwd ?? process.cwd()}`,
+    `command: ${commandText}`,
+    `exit status: ${result.status ?? "not available"}`,
+  ];
+  if (result.signal) details.push(`signal: ${result.signal}`);
+  if (result.error) details.push(`launcher error: ${result.error.message}`);
+  details.push(outputBlock("stdout", result.stdout));
+  details.push(outputBlock("stderr", result.stderr));
+  throw new Error(details.join("\n"));
+}
+
+function shellQuote(value) {
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) return value;
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function outputBlock(label, value) {
+  const text = value?.trimEnd() ?? "";
+  const maximum = 12_000;
+  if (text.length === 0) return `${label}: <empty>`;
+  if (text.length <= maximum) return `${label}:\n${text}`;
+  return `${label}:\n${text.slice(0, maximum)}\n[... ${label} truncated at ${maximum} bytes]`;
 }

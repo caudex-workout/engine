@@ -12,7 +12,14 @@ console.log("[zig-package-consumer] running");
 
 try {
   const generated = spawnSync("node", [join(root, "tools/release/build-zig-packages.mjs"), packaged], { encoding: "utf8" });
-  if (generated.status !== 0) throw new Error(`Zig package consumer: package generation failed\n${generated.stdout}${generated.stderr}`);
+  if (generated.status !== 0) {
+    throw new Error(
+      `Zig package consumer: package generation failed\n` +
+        `command:\n  ${shellCommand("node", [join(root, "tools/release/build-zig-packages.mjs"), packaged])}\n` +
+        outputBlock("stdout", generated.stdout) +
+        outputBlock("stderr", generated.stderr),
+    );
+  }
 
   for (const name of ["core", "sqlite", "exercise-catalog", "cli"]) {
     runZigBuild(join(packaged, name), ["build"], cache, globalCache);
@@ -74,15 +81,16 @@ pub fn main() void { std.debug.print("{d} {d} {d} {d}\\n", .{ caudex.engine.sche
 }
 
 function runZigBuild(cwd, args, cacheDirectory, globalCacheDirectory) {
+  const commandArgs = [
+    ...args,
+    "--cache-dir",
+    cacheDirectory,
+    "--global-cache-dir",
+    globalCacheDirectory,
+  ];
   const result = spawnSync(
     "zig",
-    [
-      ...args,
-      "--cache-dir",
-      cacheDirectory,
-      "--global-cache-dir",
-      globalCacheDirectory,
-    ],
+    commandArgs,
     {
       cwd,
       encoding: "utf8",
@@ -90,10 +98,31 @@ function runZigBuild(cwd, args, cacheDirectory, globalCacheDirectory) {
       timeout: 30_000,
     },
   );
-  if (result.status !== 0) {
+  if (result.error || result.signal || result.status !== 0) {
     throw new Error(
-      `Zig package consumer: clean Zig build failed (${result.status})\n${result.stdout}${result.stderr}`,
+      `Zig package consumer: clean Zig build failed\n` +
+        `project: ${cwd}\n` +
+        `command:\n  ${shellCommand("zig", commandArgs)}\n` +
+        `exit status: ${result.status ?? "unknown"}${result.signal ? ` (${result.signal})` : ""}\n` +
+        (result.error ? `launcher error: ${result.error.message}\n` : "") +
+        outputBlock("stdout", result.stdout) +
+        outputBlock("stderr", result.stderr),
     );
   }
   return result;
+}
+
+function shellCommand(command, args) {
+  return [command, ...args].map((value) => {
+    if (/^[A-Za-z0-9_./:=+-]+$/.test(value)) return value;
+    return `'${value.replaceAll("'", "'\\''")}'`;
+  }).join(" ");
+}
+
+function outputBlock(label, value) {
+  const text = value ?? "";
+  if (text.length === 0) return `${label}:\n  <empty>\n`;
+  const maximum = 12000;
+  const bounded = text.length > maximum ? `${text.slice(0, maximum)}\n  [... output truncated at ${maximum} bytes]` : text;
+  return `${label}:\n${bounded}\n`;
 }
