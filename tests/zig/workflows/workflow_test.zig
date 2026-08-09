@@ -2,6 +2,7 @@ const std = @import("std");
 const caudex = @import("caudex");
 const tracking = @import("caudex_tracking");
 const workflows = @import("caudex_workflows");
+const assets = @import("repository_test_assets");
 
 const timestamp: tracking.Timestamp = .{ .bytes = "2026-08-04T12:00:00Z" };
 const scope: tracking.Scope = .{ .host_scope_key = .{ .bytes = "scope-1" } };
@@ -106,7 +107,7 @@ test "template instantiation remains distinct from recommendation state" {
 test "template canonical document round trips exact values" {
     const parsed = try workflows.decodeTemplateDocument(
         std.testing.allocator,
-        @embedFile("fixtures/templates/squat-day-v1.json"),
+        assets.squat_day,
         .{},
     );
     defer parsed.deinit();
@@ -123,7 +124,7 @@ test "template canonical document round trips exact values" {
     var wire_tags: [2][]const u8 = undefined;
     const document = try workflows.templateFromDomain(template, .{ .exercises = &wire_exercises, .sets = &wire_sets, .metrics = &wire_metrics, .amount_bytes = &amounts, .tags = &wire_tags });
     var encoded: [4096]u8 = undefined;
-    try std.testing.expectEqualStrings(std.mem.trimEnd(u8, @embedFile("fixtures/templates/squat-day-v1.json"), "\r\n"), try workflows.encodeTemplateDocument(document, &encoded));
+    try std.testing.expectEqualStrings(std.mem.trimEnd(u8, assets.squat_day, "\r\n"), try workflows.encodeTemplateDocument(document, &encoded));
 }
 
 test "completed tracked workout converts to canonical evaluation input without changing prescription" {

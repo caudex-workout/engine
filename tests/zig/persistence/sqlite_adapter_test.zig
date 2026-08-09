@@ -1,6 +1,7 @@
 const std = @import("std");
 const persistence = @import("caudex_persistence");
 const sqlite = @import("caudex_sqlite");
+const assets = @import("repository_test_assets");
 const c = @cImport({
     @cInclude("sqlite3.h");
 });
@@ -282,7 +283,7 @@ test "portable data dry-runs and round trips across independent SQLite databases
 }
 
 test "shared portable fixture preserves canonical meaning in SQLite" {
-    const fixture = @embedFile("fixtures/portable/export-v1.json");
+    const fixture = assets.portable_export;
     const parsed = try persistence.portable.decodeDocument(std.testing.allocator, fixture);
     defer parsed.deinit();
     const adapter = try sqlite.openInMemory(.{});
@@ -317,7 +318,7 @@ test "schema version one migrates forward to current metadata" {
         );
         try execRaw(
             database,
-            @embedFile("adapters/sqlite/migrations/001_initial.sql"),
+            assets.sqlite_migration,
         );
         try execRaw(
             database,

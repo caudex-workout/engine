@@ -1,5 +1,6 @@
 const std = @import("std");
 const caudex = @import("caudex");
+const assets = @import("repository_test_assets");
 
 test "public root exports are intentional" {
     const declarations = std.meta.declarations(caudex);
@@ -24,22 +25,10 @@ test "public root exports are intentional" {
 
 test "core source has no forbidden effect or dependency imports" {
     const sources = .{
-        @embedFile("src/root.zig"),
-        @embedFile("src/canonical.zig"),
-        @embedFile("src/canonical_json.zig"),
-        @embedFile("src/diagnostics.zig"),
-        @embedFile("src/discovery.zig"),
-        @embedFile("src/double_progression.zig"),
-        @embedFile("src/duration.zig"),
-        @embedFile("src/engine.zig"),
-        @embedFile("src/filtering.zig"),
-        @embedFile("src/history.zig"),
-        @embedFile("src/load_math.zig"),
-        @embedFile("src/methodology.zig"),
-        @embedFile("src/ordering.zig"),
-        @embedFile("src/primitives.zig"),
-        @embedFile("src/rpe_top_set_backoff.zig"),
-        @embedFile("src/training.zig"),
+        assets.src_root,      assets.src_canonical,          assets.src_canonical_json,      assets.src_diagnostics,
+        assets.src_discovery, assets.src_double_progression, assets.src_duration,            assets.src_engine,
+        assets.src_filtering, assets.src_history,            assets.src_load_math,           assets.src_methodology,
+        assets.src_ordering,  assets.src_primitives,         assets.src_rpe_top_set_backoff, assets.src_training,
     };
     const forbidden = .{
         "std.fs",
@@ -67,7 +56,7 @@ test "core source has no forbidden effect or dependency imports" {
 }
 
 test "core npm package has no persistence adapter dependency" {
-    const manifest = @embedFile("packages/npm/workout-engine/package.json");
+    const manifest = assets.manifest;
     try std.testing.expect(
         std.mem.indexOf(u8, manifest, "@caudex-workout/persistence") == null,
     );

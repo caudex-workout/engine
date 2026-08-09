@@ -1,8 +1,9 @@
 const std = @import("std");
 const portable = @import("caudex_portable");
+const assets = @import("repository_test_assets");
 
 test "portable fixture preserves exact decimals and deterministic bytes" {
-    const fixture = @embedFile("fixtures/portable/export-v1.json");
+    const fixture = assets.portable_export;
     const parsed = try portable.decodeDocument(std.testing.allocator, fixture);
     defer parsed.deinit();
     try std.testing.expectEqualStrings("185.00", parsed.value.completedWorkouts[0].workout.exercises[0].sets[0].actualMetrics[0].value.amount);
@@ -56,7 +57,7 @@ test "portable validation returns structured duplicate and reference issues" {
 }
 
 test "portable protocol rejects unsupported versions and byte limits" {
-    const fixture = @embedFile("fixtures/portable/export-v1.json");
+    const fixture = assets.portable_export;
     var unsupported = try std.testing.allocator.dupe(u8, fixture);
     defer std.testing.allocator.free(unsupported);
     unsupported[17] = '2';

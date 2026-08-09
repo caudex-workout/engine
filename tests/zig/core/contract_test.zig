@@ -1,5 +1,6 @@
 const std = @import("std");
 const caudex = @import("caudex");
+const assets = @import("repository_test_assets");
 const canonical = caudex.canonical;
 const diagnostics = caudex.diagnostics;
 const engine = caudex.engine;
@@ -42,8 +43,8 @@ const ConformanceSuite = struct {
 
 test "canonical request fixtures decode" {
     inline for (.{
-        .{ canonical.RecommendationRequest, @embedFile("fixtures/requests/recommendation.json") },
-        .{ canonical.EvaluationRequest, @embedFile("fixtures/requests/evaluation.json") },
+        .{ canonical.RecommendationRequest, assets.recommendation_request },
+        .{ canonical.EvaluationRequest, assets.evaluation_request },
     }) |fixture| {
         const parsed = try std.json.parseFromSlice(
             fixture[0],
@@ -59,11 +60,8 @@ test "canonical request fixtures decode" {
 
 test "canonical schemas are valid JSON documents" {
     inline for (.{
-        @embedFile("schemas/v0/canonical.schema.json"),
-        @embedFile("schemas/v0/recommendation-request.schema.json"),
-        @embedFile("schemas/v0/evaluation-request.schema.json"),
-        @embedFile("schemas/v0/recommendation-result.schema.json"),
-        @embedFile("schemas/v0/evaluation-result.schema.json"),
+        assets.canonical_schema,             assets.recommendation_schema,    assets.evaluation_schema,
+        assets.recommendation_result_schema, assets.evaluation_result_schema,
     }) |schema| {
         const parsed = try std.json.parseFromSlice(
             std.json.Value,
@@ -81,11 +79,11 @@ test "double-progression config and state fixtures decode" {
     inline for (.{
         .{
             caudex.double_progression.Config,
-            @embedFile("fixtures/methodologies/double-progression-config-v1.json"),
+            assets.double_progression_config,
         },
         .{
             caudex.double_progression.State,
-            @embedFile("fixtures/methodologies/double-progression-state-v1.json"),
+            assets.double_progression_state,
         },
     }) |fixture| {
         const parsed = try std.json.parseFromSlice(
@@ -100,8 +98,7 @@ test "double-progression config and state fixtures decode" {
 
 test "double-progression schemas are valid JSON documents" {
     inline for (.{
-        @embedFile("schemas/methodologies/double-progression-config-v1.schema.json"),
-        @embedFile("schemas/methodologies/double-progression-state-v1.schema.json"),
+        assets.double_progression_config_schema, assets.double_progression_state_schema,
     }) |schema| {
         const parsed = try std.json.parseFromSlice(
             std.json.Value,
@@ -118,11 +115,11 @@ test "RPE top-set/backoff config and state fixtures decode" {
     inline for (.{
         .{
             caudex.rpe_top_set_backoff.Config,
-            @embedFile("fixtures/methodologies/rpe-top-set-backoff-config-v1.json"),
+            assets.rpe_config,
         },
         .{
             caudex.rpe_top_set_backoff.State,
-            @embedFile("fixtures/methodologies/rpe-top-set-backoff-state-v1.json"),
+            assets.rpe_state,
         },
     }) |fixture| {
         const parsed = try std.json.parseFromSlice(
@@ -137,8 +134,7 @@ test "RPE top-set/backoff config and state fixtures decode" {
 
 test "RPE top-set/backoff schemas are valid JSON documents" {
     inline for (.{
-        @embedFile("schemas/methodologies/rpe-top-set-backoff-config-v1.schema.json"),
-        @embedFile("schemas/methodologies/rpe-top-set-backoff-state-v1.schema.json"),
+        assets.rpe_config_schema, assets.rpe_state_schema,
     }) |schema| {
         const parsed = try std.json.parseFromSlice(
             std.json.Value,
@@ -155,7 +151,7 @@ test "RPE top-set/backoff state fixture round-trips" {
     const parsed = try std.json.parseFromSlice(
         caudex.rpe_top_set_backoff.State,
         std.testing.allocator,
-        @embedFile("fixtures/methodologies/rpe-top-set-backoff-state-v1.json"),
+        assets.rpe_state,
         .{},
     );
     defer parsed.deinit();
@@ -181,7 +177,7 @@ test "double-progression state fixture round-trips" {
     const parsed = try std.json.parseFromSlice(
         caudex.double_progression.State,
         std.testing.allocator,
-        @embedFile("fixtures/methodologies/double-progression-state-v1.json"),
+        assets.double_progression_state,
         .{},
     );
     defer parsed.deinit();
@@ -216,7 +212,7 @@ test "double-progression conformance fixtures" {
     const parsed = try std.json.parseFromSlice(
         ConformanceSuite,
         std.testing.allocator,
-        @embedFile("fixtures/methodologies/double-progression-conformance-v1.json"),
+        assets.double_progression_conformance,
         .{},
     );
     defer parsed.deinit();
@@ -433,7 +429,7 @@ test "diagnostic bundle matches the stable canonical fixture" {
     const actual = try bundle.writeJson(&json_buffer);
     const expected = std.mem.trimEnd(
         u8,
-        @embedFile("fixtures/results/diagnostics.json"),
+        assets.diagnostics,
         "\n",
     );
     try std.testing.expectEqualStrings(expected, actual);
@@ -480,7 +476,7 @@ test "deterministic recommendation matches the golden canonical fixture" {
     const actual = try engine.writeResultJson(result, &json_buffer);
     const expected = std.mem.trimEnd(
         u8,
-        @embedFile("fixtures/results/recommendation-no-history.json"),
+        assets.recommendation_no_history,
         "\n",
     );
 

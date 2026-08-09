@@ -6,7 +6,7 @@
   persistence-independent protocol modules.
 - `adapters/`: optional persistence contracts and SQLite implementation/migrations.
 - `apps/caudex-cli/`: first-party reference client and TUI; not core behavior.
-- `include/`: public C header; `c_api_test.zig` and `tests/c_header_smoke.c` guard it.
+- `include/`: public C header; `tests/zig/c/c_api_test.zig` and `tests/c_header_smoke.c` guard it.
 - `packages/npm/`: npm/WebAssembly facade and TypeScript declarations.
 - `packages/zig/`: clean distributable Zig package boundaries.
 - `schemas/`: versioned JSON schemas; `fixtures/`: canonical examples/conformance data.

@@ -6,15 +6,89 @@ fn namedSystemCommand(b: *std.Build, name: []const u8, argv: []const []const u8)
     return command;
 }
 
+fn addRepositoryEmbedPath(b: *std.Build, module: *std.Build.Module) void {
+    module.addEmbedPath(b.path("."));
+}
+
+fn repositoryTestAssets(b: *std.Build) *std.Build.Module {
+    const files = b.addWriteFiles();
+    const paths = [_][]const u8{
+        "src/root.zig",                                                  "src/canonical.zig",                                               "src/canonical_json.zig",                                         "src/diagnostics.zig",
+        "src/discovery.zig",                                             "src/double_progression.zig",                                      "src/duration.zig",                                               "src/engine.zig",
+        "src/filtering.zig",                                             "src/history.zig",                                                 "src/load_math.zig",                                              "src/methodology.zig",
+        "src/ordering.zig",                                              "src/primitives.zig",                                              "src/rpe_top_set_backoff.zig",                                    "src/training.zig",
+        "tracking/root.zig",                                             "workflows/root.zig",                                              "packages/npm/workout-engine/package.json",                       "adapters/sqlite/migrations/001_initial.sql",
+        "fixtures/requests/recommendation.json",                         "fixtures/requests/evaluation.json",                               "fixtures/results/diagnostics.json",                              "fixtures/results/recommendation-no-history.json",
+        "fixtures/methodologies/double-progression-config-v1.json",      "fixtures/methodologies/double-progression-state-v1.json",         "fixtures/methodologies/rpe-top-set-backoff-config-v1.json",      "fixtures/methodologies/rpe-top-set-backoff-state-v1.json",
+        "fixtures/methodologies/double-progression-conformance-v1.json", "fixtures/tracking/start-workout-v1.json",                         "fixtures/tracking/snapshot-v1.json",                             "fixtures/tracking/rejected-batch-v1.json",
+        "fixtures/templates/squat-day-v1.json",                          "fixtures/portable/export-v1.json",                                "schemas/v0/canonical.schema.json",                               "schemas/v0/recommendation-request.schema.json",
+        "schemas/v0/evaluation-request.schema.json",                     "schemas/v0/recommendation-result.schema.json",                    "schemas/v0/evaluation-result.schema.json",                       "schemas/methodologies/double-progression-config-v1.schema.json",
+        "schemas/methodologies/double-progression-state-v1.schema.json", "schemas/methodologies/rpe-top-set-backoff-config-v1.schema.json", "schemas/methodologies/rpe-top-set-backoff-state-v1.schema.json",
+    };
+    for (paths) |path| _ = files.addCopyFile(b.path(path), path);
+    const source = files.add("root.zig",
+        \\pub const src_root = @embedFile("src/root.zig");
+        \\pub const src_canonical = @embedFile("src/canonical.zig");
+        \\pub const src_canonical_json = @embedFile("src/canonical_json.zig");
+        \\pub const src_diagnostics = @embedFile("src/diagnostics.zig");
+        \\pub const src_discovery = @embedFile("src/discovery.zig");
+        \\pub const src_double_progression = @embedFile("src/double_progression.zig");
+        \\pub const src_duration = @embedFile("src/duration.zig");
+        \\pub const src_engine = @embedFile("src/engine.zig");
+        \\pub const src_filtering = @embedFile("src/filtering.zig");
+        \\pub const src_history = @embedFile("src/history.zig");
+        \\pub const src_load_math = @embedFile("src/load_math.zig");
+        \\pub const src_methodology = @embedFile("src/methodology.zig");
+        \\pub const src_ordering = @embedFile("src/ordering.zig");
+        \\pub const src_primitives = @embedFile("src/primitives.zig");
+        \\pub const src_rpe_top_set_backoff = @embedFile("src/rpe_top_set_backoff.zig");
+        \\pub const src_training = @embedFile("src/training.zig");
+        \\pub const tracking_root = @embedFile("tracking/root.zig");
+        \\pub const workflows_root = @embedFile("workflows/root.zig");
+        \\pub const manifest = @embedFile("packages/npm/workout-engine/package.json");
+        \\pub const recommendation_request = @embedFile("fixtures/requests/recommendation.json");
+        \\pub const evaluation_request = @embedFile("fixtures/requests/evaluation.json");
+        \\pub const diagnostics = @embedFile("fixtures/results/diagnostics.json");
+        \\pub const recommendation_no_history = @embedFile("fixtures/results/recommendation-no-history.json");
+        \\pub const double_progression_config = @embedFile("fixtures/methodologies/double-progression-config-v1.json");
+        \\pub const double_progression_state = @embedFile("fixtures/methodologies/double-progression-state-v1.json");
+        \\pub const rpe_config = @embedFile("fixtures/methodologies/rpe-top-set-backoff-config-v1.json");
+        \\pub const rpe_state = @embedFile("fixtures/methodologies/rpe-top-set-backoff-state-v1.json");
+        \\pub const double_progression_conformance = @embedFile("fixtures/methodologies/double-progression-conformance-v1.json");
+        \\pub const tracking_start = @embedFile("fixtures/tracking/start-workout-v1.json");
+        \\pub const tracking_snapshot = @embedFile("fixtures/tracking/snapshot-v1.json");
+        \\pub const tracking_rejected_batch = @embedFile("fixtures/tracking/rejected-batch-v1.json");
+        \\pub const squat_day = @embedFile("fixtures/templates/squat-day-v1.json");
+        \\pub const portable_export = @embedFile("fixtures/portable/export-v1.json");
+        \\pub const sqlite_migration = @embedFile("adapters/sqlite/migrations/001_initial.sql");
+        \\pub const canonical_schema = @embedFile("schemas/v0/canonical.schema.json");
+        \\pub const recommendation_schema = @embedFile("schemas/v0/recommendation-request.schema.json");
+        \\pub const evaluation_schema = @embedFile("schemas/v0/evaluation-request.schema.json");
+        \\pub const recommendation_result_schema = @embedFile("schemas/v0/recommendation-result.schema.json");
+        \\pub const evaluation_result_schema = @embedFile("schemas/v0/evaluation-result.schema.json");
+        \\pub const double_progression_config_schema = @embedFile("schemas/methodologies/double-progression-config-v1.schema.json");
+        \\pub const double_progression_state_schema = @embedFile("schemas/methodologies/double-progression-state-v1.schema.json");
+        \\pub const rpe_config_schema = @embedFile("schemas/methodologies/rpe-top-set-backoff-config-v1.schema.json");
+        \\pub const rpe_state_schema = @embedFile("schemas/methodologies/rpe-top-set-backoff-state-v1.schema.json");
+    );
+    return b.createModule(.{ .root_source_file = source });
+}
+
+fn addRepositoryTestAssets(module: *std.Build.Module, assets: *std.Build.Module) void {
+    module.addImport("repository_test_assets", assets);
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const repository_test_assets = repositoryTestAssets(b);
 
     const module = b.addModule("caudex", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
+    addRepositoryEmbedPath(b, module);
 
     const library = b.addLibrary(.{
         .name = "caudex",
@@ -34,29 +108,31 @@ pub fn build(b: *std.Build) void {
     );
     test_core_step.dependOn(&run_library_tests.step);
 
-    const contract_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("contract_test.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "caudex", .module = module },
-            },
-        }),
+    const contract_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/zig/core/contract_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "caudex", .module = module },
+        },
     });
+    addRepositoryEmbedPath(b, contract_test_module);
+    addRepositoryTestAssets(contract_test_module, repository_test_assets);
+    const contract_tests = b.addTest(.{ .root_module = contract_test_module });
     const run_contract_tests = b.addRunArtifact(contract_tests);
     run_contract_tests.setName("core public contract");
 
-    const architecture_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("architecture_test.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "caudex", .module = module },
-            },
-        }),
+    const architecture_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/zig/core/architecture_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "caudex", .module = module },
+        },
     });
+    addRepositoryEmbedPath(b, architecture_test_module);
+    addRepositoryTestAssets(architecture_test_module, repository_test_assets);
+    const architecture_tests = b.addTest(.{ .root_module = architecture_test_module });
     const run_architecture_tests = b.addRunArtifact(architecture_tests);
     run_architecture_tests.setName("core module boundaries");
 
@@ -112,14 +188,15 @@ pub fn build(b: *std.Build) void {
             .{ .name = "caudex_portable", .module = portable_module },
         },
     });
-    const portable_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("portable_protocol_test.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{.{ .name = "caudex_portable", .module = portable_module }},
-        }),
+    const portable_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/zig/portable/protocol_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "caudex_portable", .module = portable_module }},
     });
+    addRepositoryEmbedPath(b, portable_test_module);
+    addRepositoryTestAssets(portable_test_module, repository_test_assets);
+    const portable_tests = b.addTest(.{ .root_module = portable_test_module });
     const run_portable_tests = b.addRunArtifact(portable_tests);
     run_portable_tests.setName("portable protocol contract");
     const portable_test_step = b.step("test-portable", "Test bounded adapter-independent portable import and export");
@@ -182,12 +259,13 @@ pub fn build(b: *std.Build) void {
             .{ .name = "caudex_portable", .module = portable_module },
         },
     });
+    addRepositoryEmbedPath(b, c_api_module);
     const c_library = b.addLibrary(.{ .name = "caudex_c", .root_module = c_api_module });
     c_library.installHeader(b.path("include/caudex.h"), "caudex.h");
     b.installArtifact(c_library);
     const tracking_contract_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("tracking_contract_test.zig"),
+            .root_source_file = b.path("tests/zig/tracking/contract_test.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
@@ -200,7 +278,7 @@ pub fn build(b: *std.Build) void {
     run_tracking_contract_tests.setName("tracking contract behavior");
     const tracking_lifecycle_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("tracking_lifecycle_test.zig"),
+            .root_source_file = b.path("tests/zig/tracking/lifecycle_test.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
@@ -212,36 +290,38 @@ pub fn build(b: *std.Build) void {
     const run_tracking_lifecycle_tests =
         b.addRunArtifact(tracking_lifecycle_tests);
     run_tracking_lifecycle_tests.setName("tracking lifecycle behavior");
-    const tracking_architecture_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("tracking_architecture_test.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "caudex_tracking", .module = tracking_module },
-            },
-        }),
+    const tracking_architecture_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/zig/tracking/architecture_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "caudex_tracking", .module = tracking_module },
+        },
     });
+    addRepositoryEmbedPath(b, tracking_architecture_test_module);
+    addRepositoryTestAssets(tracking_architecture_test_module, repository_test_assets);
+    const tracking_architecture_tests = b.addTest(.{ .root_module = tracking_architecture_test_module });
     const run_tracking_architecture_tests =
         b.addRunArtifact(tracking_architecture_tests);
     run_tracking_architecture_tests.setName("tracking module boundaries");
-    const tracking_protocol_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("tracking_protocol_test.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "caudex_tracking_protocol", .module = tracking_protocol_module },
-                .{ .name = "caudex_workflows", .module = workflows_module },
-                .{ .name = "caudex_tracking", .module = tracking_module },
-                .{ .name = "caudex", .module = module },
-            },
-        }),
+    const tracking_protocol_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/zig/tracking/protocol_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "caudex_tracking_protocol", .module = tracking_protocol_module },
+            .{ .name = "caudex_workflows", .module = workflows_module },
+            .{ .name = "caudex_tracking", .module = tracking_module },
+            .{ .name = "caudex", .module = module },
+        },
     });
+    addRepositoryEmbedPath(b, tracking_protocol_test_module);
+    addRepositoryTestAssets(tracking_protocol_test_module, repository_test_assets);
+    const tracking_protocol_tests = b.addTest(.{ .root_module = tracking_protocol_test_module });
     const run_tracking_protocol_tests = b.addRunArtifact(tracking_protocol_tests);
     run_tracking_protocol_tests.setName("tracking protocol contract");
     const tracking_model_tests = b.addTest(.{ .root_module = b.createModule(.{
-        .root_source_file = b.path("tracking_model_test.zig"),
+        .root_source_file = b.path("tests/zig/tracking/model_test.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{.{ .name = "caudex_tracking", .module = tracking_module }},
@@ -260,28 +340,30 @@ pub fn build(b: *std.Build) void {
     tracking_contract_step.dependOn(&run_tracking_protocol_tests.step);
     tracking_contract_step.dependOn(&run_tracking_model_tests.step);
 
-    const workflow_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("workflow_test.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "caudex", .module = module },
-                .{ .name = "caudex_tracking", .module = tracking_module },
-                .{ .name = "caudex_workflows", .module = workflows_module },
-            },
-        }),
+    const workflow_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/zig/workflows/workflow_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "caudex", .module = module },
+            .{ .name = "caudex_tracking", .module = tracking_module },
+            .{ .name = "caudex_workflows", .module = workflows_module },
+        },
     });
+    addRepositoryEmbedPath(b, workflow_test_module);
+    addRepositoryTestAssets(workflow_test_module, repository_test_assets);
+    const workflow_tests = b.addTest(.{ .root_module = workflow_test_module });
     const run_workflow_tests = b.addRunArtifact(workflow_tests);
     run_workflow_tests.setName("workflow behavior");
-    const workflow_architecture_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("workflow_architecture_test.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{.{ .name = "caudex_workflows", .module = workflows_module }},
-        }),
+    const workflow_architecture_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/zig/workflows/architecture_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "caudex_workflows", .module = workflows_module }},
     });
+    addRepositoryEmbedPath(b, workflow_architecture_test_module);
+    addRepositoryTestAssets(workflow_architecture_test_module, repository_test_assets);
+    const workflow_architecture_tests = b.addTest(.{ .root_module = workflow_architecture_test_module });
     const run_workflow_architecture_tests = b.addRunArtifact(workflow_architecture_tests);
     run_workflow_architecture_tests.setName("workflow module boundaries");
     const workflow_test_step = b.step("test-workflows", "Test pure programming, template, tracking, and evaluation workflows");
@@ -290,7 +372,7 @@ pub fn build(b: *std.Build) void {
 
     const persistence_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("persistence_test.zig"),
+            .root_source_file = b.path("tests/zig/persistence/contract_test.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
@@ -322,7 +404,7 @@ pub fn build(b: *std.Build) void {
     });
     const persistence_contract_kit_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("persistence_contract_kit_test.zig"),
+            .root_source_file = b.path("tests/zig/persistence/contract_kit_test.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
@@ -363,20 +445,20 @@ pub fn build(b: *std.Build) void {
     persistence_typescript_test.step.dependOn(&persistence_typescript_check.step);
     persistence_test_step.dependOn(&persistence_typescript_test.step);
 
-    const c_api_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("c_api_test.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "caudex", .module = module },
-                .{ .name = "caudex_tracking", .module = tracking_module },
-                .{ .name = "caudex_tracking_protocol", .module = tracking_protocol_module },
-                .{ .name = "caudex_workflows", .module = workflows_module },
-                .{ .name = "caudex_portable", .module = portable_module },
-            },
-        }),
+    const c_api_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/zig/c/c_api_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "caudex", .module = module },
+            .{ .name = "caudex_tracking", .module = tracking_module },
+            .{ .name = "caudex_tracking_protocol", .module = tracking_protocol_module },
+            .{ .name = "caudex_workflows", .module = workflows_module },
+            .{ .name = "caudex_portable", .module = portable_module },
+            .{ .name = "caudex_c_api", .module = c_api_module },
+        },
     });
+    const c_api_tests = b.addTest(.{ .root_module = c_api_test_module });
     const run_c_api_tests = b.addRunArtifact(c_api_tests);
     run_c_api_tests.setName("C ABI behavior");
     const test_c_api_step = b.step("test-c-api", "Test the native C ABI execution boundary");
@@ -591,27 +673,29 @@ pub fn build(b: *std.Build) void {
             .{ .name = "caudex_portable", .module = portable_module },
         },
     });
+    addRepositoryEmbedPath(b, sqlite_module);
     sqlite_module.link_libc = true;
     sqlite_module.linkSystemLibrary("sqlite3", .{});
-    const sqlite_adapter_tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("sqlite_adapter_test.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{
-                    .name = "caudex_persistence",
-                    .module = persistence_module,
-                },
-                .{ .name = "caudex_sqlite", .module = sqlite_module },
+    const sqlite_adapter_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/zig/persistence/sqlite_adapter_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{
+                .name = "caudex_persistence",
+                .module = persistence_module,
             },
-        }),
+            .{ .name = "caudex_sqlite", .module = sqlite_module },
+        },
     });
+    addRepositoryEmbedPath(b, sqlite_adapter_test_module);
+    addRepositoryTestAssets(sqlite_adapter_test_module, repository_test_assets);
+    const sqlite_adapter_tests = b.addTest(.{ .root_module = sqlite_adapter_test_module });
     const run_sqlite_adapter_tests = b.addRunArtifact(sqlite_adapter_tests);
     run_sqlite_adapter_tests.setName("SQLite adapter behavior");
     const sqlite_tracking_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("sqlite_tracking_test.zig"),
+            .root_source_file = b.path("tests/zig/persistence/sqlite_tracking_test.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{

@@ -1,9 +1,10 @@
 const std = @import("std");
 const workflows = @import("caudex_workflows");
+const assets = @import("repository_test_assets");
 
 test "workflow bridge depends only on pure public domains" {
     _ = workflows.template_schema_version;
-    const source = @embedFile("workflows/root.zig");
+    const source = assets.workflows_root;
     inline for (.{
         "std.fs",
         "std.net",

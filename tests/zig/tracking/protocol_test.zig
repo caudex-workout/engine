@@ -1,9 +1,10 @@
 const std = @import("std");
 const protocol = @import("caudex_tracking_protocol");
 const tracking = @import("caudex_tracking");
+const assets = @import("repository_test_assets");
 
 test "tracking fixture decodes and re-encodes deterministically" {
-    const fixture = @embedFile("fixtures/tracking/start-workout-v1.json");
+    const fixture = assets.tracking_start;
     const parsed = try protocol.decodeCommandRequest(std.testing.allocator, fixture, .{});
     defer parsed.deinit();
     try std.testing.expectEqual(@as(u32, 1), parsed.value.schemaVersion);
@@ -16,7 +17,7 @@ test "tracking fixture decodes and re-encodes deterministically" {
 }
 
 test "standalone tracking snapshot is versioned bounded and deterministic" {
-    const fixture = @embedFile("fixtures/tracking/snapshot-v1.json");
+    const fixture = assets.tracking_snapshot;
     const parsed = try protocol.decodeSnapshotDocument(std.testing.allocator, fixture, .{});
     defer parsed.deinit();
     try std.testing.expectEqual(@as(u32, protocol.schema_version), parsed.value.schemaVersion);
@@ -61,7 +62,7 @@ test "versions batches and transport failures are distinct" {
 }
 
 test "canonical rejected result fixture has stable bytes" {
-    const fixture = @embedFile("fixtures/tracking/rejected-batch-v1.json");
+    const fixture = assets.tracking_rejected_batch;
     const parsed = try protocol.decodeAtomicBatchResult(std.testing.allocator, fixture, .{});
     defer parsed.deinit();
     var storage: [4096]u8 = undefined;
@@ -74,7 +75,7 @@ test "canonical rejected result fixture has stable bytes" {
 test "start command conversion validates and preserves typed values" {
     const parsed = try protocol.decodeCommandRequest(
         std.testing.allocator,
-        @embedFile("fixtures/tracking/start-workout-v1.json"),
+        assets.tracking_start,
         .{},
     );
     defer parsed.deinit();
