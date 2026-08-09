@@ -1,6 +1,10 @@
 # Native C releases
 
-Caudex publishes the stable [`caudex.h`](../../include/caudex.h) header with
+No native C bundle is currently published. The commands below describe the
+staged local artifact and the future release layout; they do not download from
+GitHub or publish anything.
+
+The future Caudex release will publish the stable [`caudex.h`](../../include/caudex.h) header with
 prebuilt `ReleaseSmall` static and shared libraries. Each target bundle also
 contains `LICENSE`, `NOTICE`, `build-metadata.json`, and `SHA256SUMS`.
 
@@ -37,7 +41,8 @@ This is a tracking baseline rather than a release-size budget. The generated
 
 ## Build from source
 
-Install Zig 0.16.0, check out the intended immutable tag, and run:
+For local validation, install Zig 0.16.0 from the repository's supported
+toolchain and run:
 
 ```bash
 zig build package-c
@@ -49,6 +54,35 @@ only the current host's static and shared C link tests:
 ```bash
 zig build test-c-release
 ```
+
+The host bundle is the convenient path for an ordinary C developer testing a
+local checkout:
+
+```bash
+zig build package-c
+cc -std=c11 \
+  -Izig-out/c-release-host/aarch64-macos/include \
+  examples/c/conformance.c \
+  zig-out/c-release-host/aarch64-macos/lib/libcaudex.a \
+  -o /tmp/caudex-c-conformance
+/tmp/caudex-c-conformance
+```
+
+Replace `aarch64-macos` with the host target. The static archive is linkable
+with the platform C compiler. Unix static archives are built as position-
+independent code so ordinary Linux compiler defaults can link them into PIE
+executables. Shared consumers must arrange an rpath or the platform loader
+path described below. Until a public release exists, there is no supported
+network URL or versioned download to substitute for this local staging command.
+
+Linux consumers should add the normal system math library after the Caudex
+library (`-lm`) for both static and shared linking; Linux keeps `round` and
+`roundq` in libm rather than libc. No Zig-specific runtime library is required.
+
+For macOS targets, the builder preserves Zig's embedded `compiler_rt.o` and
+rebuilds the static archive with Zig 0.16.0's Darwin archive mode before it
+writes checksums or runs the native Apple Clang compatibility check. This keeps
+the distributed `libcaudex.a` self-contained and acceptable to `ld64`.
 
 The example executable is [`examples/c/conformance.c`](../../examples/c/conformance.c).
 It checks ABI versioning, runtime ownership, deterministic execution, and

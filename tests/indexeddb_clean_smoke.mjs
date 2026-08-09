@@ -3,6 +3,7 @@ import {
   mkdir,
   mkdtemp,
   readdir,
+  readFile,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -14,6 +15,14 @@ const roots = {
   persistence: resolve("packages/persistence"),
   indexeddb: resolve("packages/persistence-indexeddb"),
 };
+const contract = "IndexedDB clean-consumer packaging";
+const indexeddbManifest = JSON.parse(
+  await readFile(join(roots.indexeddb, "package.json"), "utf8"),
+);
+const typescriptVersion = indexeddbManifest.devDependencies?.typescript;
+if (typeof typescriptVersion !== "string" || typescriptVersion.length === 0) {
+  throw new Error(`${contract}: package must pin its TypeScript test tool`);
+}
 const temporary = await mkdtemp(join(tmpdir(), "caudex-indexeddb-smoke-"));
 const packDirectory = join(temporary, "pack");
 const project = join(temporary, "project");
@@ -35,7 +44,11 @@ try {
     .map((name) => join(packDirectory, name));
   await writeFile(
     join(project, "package.json"),
-    JSON.stringify({ private: true, type: "module" }),
+    JSON.stringify({
+      private: true,
+      type: "module",
+      devDependencies: { typescript: typescriptVersion },
+    }),
   );
   run("npm", [
     "install",
@@ -52,7 +65,7 @@ try {
 } from "@caudex-workout/persistence-indexeddb";
 if (INDEXEDDB_SCHEMA_VERSION !== 4 ||
     typeof IndexedDbPersistenceAdapter !== "function") {
-  throw new Error("IndexedDB package runtime exports failed");
+  throw new Error("IndexedDB clean-consumer packaging: runtime exports failed");
 }
 `,
   );
@@ -72,7 +85,7 @@ const active: ActiveWorkoutStore = adapter;
 const templates: WorkoutTemplateStore = adapter;
 const recovery: WorkflowRecoveryStore = adapter;
 const portable: PortableDataStore = adapter;
-if (INDEXEDDB_SCHEMA_VERSION !== 4) throw new Error("schema version mismatch");
+if (INDEXEDDB_SCHEMA_VERSION !== 4) throw new Error("IndexedDB clean-consumer packaging: schema version mismatch");
 void catalog;
 void states;
 void active;
@@ -96,12 +109,12 @@ void portable;
     }),
   );
   run(process.execPath, [
-    resolve(roots.indexeddb, "node_modules/typescript/bin/tsc"),
+    join(project, "node_modules/typescript/bin/tsc"),
     "--project",
     join(project, "tsconfig.json"),
   ]);
   console.log(
-    "caudex clean IndexedDB browser package smoke passed: packed peers and DOM types",
+    `${contract}: packed peers and DOM types passed`,
   );
 } finally {
   await rm(temporary, { recursive: true, force: true });
@@ -114,9 +127,19 @@ function run(command, args, cwd = undefined) {
     stdio: "inherit",
     timeout: 30_000,
   });
+  if (result.error) {
+    throw new Error(
+      `${contract}: ${command} ${args.join(" ")} could not start: ${result.error.message}`,
+    );
+  }
+  if (result.signal) {
+    throw new Error(
+      `${contract}: ${command} ${args.join(" ")} terminated with ${result.signal}`,
+    );
+  }
   if (result.status !== 0) {
     throw new Error(
-      `${command} ${args.join(" ")} failed with status ${result.status}`,
+      `${contract}: ${command} ${args.join(" ")} failed with status ${result.status}`,
     );
   }
 }

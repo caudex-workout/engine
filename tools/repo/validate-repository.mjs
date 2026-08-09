@@ -6,6 +6,12 @@ const versions = JSON.parse(fs.readFileSync(path.join(root, "tools/support/versi
 const zon = fs.readFileSync(path.join(root, "build.zig.zon"), "utf8");
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, "packages/npm/workout-engine/package.json"), "utf8"));
 const lockJson = JSON.parse(fs.readFileSync(path.join(root, "packages/npm/workout-engine/package-lock.json"), "utf8"));
+const zigPackageManifests = [
+  "packages/zig/core/build.zig.zon",
+  "packages/zig/sqlite/build.zig.zon",
+  "packages/zig/exercise-catalog/build.zig.zon",
+  "packages/zig/cli/build.zig.zon",
+];
 
 function fail(message) {
   console.error(`repository validation: ${message}`);
@@ -14,6 +20,10 @@ function fail(message) {
 
 if (!zon.includes(`.minimum_zig_version = "${versions.zig}"`)) fail(`build.zig.zon is not pinned to Zig ${versions.zig}`);
 if (!zon.includes(`.version = "${packageJson.version}"`)) fail("package and Zig package versions drifted");
+for (const manifest of zigPackageManifests) {
+  const source = fs.readFileSync(path.join(root, manifest), "utf8");
+  if (!source.includes(`.version = "${packageJson.version}"`)) fail(`${manifest} version drifted`);
+}
 if (lockJson.version !== packageJson.version || lockJson.packages?.[""]?.version !== packageJson.version) fail("npm lockfile version drifted");
 if (Number(packageJson.engines?.node?.match(/\d+/)?.[0]) !== Number(versions.node_min)) fail("npm engine and supported Node minimum drifted");
 

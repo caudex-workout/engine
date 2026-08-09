@@ -340,7 +340,6 @@ Evaluate based on demand:
 
 - React Native package backed by a native module
 - Flutter plugin using the C ABI
-- Python wheels on PyPI
 - Rust crate wrapping the C ABI or compiling Zig
 - NuGet package
 - Ruby gem

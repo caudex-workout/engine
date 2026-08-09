@@ -54,6 +54,7 @@ pub const EvaluationOutput = struct {
 
 pub const RecommendError = error{
     UnsupportedMethodology,
+    CatalogLimitReached,
     InvalidRequest,
     OutputLimitReached,
 };
@@ -282,7 +283,7 @@ pub fn recommendSession(
         request.methodology_version,
     ) orelse return error.UnsupportedMethodology;
     if (request.catalog.exercises.len != 1) {
-        return error.InvalidRequest;
+        return error.CatalogLimitReached;
     }
     var issue_storage: [16]canonical.ValidationIssue = undefined;
     var issues: diagnostics.IssueWriter = .init(&issue_storage);
@@ -707,6 +708,29 @@ test "recommendation rejects history references outside the supplied catalog" {
                 .config = testConfig(),
                 .catalog = .{ .exercises = &catalog },
                 .history = .{ .workouts = &history_workouts },
+                .available_equipment_ids = &.{},
+            },
+            &output,
+        ),
+    );
+}
+
+test "recommendation reports the bounded catalog limit" {
+    const catalog = [_]training.Exercise{
+        .{ .id = try .parse("squat") },
+        .{ .id = try .parse("bench-press") },
+    };
+    var output: Output = .{};
+    try std.testing.expectError(
+        error.CatalogLimitReached,
+        recommendSession(
+            .{
+                .as_of = try .parse("2026-07-25T15:00:00Z"),
+                .methodology_id = try .parse("caudex.double-progression"),
+                .methodology_version = .{ .major = 0, .minor = 1, .patch = 0 },
+                .config = testConfig(),
+                .catalog = .{ .exercises = &catalog },
+                .history = .{},
                 .available_equipment_ids = &.{},
             },
             &output,

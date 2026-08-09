@@ -2,18 +2,23 @@
 
 This guide is for a third-party Zig application that wants to use Caudex
 without depending on repository-relative source files or copying the reference
-client's presentation logic. It is tested against Zig 0.16.0 and the v0.1.0
-source package.
+client's presentation logic. It is tested against Zig 0.16.0 and the staged
+source package. No public release tag is currently available.
 
 ## Add the public package
 
-Fetch the immutable release archive from the tagged source release and let Zig
-record the content hash:
+When a release tag is deliberately published, fetch the immutable release
+archive and let Zig record the content hash:
 
 ```sh
 zig fetch --save \
-  https://github.com/OWNER/caudex/archive/refs/tags/v0.1.0.tar.gz
+  https://github.com/caudex-workout/engine/archive/refs/tags/vX.Y.Z.tar.gz
 ```
+
+Until then, maintainers can validate the same consumer path without a public
+release by running `zig build package-zig` in the checkout and using the
+generated package under `zig-out/zig-packages/core` as a local dependency. A
+local path is a staging/test mechanism, not the external installation path.
 
 In `build.zig`, expose only the public modules required by the application:
 
@@ -77,10 +82,74 @@ pub fn recommend(request: caudex.engine.RecommendationRequest) !void {
 }
 ```
 
-The exact typed request/result declarations are available from the public
-module documentation and canonical contracts. Use explicit timestamps,
-decimal measurements, catalog snapshots, history snapshots, and methodology
-state. Do not make the engine read a clock, database, environment, or network.
+The following is a complete minimal recommendation using the first-party
+double-progression implementation. It is intentionally one exercise because
+the v0.1 typed vertical slice is bounded to one catalog exercise:
+
+```zig
+const std = @import("std");
+const caudex = @import("caudex");
+
+pub fn main() !void {
+    const exercise_id = try caudex.primitives.Id.parse("incline-dumbbell-press");
+    const dumbbell = try caudex.primitives.Id.parse("dumbbell");
+    const bench = try caudex.primitives.Id.parse("adjustable-bench");
+    const equipment = [_]caudex.primitives.Id{ dumbbell, bench };
+    const exercises = [_]caudex.training.Exercise{.{
+        .id = exercise_id,
+        .equipment_ids = &equipment,
+    }};
+    const request = caudex.engine.RecommendationRequest{
+        .as_of = try caudex.primitives.Timestamp.parse("2026-07-25T14:00:00Z"),
+        .methodology_id = try caudex.primitives.Id.parse(
+            caudex.double_progression.methodology_id,
+        ),
+        .methodology_version = .{ .major = 0, .minor = 1, .patch = 0 },
+        .config = .{
+            .repRange = .{ .min = 8, .max = 12 },
+            .workingSets = 3,
+            .advancementCriteria = .{
+                .minimumSuccessfulSets = 3,
+                .minimumRepetitions = 12,
+            },
+            .initialLoad = .{ .amount = "45", .unit = "lb" },
+            .loadIncrement = .{ .amount = "5", .unit = "lb" },
+            .failurePolicy = .{
+                .onPartial = .hold,
+                .onFailure = .regress,
+                .regressionAmount = .{ .amount = "5", .unit = "lb" },
+            },
+            .rounding = .{
+                .mode = .nearest,
+                .quantum = .{ .amount = "2.5", .unit = "lb" },
+            },
+        },
+        .catalog = .{ .exercises = &exercises },
+        .available_equipment_ids = &equipment,
+    };
+    var output = caudex.engine.Output{};
+    const result = try caudex.engine.recommendSession(request, &output);
+    const recommendation = result.recommendation.?;
+    const exercise = recommendation.exercises[0];
+    const set = exercise.sets[0];
+    std.debug.print("{s}: {s} reps x {s} {s}\n", .{
+        exercise.exerciseId,
+        set.targetMetrics[1].value.amount,
+        set.targetMetrics[0].value.amount,
+        set.targetMetrics[0].value.unit,
+    });
+}
+```
+
+The request, catalog backing arrays, and output are caller-owned. Keep them
+alive while reading the result. The engine does not allocate, persist, read a
+clock, or accept the proposal on the host's behalf.
+
+`recommendSession` returns `error.CatalogLimitReached` when more than one
+catalog exercise is supplied. This is an intentional v0.1 typed-result bound;
+use one exercise until the multi-exercise result storage is expanded. Other
+validation failures return `error.InvalidRequest`, while an unknown
+methodology/version returns `error.UnsupportedMethodology`.
 
 For a tracking client, use the public `caudex_tracking` commands and the
 optional `caudex_sqlite` adapter. The adapter owns migrations and transactions;

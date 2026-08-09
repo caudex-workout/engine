@@ -1,0 +1,370 @@
+name: Caudex release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Proposed vX.Y.Z tag to rehearse without publishing
+        required: true
+        type: string
+      source_ref:
+        description: Branch, commit, or existing tag to rehearse (defaults to this workflow commit)
+        required: false
+        type: string
+
+concurrency:
+  group: caudex-release-${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.release_tag }}
+  NODE_VERSION: 24
+
+jobs:
+  validate:
+    name: Validate release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      prerelease: ${{ steps.metadata.outputs.prerelease }}
+      npm_tag: ${{ steps.metadata.outputs.npm_tag }}
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || inputs.source_ref || github.sha }}
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+      - name: Validate tag, versions, changelog, and target policy
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          node tools/release/validate-release.mjs "$RELEASE_TAG" --output release/release.json
+          node -e 'const m=require("./release/release.json"); console.log(`version=${m.version}\nprerelease=${m.prerelease}\nnpm_tag=${m.npmTag}`)' >> "$GITHUB_OUTPUT"
+
+  test:
+    name: Full release test gate
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || inputs.source_ref || github.sha }}
+          persist-credentials: false
+      - name: Set up Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: packages/npm/workout-engine/package-lock.json
+      - name: Install locked JavaScript test tools
+        run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: packages/npm/workout-engine
+      - name: Install locked IndexedDB test tools
+        run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: packages/persistence-indexeddb
+      - name: Run canonical release tests
+        run: zig build check-release --summary all
+
+  npm:
+    name: Build and rehearse npm package
+    needs: [validate, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || inputs.source_ref || github.sha }}
+          persist-credentials: false
+      - name: Set up Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Install locked package tools
+        run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: packages/npm/workout-engine
+      - name: Build and pack npm artifact once
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          zig build package-npm
+          npm pack packages/npm/workout-engine --json --ignore-scripts --pack-destination release > release/pack.json
+          RELEASE_VERSION='${{ needs.validate.outputs.version }}' node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync("release/pack.json"))[0]; if (p.filename !== `caudex-workout-engine-${process.env.RELEASE_VERSION}.tgz`) throw new Error(`unexpected npm filename: ${p.filename}`)'
+      - name: Verify exact npm artifact and clean consumer
+        shell: bash
+        run: |
+          set -euo pipefail
+          tarball="release/caudex-workout-engine-${{ needs.validate.outputs.version }}.tgz"
+          node tests/npm_clean_smoke.mjs --tarball "$PWD/$tarball"
+          npm publish "$tarball" --dry-run --ignore-scripts --access public --tag '${{ needs.validate.outputs.npm_tag }}'
+      - name: Upload exact npm tarball
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-npm-${{ needs.validate.outputs.version }}
+          path: release/caudex-workout-engine-${{ needs.validate.outputs.version }}.tgz
+          if-no-files-found: error
+
+  c:
+    name: Build and package C artifacts
+    needs: [validate, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || inputs.source_ref || github.sha }}
+          persist-credentials: false
+      - name: Set up Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+      - name: Build complete C matrix and archive it
+        run: |
+          node tools/release/build-c-artifacts.mjs release/c
+          node tools/release/package_release_sources.mjs --version '${{ needs.validate.outputs.version }}' --kind c --source release/c --output release/assets
+      - name: Upload C archives
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-c-${{ needs.validate.outputs.version }}
+          path: release/assets/*.tar.gz
+          if-no-files-found: error
+
+  zig:
+    name: Build and package Zig source artifacts
+    needs: [validate, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || inputs.source_ref || github.sha }}
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+      - name: Build and archive Zig source packages
+        run: |
+          node tools/release/build-zig-packages.mjs release/zig
+          node tools/release/package_release_sources.mjs --version '${{ needs.validate.outputs.version }}' --kind zig --source release/zig --output release/assets
+      - name: Upload Zig archives
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-zig-${{ needs.validate.outputs.version }}
+          path: release/assets/*.tar.gz
+          if-no-files-found: error
+
+  cli:
+    name: Build CLI (${{ matrix.target }})
+    needs: [validate, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-linux-gnu, archive: tar.gz }
+          - { os: ubuntu-24.04-arm, target: aarch64-linux-gnu, archive: tar.gz }
+          - { os: macos-13, target: x86_64-macos, archive: tar.gz }
+          - { os: macos-14, target: aarch64-macos, archive: tar.gz }
+          - { os: windows-latest, target: x86_64-windows-gnu, archive: zip, windows: true }
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      attestations: write
+      id-token: write
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || inputs.source_ref || github.sha }}
+          persist-credentials: false
+      - name: Set up Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+      - name: Build and test CLI
+        run: |
+          zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe caudex-cli
+          zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe test-core
+          zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe test-persistence-sqlite
+          zig build -Dtarget=${{ matrix.target }} -Doptimize=ReleaseSafe test-tui-lifecycle
+      - name: Package Unix CLI archive
+        if: ${{ !matrix.windows }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            sqlite_library="$(otool -L zig-out/bin/caudex | awk '/sqlite3/{print $1; exit}')"
+            sqlite_source="runner system SQLite ($sqlite_library)"
+          else
+            sqlite_library="$(ldd zig-out/bin/caudex | awk '/libsqlite3/{print $3; exit}')"
+            sqlite_source="runner system SQLite ($sqlite_library)"
+          fi
+          test -f "$sqlite_library"
+          node tools/release/package_cli.mjs --version '${{ needs.validate.outputs.version }}' \
+            --target '${{ matrix.target }}' --archive tar.gz --binary zig-out/bin/caudex \
+            --output "release/caudex-workout-cli-${{ needs.validate.outputs.version }}-${{ matrix.target }}.tar.gz" \
+            --sqlite-version "$(sqlite3 --version | awk '{print $1}')" \
+            --sqlite-linkage "dynamic system library" --sqlite-source "$sqlite_source" --sqlite-library "$sqlite_library"
+      - name: Package Windows CLI archive
+        if: ${{ matrix.windows }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sqliteUrl = 'https://www.sqlite.org/2026/sqlite-dll-win-x64-3490100.zip'
+          Invoke-WebRequest $sqliteUrl -OutFile sqlite-dll.zip
+          Expand-Archive sqlite-dll.zip sqlite-dll -Force
+          $dll = Get-ChildItem sqlite-dll -Filter sqlite3.dll -Recurse | Select-Object -First 1
+          if ($null -eq $dll) { throw 'official SQLite archive did not contain sqlite3.dll' }
+          node tools/release/package_cli.mjs --version '${{ needs.validate.outputs.version }}' `
+            --target '${{ matrix.target }}' --archive zip --binary zig-out/bin/caudex.exe `
+            --output "release/caudex-workout-cli-${{ needs.validate.outputs.version }}-${{ matrix.target }}.zip" `
+            --sqlite-version '3.49.1' --sqlite-linkage 'bundled official sqlite3.dll' `
+            --sqlite-source $sqliteUrl --sqlite-dll $dll.FullName
+      - name: Upload CLI archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-cli-${{ matrix.target }}-${{ needs.validate.outputs.version }}
+          path: release/caudex-workout-cli-*
+          if-no-files-found: error
+      - name: Attest CLI archive on a real tag run
+        if: github.event_name == 'push'
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        with:
+          subject-path: release/caudex-workout-cli-${{ needs.validate.outputs.version }}-${{ matrix.target }}.${{ matrix.archive }}
+
+  verify:
+    name: Verify complete release asset set
+    needs: [validate, npm, c, zig, cli]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || inputs.source_ref || github.sha }}
+          persist-credentials: false
+      - name: Download all exact artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          path: release/assets
+          merge-multiple: true
+      - name: Verify archive contents, versions, and asset manifest
+        run: node tools/release/verify-release.mjs --version '${{ needs.validate.outputs.version }}' release/assets
+      - name: Upload one verified release staging bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-staged-${{ needs.validate.outputs.version }}
+          path: release/assets
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish coordinated release
+    needs: [validate, verify]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      CAUDEX_NPM_AUTH_MODE: ${{ vars.CAUDEX_NPM_AUTH_MODE || 'trusted-publishing' }}
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref }}
+          persist-credentials: false
+      - name: Set up Node.js for npm publication
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Download the verified staging bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-staged-${{ needs.validate.outputs.version }}
+          path: release/assets
+      - name: Refuse duplicate external release state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>release/gh-view.err; then
+            echo "a GitHub Release already exists for $RELEASE_TAG; refusing to overwrite it" >&2
+            exit 1
+          elif ! grep -Eiq 'not found|404' release/gh-view.err; then
+            cat release/gh-view.err >&2
+            exit 1
+          fi
+          if npm view "@caudex-workout/engine@${{ needs.validate.outputs.version }}" version >/dev/null 2>release/npm-view.err; then
+            echo "npm version ${{ needs.validate.outputs.version }} already exists; refusing to republish it" >&2
+            exit 1
+          elif ! grep -Eiq 'E404|404|not found' release/npm-view.err; then
+            cat release/npm-view.err >&2
+            exit 1
+          fi
+          node tools/release/validate-release.mjs "$RELEASE_TAG" --output release/release.json
+          node -e 'const fs=require("fs"); const m=require("./release/release.json"); fs.writeFileSync("release/notes.md", `${m.notes}\n`);'
+      - name: Create one draft GitHub Release with verified bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$RELEASE_TAG" release/assets/* --draft --verify-tag \
+            --title "Caudex ${{ needs.validate.outputs.version }}" --notes-file release/notes.md \
+            ${{ needs.validate.outputs.prerelease == 'true' && '--prerelease' || '' }}
+      - name: Publish exact npm tarball with temporary bootstrap token
+        if: env.CAUDEX_NPM_AUTH_MODE == 'bootstrap'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        run: |
+          test -n "$NODE_AUTH_TOKEN"
+          npm publish "release/assets/caudex-workout-engine-${{ needs.validate.outputs.version }}.tgz" \
+            --provenance --access public --tag '${{ needs.validate.outputs.npm_tag }}'
+      - name: Publish exact npm tarball with Trusted Publishing
+        if: env.CAUDEX_NPM_AUTH_MODE != 'bootstrap'
+        run: npm publish "release/assets/caudex-workout-engine-${{ needs.validate.outputs.version }}.tgz" --provenance --access public --tag '${{ needs.validate.outputs.npm_tag }}'
+      - name: Make the already-created GitHub Release public
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if [[ '${{ needs.validate.outputs.prerelease }}' == 'true' ]]; then
+            gh release edit "$RELEASE_TAG" --draft=false --prerelease
+          else
+            gh release edit "$RELEASE_TAG" --draft=false --latest
+          fi

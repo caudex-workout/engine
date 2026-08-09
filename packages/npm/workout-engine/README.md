@@ -1,15 +1,36 @@
 # Caudex Workout Engine
 
-Install the ESM package on Node.js 22 or newer:
+`@caudex-workout/engine` v0.1.0 is published to npm. Install the ESM package
+on Node.js 22 or newer:
 
 ```bash
 npm install @caudex-workout/engine
 ```
 
-The repository's
-[quickstart and concepts guide](../../../docs/quickstart-and-concepts.md) shows
-the complete install-to-result flow, explanation inspection, and host data
-ownership model. It requires no database, account, or runtime network request.
+TypeScript projects should use ESM and NodeNext resolution:
+
+```json
+// package.json
+{ "type": "module" }
+```
+
+```json
+// tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "outDir": "dist"
+  }
+}
+```
+
+The [quickstart and concepts guide](https://github.com/caudex-workout/engine/blob/main/docs/quickstart-and-concepts.md)
+shows the complete install-to-result flow, explanation inspection, and host
+data ownership model. It requires no database, account, or runtime network
+request.
 
 ## TypeScript loader and facade
 
@@ -179,7 +200,8 @@ Run it with:
 zig build test-npm-clean
 ```
 
-CommonJS is not exported or supported. Rollup is the documented browser
+CommonJS `require()` is not exported or supported; use an ESM entry point.
+Rollup is the documented browser
 bundler for v0.1; other bundlers are not part of the current compatibility
 claim.
 
@@ -223,8 +245,5 @@ Assertions throw `CaudexTestAssertionError` and do not depend on Jest, Vitest,
 or another test runner. Builders use fixed explicit timestamps and return
 ordinary mutable objects that callers may customize.
 
-On 2026-07-26, a read-only lookup of `@caudex-workout/engine` against the public
-npm registry returned `E404`, meaning no published package currently claims
-that full name. Publication still requires the maintainer to create or control
-the `@caudex` organization; this repository does not infer registry ownership
-from name availability.
+The package is published under the `@caudex-workout` namespace. Registry
+ownership and publication are maintained outside this repository.

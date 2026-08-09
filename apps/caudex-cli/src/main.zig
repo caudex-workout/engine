@@ -243,6 +243,21 @@ fn run(
         .home = nonEmpty(environ.get("HOME")),
         .local_app_data = nonEmpty(environ.get("LOCALAPPDATA")),
     };
+    const no_color = environ.get("NO_COLOR") != null;
+    const is_terminal = std.Io.File.stdout().isTty(io) catch false;
+    const settings = output.Settings{
+        .format = global.format,
+        .color = global.color,
+        .is_terminal = is_terminal,
+        .no_color = no_color,
+        .quiet = global.quiet,
+    };
+    var remaining = args[global.command_index..];
+    // Config is a client-side preference command. Dispatch it before resolving
+    // or opening the default database so `config path` and `config show` do not
+    // create unrelated database state.
+    if (remaining.len >= 2 and std.mem.eql(u8, remaining[0], "config"))
+        return try configCommand(io, allocator, environment, remaining[1..], settings, stdout);
     const path = try resolveDatabasePath(
         allocator,
         global.database_path,
@@ -256,17 +271,6 @@ fn run(
     const adapter = try sqlite.open(path, .{});
     defer adapter.close();
     try setPrivateFilePermissions(io, path);
-
-    const no_color = environ.get("NO_COLOR") != null;
-    const is_terminal = std.Io.File.stdout().isTty(io) catch false;
-    const settings = output.Settings{
-        .format = global.format,
-        .color = global.color,
-        .is_terminal = is_terminal,
-        .no_color = no_color,
-        .quiet = global.quiet,
-    };
-    var remaining = args[global.command_index..];
     if (remaining.len > 0) {
         const alias: ?[]const u8 = if (std.mem.eql(u8, remaining[0], "w")) "workout" else if (std.mem.eql(u8, remaining[0], "s")) "set" else if (std.mem.eql(u8, remaining[0], "e")) "exercise" else if (std.mem.eql(u8, remaining[0], "h")) "history" else null;
         if (alias) |noun| {
@@ -275,8 +279,6 @@ fn run(
             remaining = expanded;
         }
     }
-    if (remaining.len >= 2 and std.mem.eql(u8, remaining[0], "config"))
-        return try configCommand(io, allocator, environment, remaining[1..], settings, stdout);
     if (remaining.len >= 2 and std.mem.eql(u8, remaining[0], "history"))
         return try historyCommand(io, allocator, adapter, global, remaining[1], remaining[2..], settings, stdout);
     if (remaining.len >= 2 and std.mem.eql(u8, remaining[0], "exercise"))

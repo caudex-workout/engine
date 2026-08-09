@@ -1,5 +1,11 @@
 const std = @import("std");
 
+fn namedSystemCommand(b: *std.Build, name: []const u8, argv: []const []const u8) *std.Build.Step.Run {
+    const command = b.addSystemCommand(argv);
+    command.setName(name);
+    return command;
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -20,6 +26,7 @@ pub fn build(b: *std.Build) void {
         .root_module = module,
     });
     const run_library_tests = b.addRunArtifact(library_tests);
+    run_library_tests.setName("core behavior");
 
     const test_core_step = b.step(
         "test-core",
@@ -38,6 +45,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const run_contract_tests = b.addRunArtifact(contract_tests);
+    run_contract_tests.setName("core public contract");
 
     const architecture_tests = b.addTest(.{
         .root_module = b.createModule(.{
@@ -50,6 +58,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const run_architecture_tests = b.addRunArtifact(architecture_tests);
+    run_architecture_tests.setName("core module boundaries");
 
     const tracking_module = b.addModule("caudex_tracking", .{
         .root_source_file = b.path("tracking/root.zig"),
@@ -112,6 +121,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const run_portable_tests = b.addRunArtifact(portable_tests);
+    run_portable_tests.setName("portable protocol contract");
     const portable_test_step = b.step("test-portable", "Test bounded adapter-independent portable import and export");
     portable_test_step.dependOn(&run_portable_tests.step);
     const exercise_catalog_tests = b.addTest(.{
@@ -126,9 +136,10 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const run_exercise_catalog_tests = b.addRunArtifact(exercise_catalog_tests);
-    const verify_exercise_catalog = b.addSystemCommand(&.{ "node", "catalog/tools/generate.mjs", "--check" });
-    const exercise_catalog_generator_tests = b.addSystemCommand(&.{ "node", "tests/exercise_catalog_generator_test.mjs" });
-    const exercise_catalog_types = b.addSystemCommand(&.{
+    run_exercise_catalog_tests.setName("exercise catalog behavior");
+    const verify_exercise_catalog = namedSystemCommand(b, "exercise catalog generated-output consistency", &.{ "node", "catalog/tools/generate.mjs", "--check" });
+    const exercise_catalog_generator_tests = namedSystemCommand(b, "exercise catalog generator contract", &.{ "node", "tests/exercise_catalog_generator_test.mjs" });
+    const exercise_catalog_types = namedSystemCommand(b, "exercise catalog type contract", &.{
         "node",
         "packages/npm/workout-engine/node_modules/typescript/bin/tsc",
         "--noEmit",
@@ -143,10 +154,10 @@ pub fn build(b: *std.Build) void {
         "NodeNext",
         "tests/exercise_catalog_test.ts",
     });
-    const exercise_catalog_runtime = b.addSystemCommand(&.{ "node", "--experimental-strip-types", "--disable-warning=ExperimentalWarning", "tests/exercise_catalog_test.ts" });
+    const exercise_catalog_runtime = namedSystemCommand(b, "exercise catalog runtime contract", &.{ "node", "--experimental-strip-types", "--disable-warning=ExperimentalWarning", "tests/exercise_catalog_test.ts" });
     exercise_catalog_runtime.step.dependOn(&exercise_catalog_types.step);
-    const exercise_catalog_package = b.addSystemCommand(&.{ "node", "packages/exercise-catalog/scripts/build-package.mjs" });
-    const exercise_catalog_clean = b.addSystemCommand(&.{ "node", "tests/exercise_catalog_clean_smoke.mjs" });
+    const exercise_catalog_package = namedSystemCommand(b, "exercise catalog package artifact", &.{ "node", "packages/exercise-catalog/scripts/build-package.mjs" });
+    const exercise_catalog_clean = namedSystemCommand(b, "exercise catalog clean-consumer packaging", &.{ "node", "tests/exercise_catalog_clean_smoke.mjs" });
     exercise_catalog_clean.step.dependOn(&exercise_catalog_package.step);
     const exercise_catalog_step = b.step("test-exercise-catalog", "Verify and test the pinned optional exercise catalog");
     exercise_catalog_step.dependOn(&run_exercise_catalog_tests.step);
@@ -186,6 +197,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const run_tracking_contract_tests = b.addRunArtifact(tracking_contract_tests);
+    run_tracking_contract_tests.setName("tracking contract behavior");
     const tracking_lifecycle_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("tracking_lifecycle_test.zig"),
@@ -199,6 +211,7 @@ pub fn build(b: *std.Build) void {
     });
     const run_tracking_lifecycle_tests =
         b.addRunArtifact(tracking_lifecycle_tests);
+    run_tracking_lifecycle_tests.setName("tracking lifecycle behavior");
     const tracking_architecture_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("tracking_architecture_test.zig"),
@@ -211,6 +224,7 @@ pub fn build(b: *std.Build) void {
     });
     const run_tracking_architecture_tests =
         b.addRunArtifact(tracking_architecture_tests);
+    run_tracking_architecture_tests.setName("tracking module boundaries");
     const tracking_protocol_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("tracking_protocol_test.zig"),
@@ -225,6 +239,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const run_tracking_protocol_tests = b.addRunArtifact(tracking_protocol_tests);
+    run_tracking_protocol_tests.setName("tracking protocol contract");
     const tracking_model_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("tracking_model_test.zig"),
         .target = target,
@@ -232,6 +247,7 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "caudex_tracking", .module = tracking_module }},
     }) });
     const run_tracking_model_tests = b.addRunArtifact(tracking_model_tests);
+    run_tracking_model_tests.setName("tracking reference model");
     const tracking_model_step = b.step("test-tracking-model", "Compare bounded command sequences with an independent reference model");
     tracking_model_step.dependOn(&run_tracking_model_tests.step);
     const tracking_contract_step = b.step(
@@ -257,6 +273,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const run_workflow_tests = b.addRunArtifact(workflow_tests);
+    run_workflow_tests.setName("workflow behavior");
     const workflow_architecture_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("workflow_architecture_test.zig"),
@@ -266,6 +283,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const run_workflow_architecture_tests = b.addRunArtifact(workflow_architecture_tests);
+    run_workflow_architecture_tests.setName("workflow module boundaries");
     const workflow_test_step = b.step("test-workflows", "Test pure programming, template, tracking, and evaluation workflows");
     workflow_test_step.dependOn(&run_workflow_tests.step);
     workflow_test_step.dependOn(&run_workflow_architecture_tests.step);
@@ -284,6 +302,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const run_persistence_tests = b.addRunArtifact(persistence_tests);
+    run_persistence_tests.setName("persistence contract behavior");
     const persistence_test_step = b.step(
         "test-persistence-contracts",
         "Test optional Zig persistence capability contracts",
@@ -320,6 +339,7 @@ pub fn build(b: *std.Build) void {
     });
     const run_persistence_contract_kit_tests =
         b.addRunArtifact(persistence_contract_kit_tests);
+    run_persistence_contract_kit_tests.setName("persistence adapter contract kit");
     const persistence_contract_kit_step = b.step(
         "test-persistence-contract-kit",
         "Run the reusable persistence adapter contract suite",
@@ -328,13 +348,13 @@ pub fn build(b: *std.Build) void {
         &run_persistence_contract_kit_tests.step,
     );
 
-    const persistence_typescript_check = b.addSystemCommand(&.{
+    const persistence_typescript_check = namedSystemCommand(b, "persistence TypeScript contract", &.{
         "node",
         "packages/npm/workout-engine/node_modules/typescript/bin/tsc",
         "--project",
         "tests/persistence_contracts_tsconfig.json",
     });
-    const persistence_typescript_test = b.addSystemCommand(&.{
+    const persistence_typescript_test = namedSystemCommand(b, "persistence package consumer", &.{
         "node",
         "--experimental-strip-types",
         "--disable-warning=ExperimentalWarning",
@@ -358,6 +378,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const run_c_api_tests = b.addRunArtifact(c_api_tests);
+    run_c_api_tests.setName("C ABI behavior");
     const test_c_api_step = b.step("test-c-api", "Test the native C ABI execution boundary");
     test_c_api_step.dependOn(&run_c_api_tests.step);
 
@@ -402,6 +423,7 @@ pub fn build(b: *std.Build) void {
     c_conformance.root_module.linkLibrary(c_library);
     c_conformance.root_module.link_libc = true;
     const run_c_conformance = b.addRunArtifact(c_conformance);
+    run_c_conformance.setName("C ABI conformance");
     run_c_conformance.addFileArg(b.path("fixtures/operations/recommendation-v1.json"));
     const c_example_step = b.step(
         "example-c",
@@ -448,7 +470,7 @@ pub fn build(b: *std.Build) void {
     wasm_runtime.export_memory = true;
     b.installArtifact(wasm_runtime);
 
-    const wasm_conformance = b.addSystemCommand(&.{ "node", "tests/wasm_conformance.mjs" });
+    const wasm_conformance = namedSystemCommand(b, "WASM conformance", &.{ "node", "tests/wasm_conformance.mjs" });
     wasm_conformance.addArtifactArg(wasm_runtime);
     wasm_conformance.addFileArg(b.path("fixtures/operations/recommendation-v1.json"));
     const wasm_step = b.step(
@@ -457,13 +479,13 @@ pub fn build(b: *std.Build) void {
     );
     wasm_step.dependOn(&wasm_conformance.step);
 
-    const typescript_loader_test = b.addSystemCommand(&.{
+    const typescript_loader_test = namedSystemCommand(b, "WASM TypeScript consumer", &.{
         "node",
         "--experimental-strip-types",
         "--disable-warning=ExperimentalWarning",
         "tests/typescript_loader_test.ts",
     });
-    const npm_source_typecheck = b.addSystemCommand(&.{
+    const npm_source_typecheck = namedSystemCommand(b, "npm source type contract", &.{
         "node",
         "packages/npm/workout-engine/node_modules/typescript/bin/tsc",
         "--noEmit",
@@ -491,7 +513,7 @@ pub fn build(b: *std.Build) void {
     );
     typescript_step.dependOn(&typescript_loader_test.step);
 
-    const methodology_factory_test = b.addSystemCommand(&.{
+    const methodology_factory_test = namedSystemCommand(b, "npm methodology factory consumer", &.{
         "node",
         "--experimental-strip-types",
         "--disable-warning=ExperimentalWarning",
@@ -513,20 +535,20 @@ pub fn build(b: *std.Build) void {
     );
     methodology_factory_step.dependOn(&methodology_factory_test.step);
 
-    const npm_package_build = b.addSystemCommand(&.{
+    const npm_package_build = namedSystemCommand(b, "npm package artifact build", &.{
         "node",
         "--disable-warning=ExperimentalWarning",
         "packages/npm/workout-engine/scripts/build-package.mjs",
     });
     npm_package_build.addArtifactArg(wasm_runtime);
 
-    const persistence_package_build = b.addSystemCommand(&.{
+    const persistence_package_build = namedSystemCommand(b, "persistence package type build", &.{
         "node",
         "packages/npm/workout-engine/node_modules/typescript/bin/tsc",
         "--project",
         "packages/persistence/tsconfig.json",
     });
-    const indexeddb_package_build = b.addSystemCommand(&.{
+    const indexeddb_package_build = namedSystemCommand(b, "IndexedDB package type build", &.{
         "npm",
         "run",
         "build",
@@ -534,14 +556,14 @@ pub fn build(b: *std.Build) void {
         "packages/persistence-indexeddb",
     });
     indexeddb_package_build.step.dependOn(&persistence_package_build.step);
-    const indexeddb_adapter_test = b.addSystemCommand(&.{
-        "node",
-        "--experimental-strip-types",
-        "--disable-warning=ExperimentalWarning",
-        "tests/indexeddb_adapter_test.ts",
+    const indexeddb_adapter_test = namedSystemCommand(b, "IndexedDB adapter behavior", &.{
+        "npm",
+        "test",
+        "--prefix",
+        "packages/persistence-indexeddb",
     });
     indexeddb_adapter_test.step.dependOn(&indexeddb_package_build.step);
-    const indexeddb_clean_smoke = b.addSystemCommand(&.{
+    const indexeddb_clean_smoke = namedSystemCommand(b, "IndexedDB clean-consumer packaging", &.{
         "node",
         "tests/indexeddb_clean_smoke.mjs",
     });
@@ -586,6 +608,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const run_sqlite_adapter_tests = b.addRunArtifact(sqlite_adapter_tests);
+    run_sqlite_adapter_tests.setName("SQLite adapter behavior");
     const sqlite_tracking_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("sqlite_tracking_test.zig"),
@@ -602,6 +625,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const run_sqlite_tracking_tests = b.addRunArtifact(sqlite_tracking_tests);
+    run_sqlite_tracking_tests.setName("SQLite tracking behavior");
     const sqlite_test_step = b.step(
         "test-persistence-sqlite",
         "Build and test the optional SQLite persistence adapter",
@@ -632,6 +656,7 @@ pub fn build(b: *std.Build) void {
     cli_build_step.dependOn(&cli.step);
 
     const run_cli = b.addRunArtifact(cli);
+    run_cli.setName("CLI user command");
     if (b.args) |args| run_cli.addArgs(args);
     const run_cli_step = b.step("run-caudex-cli", "Run the caudex reference client");
     run_cli_step.dependOn(&run_cli.step);
@@ -640,6 +665,7 @@ pub fn build(b: *std.Build) void {
         .root_module = cli_module,
     });
     const run_cli_tests = b.addRunArtifact(cli_tests);
+    run_cli_tests.setName("CLI core behavior");
 
     const fuzz_driver_module = b.createModule(.{
         .root_source_file = b.path("tests/fuzz/runner.zig"),
@@ -664,6 +690,7 @@ pub fn build(b: *std.Build) void {
     for (fuzz_steps, fuzz_targets) |step_name, fuzz_target| {
         const fuzz_executable = b.addExecutable(.{ .name = step_name, .root_module = fuzz_driver_module });
         const run_fuzz = b.addRunArtifact(fuzz_executable);
+        run_fuzz.setName(b.fmt("fuzz {s} robustness", .{fuzz_target}));
         run_fuzz.addArg(b.fmt("--target={s}", .{fuzz_target}));
         run_fuzz.addArg("--iterations=10000");
         if (b.args) |args| run_fuzz.addArgs(args);
@@ -684,13 +711,14 @@ pub fn build(b: *std.Build) void {
     });
     const fuzz_smoke_tests = b.addTest(.{ .name = "fuzz-smoke", .root_module = fuzz_smoke_module });
     const run_fuzz_smoke = b.addRunArtifact(fuzz_smoke_tests);
+    run_fuzz_smoke.setName("fuzz smoke robustness");
     const fuzz_smoke_step = b.step("fuzz-smoke", "Run deterministic bounded smoke cases for every fuzz driver");
     fuzz_smoke_step.dependOn(&run_fuzz_smoke.step);
 
-    const mutation_smoke = b.addSystemCommand(&.{ "node", "tools/mutation/run.mjs", "--smoke" });
+    const mutation_smoke = namedSystemCommand(b, "mutation smoke robustness", &.{ "node", "tools/mutation/run.mjs", "--smoke" });
     const mutation_smoke_step = b.step("mutation-smoke", "Run the representative bounded mutation subset");
     mutation_smoke_step.dependOn(&mutation_smoke.step);
-    const mutation_test = b.addSystemCommand(&.{ "node", "tools/mutation/run.mjs" });
+    const mutation_test = namedSystemCommand(b, "mutation suite robustness", &.{ "node", "tools/mutation/run.mjs" });
     if (b.args) |args| mutation_test.addArgs(args);
     const mutation_test_step = b.step("mutation-test", "Run the curated methodology mutation suite");
     mutation_test_step.dependOn(&mutation_test.step);
@@ -701,51 +729,61 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     }) });
     const run_tui_lifecycle_tests = b.addRunArtifact(tui_lifecycle_tests);
+    run_tui_lifecycle_tests.setName("TUI lifecycle behavior");
     const tui_lifecycle_step = b.step("test-tui-lifecycle", "Test terminal lifecycle with a fake terminal");
     tui_lifecycle_step.dependOn(&run_tui_lifecycle_tests.step);
     const tui_model_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("apps/caudex-cli/src/tui/model.zig"), .target = target, .optimize = optimize }) });
     const run_tui_model_tests = b.addRunArtifact(tui_model_tests);
+    run_tui_model_tests.setName("TUI model behavior");
     const tui_model_step = b.step("test-tui-model", "Test deterministic TUI update and render model");
     tui_model_step.dependOn(&run_tui_model_tests.step);
     const tui_dashboard_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("apps/caudex-cli/src/tui/dashboard.zig"), .target = target, .optimize = optimize }) });
     const run_tui_dashboard_tests = b.addRunArtifact(tui_dashboard_tests);
+    run_tui_dashboard_tests.setName("TUI dashboard behavior");
     const tui_dashboard_step = b.step("test-tui-dashboard", "Test safe current-workout dashboard states");
     tui_dashboard_step.dependOn(&run_tui_dashboard_tests.step);
     const tui_workout_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("apps/caudex-cli/src/tui/workout_screen.zig"), .target = target, .optimize = optimize }) });
     const run_tui_workout_tests = b.addRunArtifact(tui_workout_tests);
+    run_tui_workout_tests.setName("TUI workout behavior");
     const tui_workout_step = b.step("test-tui-workout", "Test exercise ordering and set logging screens");
     tui_workout_step.dependOn(&run_tui_workout_tests.step);
     const tui_session_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("apps/caudex-cli/src/tui/session.zig"), .target = target, .optimize = optimize }) });
     const run_tui_session_tests = b.addRunArtifact(tui_session_tests);
+    run_tui_session_tests.setName("TUI session behavior");
     const tui_session_step = b.step("test-tui-session", "Test completion, cancellation, and recovery states");
     tui_session_step.dependOn(&run_tui_session_tests.step);
     const tui_harness = b.addExecutable(.{ .name = "caudex-tui-e2e-harness", .root_module = b.createModule(.{ .root_source_file = b.path("tests/tui_live_workout_harness.zig"), .target = target, .optimize = optimize, .imports = &.{ .{ .name = "caudex_persistence", .module = persistence_module }, .{ .name = "caudex_sqlite", .module = sqlite_module }, .{ .name = "caudex_tracking", .module = tracking_module }, .{ .name = "caudex_tui", .module = b.createModule(.{ .root_source_file = b.path("apps/caudex-cli/src/tui/root.zig") }) } } }) });
-    const tui_e2e = b.addSystemCommand(&.{ "bash", "tests/tui_live_workout_test.sh" });
+    const tui_e2e = namedSystemCommand(b, "CLI/TUI live-workout integration", &.{ "bash", "tests/tui_live_workout_test.sh" });
     tui_e2e.addArtifactArg(cli);
     tui_e2e.addArtifactArg(tui_harness);
     const tui_e2e_step = b.step("test-tui-e2e", "Run fake-terminal live workout end to end");
     tui_e2e_step.dependOn(&tui_e2e.step);
     const tui_catalog_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("apps/caudex-cli/src/tui/catalog_screen.zig"), .target = target, .optimize = optimize }) });
     const run_tui_catalog_tests = b.addRunArtifact(tui_catalog_tests);
+    run_tui_catalog_tests.setName("TUI catalog behavior");
     const tui_catalog_step = b.step("test-tui-catalog", "Test public catalog-management TUI screens");
     tui_catalog_step.dependOn(&run_tui_catalog_tests.step);
     const tui_history_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("apps/caudex-cli/src/tui/history_screen.zig"), .target = target, .optimize = optimize }) });
     const run_tui_history_tests = b.addRunArtifact(tui_history_tests);
+    run_tui_history_tests.setName("TUI history behavior");
     const tui_history_step = b.step("test-tui-history", "Test bounded history and correction TUI flows");
     tui_history_step.dependOn(&run_tui_history_tests.step);
     const tui_data_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("apps/caudex-cli/src/tui/data_screen.zig"), .target = target, .optimize = optimize }) });
     const run_tui_data_tests = b.addRunArtifact(tui_data_tests);
+    run_tui_data_tests.setName("TUI data behavior");
     const tui_data_step = b.step("test-tui-data", "Test local-data diagnostics and safe switching UI");
     tui_data_step.dependOn(&run_tui_data_tests.step);
-    const tracking_coverage_audit = b.addSystemCommand(&.{ "bash", "tests/tracking_coverage_audit_test.sh" });
+    const tracking_coverage_audit = namedSystemCommand(b, "tracking documentation coverage", &.{ "bash", "tests/tracking_coverage_audit_test.sh" });
     const tracking_coverage_step = b.step("test-tracking-coverage-audit", "Check public tracking coverage audit completeness");
     tracking_coverage_step.dependOn(&tracking_coverage_audit.step);
     const tui_compatibility_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("apps/caudex-cli/src/tui/compatibility.zig"), .target = target, .optimize = optimize }) });
     const run_tui_compatibility_tests = b.addRunArtifact(tui_compatibility_tests);
+    run_tui_compatibility_tests.setName("TUI terminal compatibility");
     const tui_compatibility_step = b.step("test-tui-compatibility", "Test TUI terminal compatibility and accessibility");
     tui_compatibility_step.dependOn(&run_tui_compatibility_tests.step);
 
     const cli_help = b.addRunArtifact(cli);
+    cli_help.setName("CLI help contract");
     cli_help.addArg("--help");
     cli_help.expectStdOutEqual(
         \\Caudex Workout Engine reference client
@@ -802,6 +840,7 @@ pub fn build(b: *std.Build) void {
     );
 
     const cli_version = b.addRunArtifact(cli);
+    cli_version.setName("CLI version contract");
     cli_version.addArg("version");
     cli_version.expectStdOutEqual(
         "caudex 0.1.0\nengine: 0.1.0 (schema 1)\npersistence contract: 3\n" ++
@@ -809,6 +848,7 @@ pub fn build(b: *std.Build) void {
     );
 
     const cli_database_human = b.addRunArtifact(cli);
+    cli_database_human.setName("CLI database human output");
     cli_database_human.addArgs(&.{ "--database", ":memory:", "database", "info" });
     cli_database_human.expectStdOutEqual(
         \\Database: :memory:
@@ -821,6 +861,7 @@ pub fn build(b: *std.Build) void {
     );
 
     const cli_database_json = b.addRunArtifact(cli);
+    cli_database_json.setName("CLI database JSON output");
     cli_database_json.addArgs(&.{
         "--database",
         ":memory:",
@@ -838,6 +879,7 @@ pub fn build(b: *std.Build) void {
     );
 
     const cli_invalid = b.addRunArtifact(cli);
+    cli_invalid.setName("CLI invalid-argument rejection");
     cli_invalid.addArgs(&.{ "--database", ":memory:", "database", "unknown" });
     cli_invalid.expectExitCode(2);
     cli_invalid.expectStdOutEqual("");
@@ -846,6 +888,7 @@ pub fn build(b: *std.Build) void {
     );
 
     const cli_invalid_json = b.addRunArtifact(cli);
+    cli_invalid_json.setName("CLI JSON error contract");
     cli_invalid_json.addArgs(&.{ "--database", ":memory:", "--format", "json", "database", "unknown" });
     cli_invalid_json.expectExitCode(2);
     cli_invalid_json.expectStdOutEqual("");
@@ -855,7 +898,7 @@ pub fn build(b: *std.Build) void {
             "\"message\":\"Invalid arguments; run 'caudex --help'.\"}}\n",
     );
 
-    const cli_broken_pipe = b.addSystemCommand(&.{
+    const cli_broken_pipe = namedSystemCommand(b, "CLI broken-pipe handling", &.{
         "bash",
         "-o",
         "pipefail",
@@ -865,6 +908,7 @@ pub fn build(b: *std.Build) void {
     });
     cli_broken_pipe.addArtifactArg(cli);
     const cli_after_broken_pipe = b.addRunArtifact(cli);
+    cli_after_broken_pipe.setName("CLI broken-pipe recovery");
     cli_after_broken_pipe.addArgs(&.{
         "--database",
         ".zig-cache/cwe112-broken-pipe.sqlite",
@@ -882,13 +926,13 @@ pub fn build(b: *std.Build) void {
             "\"latestSchemaVersion\":10,\"compatibility\":\"current\"}}\n",
     );
 
-    const cli_workout_start_test = b.addSystemCommand(&.{
+    const cli_workout_start_test = namedSystemCommand(b, "CLI workout start", &.{
         "bash",
         "tests/cli_workout_start_test.sh",
     });
     cli_workout_start_test.addArtifactArg(cli);
 
-    const cli_workout_resolution_test = b.addSystemCommand(&.{
+    const cli_workout_resolution_test = namedSystemCommand(b, "CLI workout resolution", &.{
         "bash",
         "tests/cli_workout_resolution_test.sh",
     });
@@ -909,70 +953,70 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
-    const cli_add_exercise_test = b.addSystemCommand(&.{
+    const cli_add_exercise_test = namedSystemCommand(b, "CLI add exercise", &.{
         "bash",
         "tests/cli_add_exercise_test.sh",
     });
     cli_add_exercise_test.addArtifactArg(cli);
     cli_add_exercise_test.addArtifactArg(cli_catalog_seed);
 
-    const cli_set_commands_test = b.addSystemCommand(&.{
+    const cli_set_commands_test = namedSystemCommand(b, "CLI set commands", &.{
         "bash",
         "tests/cli_set_commands_test.sh",
     });
     cli_set_commands_test.addArtifactArg(cli);
     cli_set_commands_test.addArtifactArg(cli_catalog_seed);
 
-    const cli_workout_end_test = b.addSystemCommand(&.{
+    const cli_workout_end_test = namedSystemCommand(b, "CLI workout end", &.{
         "bash",
         "tests/cli_workout_end_test.sh",
     });
     cli_workout_end_test.addArtifactArg(cli);
 
-    const cli_catalog_commands_test = b.addSystemCommand(&.{
+    const cli_catalog_commands_test = namedSystemCommand(b, "CLI catalog commands", &.{
         "bash",
         "tests/cli_catalog_commands_test.sh",
     });
     cli_catalog_commands_test.addArtifactArg(cli);
 
-    const cli_history_commands_test = b.addSystemCommand(&.{
+    const cli_history_commands_test = namedSystemCommand(b, "CLI history commands", &.{
         "bash",
         "tests/cli_history_commands_test.sh",
     });
     cli_history_commands_test.addArtifactArg(cli);
     cli_history_commands_test.addArtifactArg(cli_catalog_seed);
 
-    const cli_ergonomics_test = b.addSystemCommand(&.{
+    const cli_ergonomics_test = namedSystemCommand(b, "CLI ergonomics", &.{
         "bash",
         "tests/cli_ergonomics_test.sh",
     });
     cli_ergonomics_test.addArtifactArg(cli);
 
-    const cli_batch_test = b.addSystemCommand(&.{
+    const cli_batch_test = namedSystemCommand(b, "CLI batch", &.{
         "bash",
         "tests/cli_batch_test.sh",
     });
     cli_batch_test.addArtifactArg(cli);
 
-    const cli_completion_test = b.addSystemCommand(&.{
+    const cli_completion_test = namedSystemCommand(b, "CLI completion", &.{
         "bash",
         "tests/cli_completion_test.sh",
     });
     cli_completion_test.addArtifactArg(cli);
 
-    const cli_shell_smoke_test = b.addSystemCommand(&.{
+    const cli_shell_smoke_test = namedSystemCommand(b, "CLI shell smoke", &.{
         "bash",
         "tests/cli_shell_smoke_test.sh",
     });
     cli_shell_smoke_test.addArtifactArg(cli);
 
-    const cli_database_diagnostics_test = b.addSystemCommand(&.{
+    const cli_database_diagnostics_test = namedSystemCommand(b, "CLI database diagnostics", &.{
         "bash",
         "tests/cli_database_diagnostics_test.sh",
     });
     cli_database_diagnostics_test.addArtifactArg(cli);
 
-    const cli_benchmark = b.addSystemCommand(&.{ "bash", "tests/cli_benchmark.sh" });
+    const cli_benchmark = namedSystemCommand(b, "CLI benchmark", &.{ "bash", "tests/cli_benchmark.sh" });
     cli_benchmark.addArtifactArg(cli);
     const cli_benchmark_step = b.step("benchmark-caudex-cli", "Measure repeatable caudex CLI baselines");
     cli_benchmark_step.dependOn(&cli_benchmark.step);
@@ -985,13 +1029,11 @@ pub fn build(b: *std.Build) void {
         \\}
         \\
     );
-    const private_import_check = b.addSystemCommand(&.{
-        "zig",
-        "build-exe",
-        "-fno-emit-bin",
+    const private_import_check = namedSystemCommand(b, "Zig private-module boundary", &.{
+        "node",
+        "tests/private_import_boundary_test.mjs",
     });
     private_import_check.addFileArg(private_import_probe);
-    private_import_check.expectExitCode(1);
 
     const cli_test_step = b.step("test-caudex-cli", "Test the caudex reference client");
     cli_test_step.dependOn(&run_cli_tests.step);
@@ -1017,7 +1059,7 @@ pub fn build(b: *std.Build) void {
     cli_test_step.dependOn(&cli_database_diagnostics_test.step);
     cli_test_step.dependOn(&private_import_check.step);
 
-    const npm_package_test = b.addSystemCommand(&.{
+    const npm_package_test = namedSystemCommand(b, "npm package artifact validation", &.{
         "node",
         "tests/npm_package_artifact_test.mjs",
         "packages/npm/workout-engine",
@@ -1029,7 +1071,7 @@ pub fn build(b: *std.Build) void {
     );
     npm_package_step.dependOn(&npm_package_test.step);
 
-    const npm_clean_smoke = b.addSystemCommand(&.{
+    const npm_clean_smoke = namedSystemCommand(b, "npm clean-consumer packaging", &.{
         "node",
         "tests/npm_clean_smoke.mjs",
     });
@@ -1040,17 +1082,17 @@ pub fn build(b: *std.Build) void {
     );
     npm_smoke_step.dependOn(&npm_clean_smoke.step);
 
-    const npm_release_test = b.addSystemCommand(&.{
+    const release_workflow_test = namedSystemCommand(b, "release workflow contract", &.{
         "node",
-        "tests/npm_release_test.mjs",
+        "tests/release_workflow_test.mjs",
     });
-    const npm_release_step = b.step(
-        "test-npm-release",
-        "Test npm release metadata validation",
+    const release_workflow_step = b.step(
+        "test-release-workflow",
+        "Test release tag parsing, orchestration, and asset manifest contracts",
     );
-    npm_release_step.dependOn(&npm_release_test.step);
+    release_workflow_step.dependOn(&release_workflow_test.step);
 
-    const docs_quickstart_test = b.addSystemCommand(&.{
+    const docs_quickstart_test = namedSystemCommand(b, "documentation quickstart", &.{
         "node",
         "tests/docs_quickstart_test.mjs",
     });
@@ -1061,7 +1103,7 @@ pub fn build(b: *std.Build) void {
     );
     docs_quickstart_step.dependOn(&docs_quickstart_test.step);
 
-    const cli_documentation_test = b.addSystemCommand(&.{
+    const cli_documentation_test = namedSystemCommand(b, "CLI/integrator documentation", &.{
         "node",
         "tests/cli_documentation_test.mjs",
     });
@@ -1071,17 +1113,7 @@ pub fn build(b: *std.Build) void {
     );
     cli_documentation_step.dependOn(&cli_documentation_test.step);
 
-    const cli_release_workflow_test = b.addSystemCommand(&.{
-        "node",
-        "tests/cli_release_workflow_test.mjs",
-    });
-    const cli_release_workflow_step = b.step(
-        "test-cli-release-workflow",
-        "Check CLI release targets, packaging, attestation, and publication gates",
-    );
-    cli_release_workflow_step.dependOn(&cli_release_workflow_test.step);
-
-    const methodology_guides_test = b.addSystemCommand(&.{
+    const methodology_guides_test = namedSystemCommand(b, "methodology documentation", &.{
         "node",
         "tests/methodology_guides_test.mjs",
     });
@@ -1091,7 +1123,7 @@ pub fn build(b: *std.Build) void {
     );
     methodology_guides_step.dependOn(&methodology_guides_test.step);
 
-    const data_mapping_guide_test = b.addSystemCommand(&.{
+    const data_mapping_guide_test = namedSystemCommand(b, "npm data-mapping consumer", &.{
         "node",
         "tests/data_mapping_guide_test.mjs",
     });
@@ -1102,7 +1134,7 @@ pub fn build(b: *std.Build) void {
     );
     data_mapping_guide_step.dependOn(&data_mapping_guide_test.step);
 
-    const custom_repository_test = b.addSystemCommand(&.{
+    const custom_repository_test = namedSystemCommand(b, "npm custom-repository consumer", &.{
         "node",
         "tests/custom_repository_example_test.mjs",
     });
@@ -1114,7 +1146,7 @@ pub fn build(b: *std.Build) void {
     );
     custom_repository_step.dependOn(&custom_repository_test.step);
 
-    const testing_utilities_test = b.addSystemCommand(&.{
+    const testing_utilities_test = namedSystemCommand(b, "npm testing-utilities consumer", &.{
         "node",
         "tests/testing_utilities_test.mjs",
     });
@@ -1125,7 +1157,7 @@ pub fn build(b: *std.Build) void {
     );
     testing_utilities_step.dependOn(&testing_utilities_test.step);
 
-    const npm_examples_test = b.addSystemCommand(&.{
+    const npm_examples_test = namedSystemCommand(b, "npm examples consumer", &.{
         "node",
         "tests/npm_examples_test.mjs",
     });
@@ -1136,11 +1168,11 @@ pub fn build(b: *std.Build) void {
     );
     npm_examples_step.dependOn(&npm_examples_test.step);
 
-    const zig_package_consumer_test = b.addSystemCommand(&.{
+    const zig_package_consumer_test = namedSystemCommand(b, "Zig package consumer", &.{
         "node",
         "tests/zig_package_consumer_test.mjs",
     });
-    const zig_package_archive = b.addSystemCommand(&.{
+    const zig_package_archive = namedSystemCommand(b, "Zig package artifact", &.{
         "node",
         "tools/release/build-zig-packages.mjs",
         "zig-out/zig-packages",
@@ -1156,7 +1188,7 @@ pub fn build(b: *std.Build) void {
     );
     zig_package_step.dependOn(&zig_package_consumer_test.step);
 
-    const c_release_package = b.addSystemCommand(&.{
+    const c_release_package = namedSystemCommand(b, "C release artifact packaging", &.{
         "node",
         "tools/release/build-c-artifacts.mjs",
         "zig-out/c-release",
@@ -1167,7 +1199,7 @@ pub fn build(b: *std.Build) void {
     );
     c_release_package_step.dependOn(&c_release_package.step);
 
-    const c_release_test = b.addSystemCommand(&.{
+    const c_release_test = namedSystemCommand(b, "C native-consumer compatibility", &.{
         "node",
         "tools/release/build-c-artifacts.mjs",
         "zig-out/c-release-host",
@@ -1180,87 +1212,92 @@ pub fn build(b: *std.Build) void {
     );
     c_release_test_step.dependOn(&c_release_test.step);
 
-    const test_step = b.step("test", "Run library tests");
-    test_step.dependOn(&run_library_tests.step);
-    test_step.dependOn(&run_contract_tests.step);
-    test_step.dependOn(&run_architecture_tests.step);
-    test_step.dependOn(&run_tracking_contract_tests.step);
-    test_step.dependOn(&run_tracking_model_tests.step);
-    test_step.dependOn(&run_tracking_lifecycle_tests.step);
-    test_step.dependOn(&run_tracking_architecture_tests.step);
-    test_step.dependOn(&run_workflow_tests.step);
-    test_step.dependOn(&run_workflow_architecture_tests.step);
-    test_step.dependOn(&run_exercise_catalog_tests.step);
-    test_step.dependOn(&run_portable_tests.step);
-    test_step.dependOn(&verify_exercise_catalog.step);
-    test_step.dependOn(&exercise_catalog_generator_tests.step);
-    test_step.dependOn(&exercise_catalog_runtime.step);
-    test_step.dependOn(&exercise_catalog_clean.step);
-    test_step.dependOn(&run_persistence_tests.step);
-    test_step.dependOn(&run_persistence_contract_kit_tests.step);
-    test_step.dependOn(&persistence_typescript_test.step);
-    test_step.dependOn(&run_c_api_tests.step);
-    test_step.dependOn(&c_header_test.step);
-    test_step.dependOn(&cpp_header_test.step);
-    test_step.dependOn(&run_c_conformance.step);
-    test_step.dependOn(&wasm_library.step);
-    test_step.dependOn(&wasm_conformance.step);
-    test_step.dependOn(&typescript_loader_test.step);
-    test_step.dependOn(&methodology_factory_test.step);
-    test_step.dependOn(&npm_package_test.step);
-    test_step.dependOn(&indexeddb_adapter_test.step);
-    test_step.dependOn(&indexeddb_clean_smoke.step);
-    test_step.dependOn(&run_sqlite_adapter_tests.step);
-    test_step.dependOn(&run_sqlite_tracking_tests.step);
-    test_step.dependOn(&run_cli_tests.step);
-    test_step.dependOn(&run_tui_lifecycle_tests.step);
-    test_step.dependOn(&run_tui_model_tests.step);
-    test_step.dependOn(&run_tui_dashboard_tests.step);
-    test_step.dependOn(&run_tui_workout_tests.step);
-    test_step.dependOn(&run_tui_session_tests.step);
-    test_step.dependOn(&run_tui_catalog_tests.step);
-    test_step.dependOn(&run_tui_history_tests.step);
-    test_step.dependOn(&run_tui_data_tests.step);
-    test_step.dependOn(&tracking_coverage_audit.step);
-    test_step.dependOn(&run_tui_compatibility_tests.step);
-    test_step.dependOn(&tui_e2e.step);
-    test_step.dependOn(&cli_help.step);
-    test_step.dependOn(&cli_version.step);
-    test_step.dependOn(&cli_database_human.step);
-    test_step.dependOn(&cli_database_json.step);
-    test_step.dependOn(&cli_invalid.step);
-    test_step.dependOn(&cli_invalid_json.step);
-    test_step.dependOn(&cli_after_broken_pipe.step);
-    test_step.dependOn(&cli_workout_start_test.step);
-    test_step.dependOn(&cli_workout_resolution_test.step);
-    test_step.dependOn(&cli_add_exercise_test.step);
-    test_step.dependOn(&cli_set_commands_test.step);
-    test_step.dependOn(&cli_workout_end_test.step);
-    test_step.dependOn(&cli_catalog_commands_test.step);
-    test_step.dependOn(&cli_history_commands_test.step);
-    test_step.dependOn(&cli_ergonomics_test.step);
-    test_step.dependOn(&cli_batch_test.step);
-    test_step.dependOn(&cli_completion_test.step);
-    test_step.dependOn(&cli_shell_smoke_test.step);
-    test_step.dependOn(&cli_database_diagnostics_test.step);
-    test_step.dependOn(&private_import_check.step);
-    test_step.dependOn(&npm_clean_smoke.step);
-    test_step.dependOn(&npm_release_test.step);
-    test_step.dependOn(&docs_quickstart_test.step);
-    test_step.dependOn(&cli_documentation_test.step);
-    test_step.dependOn(&cli_release_workflow_test.step);
-    test_step.dependOn(&methodology_guides_test.step);
-    test_step.dependOn(&data_mapping_guide_test.step);
-    test_step.dependOn(&custom_repository_test.step);
-    test_step.dependOn(&testing_utilities_test.step);
-    test_step.dependOn(&npm_examples_test.step);
-    test_step.dependOn(&zig_package_consumer_test.step);
-    test_step.dependOn(&c_release_test.step);
+    const canonical_step = b.step(
+        "canonical",
+        "Run semantic core, compatibility, consumer, and client contracts",
+    );
+    canonical_step.dependOn(&run_library_tests.step);
+    canonical_step.dependOn(&run_contract_tests.step);
+    canonical_step.dependOn(&run_architecture_tests.step);
+    canonical_step.dependOn(&run_tracking_contract_tests.step);
+    canonical_step.dependOn(&run_tracking_model_tests.step);
+    canonical_step.dependOn(&run_tracking_lifecycle_tests.step);
+    canonical_step.dependOn(&run_tracking_architecture_tests.step);
+    canonical_step.dependOn(&run_workflow_tests.step);
+    canonical_step.dependOn(&run_workflow_architecture_tests.step);
+    canonical_step.dependOn(&run_exercise_catalog_tests.step);
+    canonical_step.dependOn(&run_portable_tests.step);
+    canonical_step.dependOn(&verify_exercise_catalog.step);
+    canonical_step.dependOn(&exercise_catalog_generator_tests.step);
+    canonical_step.dependOn(&exercise_catalog_runtime.step);
+    canonical_step.dependOn(&exercise_catalog_clean.step);
+    canonical_step.dependOn(&run_persistence_tests.step);
+    canonical_step.dependOn(&run_persistence_contract_kit_tests.step);
+    canonical_step.dependOn(&persistence_typescript_test.step);
+    canonical_step.dependOn(&run_c_api_tests.step);
+    canonical_step.dependOn(&c_header_test.step);
+    canonical_step.dependOn(&cpp_header_test.step);
+    canonical_step.dependOn(&run_c_conformance.step);
+    canonical_step.dependOn(&wasm_library.step);
+    canonical_step.dependOn(&wasm_conformance.step);
+    canonical_step.dependOn(&typescript_loader_test.step);
+    canonical_step.dependOn(&methodology_factory_test.step);
+    canonical_step.dependOn(&npm_package_test.step);
+    canonical_step.dependOn(&indexeddb_adapter_test.step);
+    canonical_step.dependOn(&indexeddb_clean_smoke.step);
+    canonical_step.dependOn(&run_sqlite_adapter_tests.step);
+    canonical_step.dependOn(&run_sqlite_tracking_tests.step);
+    canonical_step.dependOn(&run_cli_tests.step);
+    canonical_step.dependOn(&run_tui_lifecycle_tests.step);
+    canonical_step.dependOn(&run_tui_model_tests.step);
+    canonical_step.dependOn(&run_tui_dashboard_tests.step);
+    canonical_step.dependOn(&run_tui_workout_tests.step);
+    canonical_step.dependOn(&run_tui_session_tests.step);
+    canonical_step.dependOn(&run_tui_catalog_tests.step);
+    canonical_step.dependOn(&run_tui_history_tests.step);
+    canonical_step.dependOn(&run_tui_data_tests.step);
+    canonical_step.dependOn(&tracking_coverage_audit.step);
+    canonical_step.dependOn(&run_tui_compatibility_tests.step);
+    canonical_step.dependOn(&tui_e2e.step);
+    canonical_step.dependOn(&cli_help.step);
+    canonical_step.dependOn(&cli_version.step);
+    canonical_step.dependOn(&cli_database_human.step);
+    canonical_step.dependOn(&cli_database_json.step);
+    canonical_step.dependOn(&cli_invalid.step);
+    canonical_step.dependOn(&cli_invalid_json.step);
+    canonical_step.dependOn(&cli_after_broken_pipe.step);
+    canonical_step.dependOn(&cli_workout_start_test.step);
+    canonical_step.dependOn(&cli_workout_resolution_test.step);
+    canonical_step.dependOn(&cli_add_exercise_test.step);
+    canonical_step.dependOn(&cli_set_commands_test.step);
+    canonical_step.dependOn(&cli_workout_end_test.step);
+    canonical_step.dependOn(&cli_catalog_commands_test.step);
+    canonical_step.dependOn(&cli_history_commands_test.step);
+    canonical_step.dependOn(&cli_ergonomics_test.step);
+    canonical_step.dependOn(&cli_batch_test.step);
+    canonical_step.dependOn(&cli_completion_test.step);
+    canonical_step.dependOn(&cli_shell_smoke_test.step);
+    canonical_step.dependOn(&cli_database_diagnostics_test.step);
+    canonical_step.dependOn(&private_import_check.step);
+    canonical_step.dependOn(&npm_clean_smoke.step);
+    canonical_step.dependOn(&docs_quickstart_test.step);
+    canonical_step.dependOn(&cli_documentation_test.step);
+    canonical_step.dependOn(&release_workflow_test.step);
+    canonical_step.dependOn(&methodology_guides_test.step);
+    canonical_step.dependOn(&data_mapping_guide_test.step);
+    canonical_step.dependOn(&custom_repository_test.step);
+    canonical_step.dependOn(&testing_utilities_test.step);
+    canonical_step.dependOn(&npm_examples_test.step);
+    canonical_step.dependOn(&zig_package_consumer_test.step);
+    canonical_step.dependOn(&c_release_test.step);
 
-    const format_check = b.addSystemCommand(&.{ "zig", "fmt", "--check", "." });
-    const diff_check = b.addSystemCommand(&.{ "git", "diff", "--check" });
-    const repository_validation = b.addSystemCommand(&.{ "node", "tools/repo/validate-repository.mjs" });
-    const public_contract_validation = b.addSystemCommand(&.{ "node", "tools/repo/public-contract-snapshot.mjs" });
+    const test_step = b.step("test", "Run the canonical contract suite");
+    test_step.dependOn(canonical_step);
+
+    const format_check = namedSystemCommand(b, "format consistency", &.{ "zig", "fmt", "--check", "." });
+    const diff_check = namedSystemCommand(b, "working-tree whitespace", &.{ "git", "diff", "--check" });
+    const repository_validation = namedSystemCommand(b, "repository metadata validation", &.{ "node", "tools/repo/validate-repository.mjs" });
+    const public_contract_validation = namedSystemCommand(b, "public contract validation", &.{ "node", "tools/repo/public-contract-snapshot.mjs" });
     const fast_check = b.step(
         "check-fast",
         "Run fast local checks: formatting, repository metadata, and core tests",
@@ -1276,23 +1313,34 @@ pub fn build(b: *std.Build) void {
         "Run the canonical pull-request verification suite",
     );
     check.dependOn(fast_check);
-    check.dependOn(test_step);
+    check.dependOn(canonical_step);
 
-    const release_validation = b.addSystemCommand(&.{ "node", "tools/release/validate-npm-release.mjs", "v0.1.0" });
-    const release_metadata_validation = b.addSystemCommand(&.{ "node", "tools/release/validate-release-metadata.mjs" });
-    const release_workflow_validation = b.addSystemCommand(&.{ "node", "tests/cli_release_workflow_test.mjs" });
-    const compatibility_validation = b.addSystemCommand(&.{ "node", "tools/repo/compatibility-check.mjs" });
+    const release_validation = namedSystemCommand(b, "release metadata validation", &.{ "node", "tools/release/validate-release.mjs" });
+    const release_workflow_validation = namedSystemCommand(b, "release workflow contract validation", &.{ "node", "tests/release_workflow_test.mjs" });
+    const compatibility_validation = namedSystemCommand(b, "compatibility contract validation", &.{ "node", "tools/repo/compatibility-check.mjs" });
+    const release_contracts = b.step(
+        "release-contracts",
+        "Validate release metadata, workflow, and compatibility contracts",
+    );
+    release_contracts.dependOn(&release_validation.step);
+    release_contracts.dependOn(&release_workflow_validation.step);
+    release_contracts.dependOn(&compatibility_validation.step);
+
+    const robustness = b.step(
+        "robustness",
+        "Run bounded fuzz and mutation robustness contracts",
+    );
+    robustness.dependOn(fuzz_smoke_step);
+    robustness.dependOn(mutation_smoke_step);
+
     const check_release = b.step(
         "check-release",
         "Run canonical checks plus release metadata and artifact workflow validation",
     );
-    check_release.dependOn(check);
-    check_release.dependOn(&release_validation.step);
-    check_release.dependOn(&release_metadata_validation.step);
-    check_release.dependOn(&release_workflow_validation.step);
-    check_release.dependOn(&compatibility_validation.step);
-    check_release.dependOn(fuzz_smoke_step);
-    check_release.dependOn(mutation_smoke_step);
+    check_release.dependOn(fast_check);
+    check_release.dependOn(canonical_step);
+    check_release.dependOn(release_contracts);
+    check_release.dependOn(robustness);
 
     const release_validate_step = b.step(
         "release-validate",
@@ -1308,6 +1356,17 @@ pub fn build(b: *std.Build) void {
     release_stage_step.dependOn(npm_package_step);
     release_stage_step.dependOn(zig_package_archive_step);
     release_stage_step.dependOn(&c_release_package.step);
+
+    const release_check_command = namedSystemCommand(b, "release rehearsal", &.{
+        "node",
+        "tools/release/rehearse-release.mjs",
+    });
+    const release_check_step = b.step(
+        "release-check",
+        "Rehearse release validation and host-runnable packaging without publishing",
+    );
+    release_check_step.dependOn(check_release);
+    release_check_step.dependOn(&release_check_command.step);
 
     const clean = b.addSystemCommand(&.{ "rm", "-rf", ".zig-cache", "zig-out" });
     const clean_step = b.step("clean", "Remove generated Zig cache and build output");

@@ -1,7 +1,7 @@
-import "../packages/persistence-indexeddb/node_modules/fake-indexeddb/auto/index.mjs";
+import "fake-indexeddb/auto";
 import { readFile } from "node:fs/promises";
-import { PersistenceConflictError, PersistenceRevisionConflictError } from "../packages/persistence-indexeddb/node_modules/@caudex-workout/persistence/dist/index.js";
-import { IndexedDbPersistenceAdapter } from "../packages/persistence-indexeddb/src/index.ts";
+import { PersistenceConflictError, PersistenceRevisionConflictError } from "@caudex-workout/persistence";
+import { IndexedDbPersistenceAdapter } from "../src/index.ts";
 
 const adapter = new IndexedDbPersistenceAdapter({
   databaseName: `caudex-test-${crypto.randomUUID()}`,
@@ -234,7 +234,7 @@ try {
     await reopened.deleteDatabase();
 
     const fixtureAdapter = new IndexedDbPersistenceAdapter({ databaseName: `caudex-fixture-${crypto.randomUUID()}` });
-    const fixture = JSON.parse(await readFile("fixtures/portable/export-v1.json", "utf8"));
+    const fixture = JSON.parse(await readFile(new URL("../../../fixtures/portable/export-v1.json", import.meta.url), "utf8"));
     const fixturePlan = await fixtureAdapter.importPortable({ schemaVersion: 1, mode: "replace", conflictPolicy: "overwrite", dryRun: false, document: fixture });
     const fixtureRoundTrip = await fixtureAdapter.exportPortable({ hostScopeKey: "scope-1", exportedAt: "2026-08-04T12:00:00Z" });
     if (!fixturePlan.valid || fixtureRoundTrip.catalogReferences?.[0]?.catalogId !== "host.catalog" ||

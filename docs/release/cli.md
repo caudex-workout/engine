@@ -1,4 +1,4 @@
-# CLI v0.1.0 release
+# CLI release artifacts
 
 GitHub Releases are the only binary channel. Supported native smoke-tested
 targets are x86_64/aarch64 Linux GNU, x86_64/aarch64 macOS, and x86_64 Windows
@@ -19,9 +19,10 @@ The support claim is limited to this native release smoke-test baseline:
 Other operating systems, libc variants, architectures, and runtime versions
 are not claimed to be supported by the initial binary release.
 
-The `CLI release` workflow creates deterministic Unix archives where supported,
-checksums, provenance attestations, and a draft release. Publishing requires an
-annotated SSH-signed `v0.1.0` tag and review of every native smoke-test result.
+The canonical `Caudex release` workflow creates deterministic Unix archives,
+checksums, provenance attestations, and the coordinated draft release.
+Publishing requires an intentionally pushed signed `vX.Y.Z` tag and review of
+every native smoke-test result.
 
 For installation, first-workout, scripting, backup, exit-code, TUI, and
 troubleshooting instructions, see the [reference-client user guide](../../apps/caudex-cli/README.md).

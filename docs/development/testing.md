@@ -24,7 +24,8 @@ and should have a failing test or fixture where practical.
 The test suite covers direct Zig use, the clean Zig consumer, C header and
 linkage smoke tests, WASM and TypeScript loaders, npm examples, browser-facing
 fixtures, SQLite adapters, CLI output/exit codes, and documentation
-quickstarts. The release check also validates the v0.1.0 metadata contract.
+quickstarts. The release check also validates the tag-derived release metadata
+and asset-manifest contract.
 
 See [`fuzzing.md`](fuzzing.md) and [`mutation-testing.md`](mutation-testing.md)
 for boundary invariants, resource limits, reproducer commands, mutation

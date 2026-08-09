@@ -44,7 +44,7 @@ simple control flow, explicit invariants, and no speculative abstraction.
 Use the language and ecosystem idioms of the edited surface: `snake_case` and
 explicit fixed-width domain values in Zig, idiomatic TypeScript/JavaScript in
 npm packages, and restrained, justified, pinned dependencies. Do not weaken a
-public contract or rewrite functioning Node/Python tooling for style reasons.
+public contract or rewrite functioning Node.js tooling for style reasons.
 
 ## Public contracts
 

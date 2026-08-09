@@ -14,8 +14,8 @@ caudex workout start
 
 ## Installation and runtime baseline
 
-The v0.1.0 binaries are distributed only through the immutable GitHub Release
-`v0.1.0`. The release matrix verifies x86_64 and aarch64 Linux GNU, x86_64 and
+Released binaries are distributed only through the immutable GitHub Release
+for the matching `vX.Y.Z` tag. The release matrix verifies x86_64 and aarch64 Linux GNU, x86_64 and
 aarch64 macOS, and x86_64 Windows GNU. The initial archives are not
 platform-code-signed. Linux and macOS use the documented system SQLite
 runtime; Windows includes the pinned official `sqlite3.dll` beside

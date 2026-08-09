@@ -243,7 +243,7 @@ Each package:
 - Does not alter recommendation semantics
 - Can be omitted completely
 
-Equivalent packages or modules may be created for Zig, Swift, Kotlin, Python, or other ecosystems only when there is demand.
+Equivalent packages or modules may be created for Zig, Swift, Kotlin, or other ecosystems only when there is demand.
 
 ## Reference schemas versus existing application schemas
 

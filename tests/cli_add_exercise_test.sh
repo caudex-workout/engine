@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(dirname "$0")/test_diagnostics.sh"
+test_diagnostics_init "CLI add-exercise contract"
 
 cli=$1
 seed=$2
