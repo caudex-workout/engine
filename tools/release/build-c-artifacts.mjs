@@ -27,6 +27,7 @@ const outputRoot = resolve(process.argv[2] ?? "zig-out/c-release");
 const hostOnly = process.argv.includes("--host-only");
 const linkTest = process.argv.includes("--test");
 const selected = hostOnly ? matrix.filter(isHostTarget) : matrix;
+console.log(`[c-release-compatibility] running${hostOnly ? " host-only" : " full matrix"}`);
 if (selected.length !== 1 && hostOnly) {
   throw new Error(`unsupported release host: ${process.platform}/${process.arch}`);
 }
@@ -436,7 +437,7 @@ function run(command, args, cwd, capture = false, env = process.env) {
   });
   if (result.status !== 0) {
     throw new Error(
-      `${basename(command)} ${args.join(" ")} failed (${result.status})\n` +
+      `C release compatibility: ${basename(command)} ${args.join(" ")} failed (${result.status})\n` +
         `${result.stdout ?? ""}${result.stderr ?? ""}`,
     );
   }

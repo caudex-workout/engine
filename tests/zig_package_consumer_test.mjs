@@ -8,10 +8,11 @@ const temporary = await mkdtemp(join(tmpdir(), "caudex-zig-consumer-"));
 const packaged = join(temporary, "packages");
 const cache = join(temporary, "cache");
 const globalCache = join(temporary, "global-cache");
+console.log("[zig-package-consumer] running");
 
 try {
   const generated = spawnSync("node", [join(root, "tools/release/build-zig-packages.mjs"), packaged], { encoding: "utf8" });
-  if (generated.status !== 0) throw new Error(generated.stdout + generated.stderr);
+  if (generated.status !== 0) throw new Error(`Zig package consumer: package generation failed\n${generated.stdout}${generated.stderr}`);
 
   for (const name of ["core", "sqlite", "exercise-catalog", "cli"]) {
     runZigBuild(join(packaged, name), ["build"], cache, globalCache);
@@ -91,7 +92,7 @@ function runZigBuild(cwd, args, cacheDirectory, globalCacheDirectory) {
   );
   if (result.status !== 0) {
     throw new Error(
-      `clean Zig build failed (${result.status})\n${result.stdout}${result.stderr}`,
+      `Zig package consumer: clean Zig build failed (${result.status})\n${result.stdout}${result.stderr}`,
     );
   }
   return result;

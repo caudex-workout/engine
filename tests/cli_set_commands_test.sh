@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(dirname "$0")/test_diagnostics.sh"
+test_diagnostics_init cli-set-commands
 
 cli=$1
 seed=$2

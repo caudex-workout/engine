@@ -18,6 +18,7 @@ const suppliedTarball = suppliedTarballIndex === -1 ? undefined : resolve(proces
 const temporary = await mkdtemp(join(tmpdir(), "caudex-npm-smoke-"));
 const packDirectory = join(temporary, "pack");
 const project = join(temporary, "project");
+console.log("[npm-clean-consumer] running");
 await mkdir(packDirectory);
 await mkdir(project);
 
@@ -217,7 +218,7 @@ function run(command, args, cwd = undefined) {
   });
   if (result.status !== 0) {
     throw new Error(
-      `${command} ${args.join(" ")} failed with status ${result.status}` +
+      `npm clean consumer: ${command} ${args.join(" ")} failed with status ${result.status}` +
         (result.error ? `: ${result.error.message}` : ""),
     );
   }
