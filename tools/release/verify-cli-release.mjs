@@ -4,13 +4,20 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { archiveEntries, sha256 } from "./archive-utils.mjs";
 
-export async function verifyCliRelease(directory, version) {
+export async function verifyCliRelease(directory, version, options = {}) {
   const assets = [
     "x86_64-linux-gnu", "aarch64-linux-gnu", "aarch64-macos", "x86_64-windows-gnu",
   ].map((target) => `caudex-workout-cli-${version}-${target}${target.endsWith("windows-gnu") ? ".zip" : ".tar.gz"}`);
-  const sumsPath = path.join(directory, "SHA256SUMS");
-  const expected = parseChecksums(await fs.readFile(sumsPath, "utf8"));
-  if (expected.size !== assets.length || assets.some((name) => !expected.has(name))) throw new Error("SHA256SUMS does not cover exactly the release CLI archives");
+  const suppliedChecksums = options.checksums;
+  const expected = suppliedChecksums ?? parseChecksums(
+    await fs.readFile(path.join(directory, "SHA256SUMS"), "utf8"),
+  );
+  if (
+    (!(suppliedChecksums instanceof Map) && expected.size !== assets.length) ||
+    assets.some((name) => !expected.has(name))
+  ) {
+    throw new Error("SHA256SUMS does not cover exactly the release CLI archives");
+  }
   for (const name of assets) {
     const archive = path.join(directory, name);
     if (await sha256(archive) !== expected.get(name)) throw new Error(`checksum mismatch: ${name}`);

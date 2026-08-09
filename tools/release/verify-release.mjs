@@ -28,7 +28,9 @@ for (const asset of expected.filter((entry) => entry.kind === "c" || entry.kind 
 
 const hashes = {};
 for (const name of [...expectedNames].sort()) hashes[name] = await sha256(path.join(directory, name));
-await verifyCliRelease(directory, version);
+await verifyCliRelease(directory, version, {
+  checksums: new Map(Object.entries(hashes)),
+});
 const manifest = {
   schemaVersion: 1,
   version,

@@ -8,6 +8,7 @@ import {
   fastCommandTimeoutMs,
   run,
 } from "../tools/release/subprocess.mjs";
+import { verifyCliRelease } from "../tools/release/verify-cli-release.mjs";
 import { parseReleaseTag, validateRelease } from "../tools/release/validate-release.mjs";
 
 if (fastCommandTimeoutMs !== 120_000 || compilerLinkerTimeoutMs !== 300_000) {
@@ -79,6 +80,10 @@ for (const invalid of ["0.1.0", "vfoo", "v0.1", "v01.2.3", "v1.2.3-"]) {
 
 const fixtureRoot = await mkdtemp(path.join(tmpdir(), "caudex-release-validator-"));
 try {
+  await expectFailure(
+    () => verifyCliRelease(fixtureRoot, "0.1.0", { checksums: new Map() }),
+    "SHA256SUMS does not cover exactly the release CLI archives",
+  );
   for (const relative of [
     "packages/npm/workout-engine/package.json",
     "packages/npm/workout-engine/package-lock.json",
