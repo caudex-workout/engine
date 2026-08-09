@@ -23,7 +23,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up Zig
-        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        uses: mlugg/setup-zig@272b55e6c4fcef353f6d923050ff32f018636378 # node24 runtime update
         with:
           version: 0.16.0
       - name: Set up Node.js
@@ -51,7 +51,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up Zig
-        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        uses: mlugg/setup-zig@272b55e6c4fcef353f6d923050ff32f018636378 # node24 runtime update
         with:
           version: 0.16.0
       - name: Set up Node.js
@@ -91,7 +91,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Set up Zig
-        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        uses: mlugg/setup-zig@272b55e6c4fcef353f6d923050ff32f018636378 # node24 runtime update
         with:
           version: 0.16.0
       - name: Set up Node.js
