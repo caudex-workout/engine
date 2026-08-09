@@ -44,7 +44,10 @@ run("node", [
 ]);
 
 if (process.platform === "linux" || process.platform === "darwin") {
-  run("zig", ["build", "-Doptimize=ReleaseSafe", "caudex-cli"]);
+  // The focused caudex-cli step compiles the executable but does not install
+  // it into zig-out/bin. The rehearsal inspects and packages that installed
+  // path, so use the install step explicitly for clean checkouts.
+  run("zig", ["build", "-Doptimize=ReleaseSafe", "install"]);
   const target = `${process.arch === "arm64" ? "aarch64" : "x86_64"}-${process.platform === "darwin" ? "macos" : "linux-gnu"}`;
   const binary = path.join(repositoryRoot, "zig-out", "bin", "caudex");
   const sqlite = findSqlite(binary);
