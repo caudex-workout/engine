@@ -66,10 +66,14 @@ try {
   const consumerPackage = {
     private: true,
     type: "module",
-    dependencies: { [packageMetadata.name]: artifact.artifactPath },
+    dependencies: { [packageMetadata.name]: artifact.npmDependencySpec },
   };
-  if (consumerPackage.dependencies[packageMetadata.name] !== artifact.artifactPath) {
-    throw new Error(`${contract}: generated dependency did not retain the local artifact path`);
+  if (
+    consumerPackage.dependencies[packageMetadata.name] !== artifact.npmDependencySpec ||
+    !artifact.npmDependencySpec.startsWith("file:") ||
+    artifact.npmDependencySpec.includes("%20")
+  ) {
+    throw new Error(`${contract}: generated dependency did not retain the local npm spec`);
   }
   await writeFile(join(project, "package.json"), JSON.stringify(consumerPackage));
   run(
@@ -90,7 +94,7 @@ try {
   const dependencySpec = consumerManifest.dependencies?.[packageMetadata.name];
   if (
     typeof dependencySpec !== "string" ||
-    (!dependencySpec.startsWith("file:") && dependencySpec !== artifact.artifactPath) ||
+    !dependencySpec.startsWith("file:") ||
     dependencySpec.includes("%20")
   ) {
     throw new Error(
@@ -297,9 +301,11 @@ function run(
   if (artifact !== undefined) {
     details.push("artifact exists:\n  true");
     details.push(`artifact filesystem path:\n  ${artifact.artifactPath}`);
-    details.push(`npm spec:\n  ${artifact.artifactPath}`);
+    details.push(`npm spec:\n  ${artifact.npmDependencySpec}`);
     details.push(`artifact file URL (diagnostic only):\n  ${artifact.artifactFileUrl}`);
-    details.push(`fixture:\n  ${cwd ?? process.cwd()}`);
+    details.push(
+      "fixture:\n  clean consumer install (Node ESM, TypeScript, Rollup/browser)",
+    );
     const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
     if (output.includes("git ls-remote") || output.includes("github.com")) {
       details.push(

@@ -52,8 +52,10 @@ export async function canonicalNpmArtifact(
       );
     }
   }
+  const artifactFileUrl = pathToFileURL(artifactPath).href;
   return {
     artifactPath,
-    artifactFileUrl: pathToFileURL(artifactPath).href,
+    artifactFileUrl,
+    npmDependencySpec: decodeURI(artifactFileUrl),
   };
 }
