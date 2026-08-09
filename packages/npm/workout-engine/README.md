@@ -1,8 +1,7 @@
 # Caudex Workout Engine
 
-Public release status: `@caudex-workout/engine` is staged and tested locally,
-but is not currently published to npm. After a deliberate public release,
-install the ESM package on Node.js 22 or newer:
+`@caudex-workout/engine` v0.1.0 is published to npm. Install the ESM package
+on Node.js 22 or newer:
 
 ```bash
 npm install @caudex-workout/engine
@@ -246,8 +245,5 @@ Assertions throw `CaudexTestAssertionError` and do not depend on Jest, Vitest,
 or another test runner. Builders use fixed explicit timestamps and return
 ordinary mutable objects that callers may customize.
 
-On 2026-07-26, a read-only lookup of `@caudex-workout/engine` against the public
-npm registry returned `E404`, meaning no published package currently claims
-that full name. Publication still requires the maintainer to create or control
-the `@caudex` organization; this repository does not infer registry ownership
-from name availability.
+The package is published under the `@caudex-workout` namespace. Registry
+ownership and publication are maintained outside this repository.

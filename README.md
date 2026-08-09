@@ -5,10 +5,9 @@
 
 Current contract line: **0.1.0** · supported Zig: **0.16.x**
 
-> Public release status: no npm package, Zig tag, or native C release bundle is
-> currently published. The v0.1.0 artifacts are staged and validated locally;
-> the consumer commands below become network-installable only after a release
-> is deliberately published.
+> Public release status: **v0.1.0** is the current public release. The npm,
+> Zig, native C, and CLI artifacts are published through their documented
+> distribution paths.
 
 Caudex is an open-source, embeddable strength and hypertrophy programming
 engine for developers. It accepts complete host-owned snapshots and returns
@@ -32,7 +31,7 @@ and whether a proposal is accepted or stored.
 
 ## npm quickstart
 
-For a future public release, install the package into a Node.js 22 or newer
+For the v0.1.0 release, install the package into a Node.js 22 or newer
 project:
 
 ```bash
@@ -127,15 +126,14 @@ This produces an `incline-dumbbell-press` recommendation and a structured
 It is compiled and executed against the packed npm artifact by
 `zig build test-docs-quickstart`.
 
-The package is not yet published to the public npm registry. To validate the
-same flow locally from this checkout, run `zig build package-npm`, then pack
+The package is published to the public npm registry. To validate the same flow
+locally from this checkout, run `zig build package-npm`, then pack
 `packages/npm/workout-engine` with `npm pack` and install the resulting tarball
-into a separate consumer project. Do not interpret that local tarball as a
-published package.
+into a separate consumer project.
 
 ## Zig package
 
-After a public tag exists, direct Zig consumers can add its source archive with `zig fetch --save`
+Direct Zig consumers can add the v0.1.0 source archive with `zig fetch --save`
 and import `@import("caudex")` plus the optional database-independent
 `@import("caudex_persistence")` and host-owned `@import("caudex_tracking")`
 contracts, plus the optional `@import("caudex_sqlite")` adapter. The
@@ -164,8 +162,7 @@ Release compatibility, migration rules, and completed security/license reviews
 are indexed in the [v0.1.0 release record](docs/release/v0.1.0.md).
 
 Maintainers should use the single [release guide](docs/releasing.md) for
-rehearsals and future tagged releases; the first public release has not been
-performed.
+future tagged releases; v0.1.0 was the first public release.
 
 See the [quickstart and concepts guide](docs/quickstart-and-concepts.md) for the
 request/result model, explanation references, data ownership, deterministic

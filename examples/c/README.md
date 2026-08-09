@@ -1,9 +1,8 @@
 # C conformance example
 
-This is a repository validation example, not a public download/install
-command. No v0.1.0 C bundle is currently published. The future consumer
-bundle will contain `caudex.h`, a static or shared library, checksums, and
-build metadata.
+This is a repository validation example and documents the public v0.1.0 C
+bundle. The consumer bundle contains `caudex.h`, a static or shared library,
+checksums, and build metadata.
 
 `conformance.c` is a dependency-free C11 consumer of `caudex.h`. It:
 
