@@ -122,6 +122,12 @@ function buildLibrary(target, linkage, output, importLibrary) {
     "-target",
     target,
     "-OReleaseSmall",
+    // Static Unix libraries are consumed by ordinary host compilers, whose
+    // Linux defaults commonly produce PIE executables. Keep the reusable
+    // library PIC instead of requiring consumers to disable PIE.
+    ...(linkage === "static" && (target.endsWith("-linux-gnu") || target.endsWith("-macos"))
+      ? ["-fPIC"]
+      : []),
     "--dep",
     "caudex",
     "--dep",

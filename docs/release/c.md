@@ -69,10 +69,11 @@ cc -std=c11 \
 ```
 
 Replace `aarch64-macos` with the host target. The static archive is linkable
-with the platform C compiler; shared consumers must arrange an rpath or the
-platform loader path described below. Until a public release exists, there is
-no supported network URL or versioned download to substitute for this local
-staging command.
+with the platform C compiler. Unix static archives are built as position-
+independent code so ordinary Linux compiler defaults can link them into PIE
+executables. Shared consumers must arrange an rpath or the platform loader
+path described below. Until a public release exists, there is no supported
+network URL or versioned download to substitute for this local staging command.
 
 Linux consumers should add the normal system math library after the Caudex
 library (`-lm`) for both static and shared linking; Linux keeps `round` and
