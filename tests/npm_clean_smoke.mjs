@@ -70,8 +70,7 @@ try {
   };
   if (
     consumerPackage.dependencies[packageMetadata.name] !== artifact.npmDependencySpec ||
-    !artifact.npmDependencySpec.startsWith("file:") ||
-    artifact.npmDependencySpec.includes("%20")
+    !artifact.npmDependencySpec.startsWith("file:")
   ) {
     throw new Error(`${contract}: generated dependency did not retain the local npm spec`);
   }
@@ -83,6 +82,7 @@ try {
       "--ignore-scripts",
       "--no-audit",
       "--no-fund",
+      artifact.npmDependencySpec,
     ],
     project,
     "install exact packed artifact",
@@ -94,8 +94,7 @@ try {
   const dependencySpec = consumerManifest.dependencies?.[packageMetadata.name];
   if (
     typeof dependencySpec !== "string" ||
-    !dependencySpec.startsWith("file:") ||
-    dependencySpec.includes("%20")
+    !dependencySpec.startsWith("file:")
   ) {
     throw new Error(
       `${contract}: npm rewrote the exact artifact dependency ambiguously: ` +

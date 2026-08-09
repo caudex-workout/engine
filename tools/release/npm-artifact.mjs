@@ -56,6 +56,6 @@ export async function canonicalNpmArtifact(
   return {
     artifactPath,
     artifactFileUrl,
-    npmDependencySpec: decodeURI(artifactFileUrl),
+    npmDependencySpec: artifactFileUrl,
   };
 }
