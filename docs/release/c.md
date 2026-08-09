@@ -74,6 +74,11 @@ platform loader path described below. Until a public release exists, there is
 no supported network URL or versioned download to substitute for this local
 staging command.
 
+For macOS targets, the builder preserves Zig's embedded `compiler_rt.o` and
+rebuilds the static archive with Zig 0.16.0's Darwin archive mode before it
+writes checksums or runs the native Apple Clang compatibility check. This keeps
+the distributed `libcaudex.a` self-contained and acceptable to `ld64`.
+
 The example executable is [`examples/c/conformance.c`](../../examples/c/conformance.c).
 It checks ABI versioning, runtime ownership, deterministic execution, and
 result fingerprints using only the installed header and produced library.
