@@ -7,3 +7,7 @@ The core and native C libraries have no third-party runtime dependencies.
 
 The optional exercise-catalog distribution includes transformed textual data
 from yuhonas/free-exercise-db under the Unlicense. Its images are excluded.
+
+The first-party CLI statically includes the official SQLite 3.49.1 amalgamation,
+which is released into the public domain. Its source provenance and checksums
+are recorded in vendor/sqlite/README.md.

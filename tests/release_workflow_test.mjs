@@ -83,6 +83,8 @@ for (const phrase of [
   "attest-build-provenance",
   "CAUDEX_NPM_AUTH_MODE",
   "cancel-in-progress: false",
+  "--sqlite-source-file vendor/sqlite/sqlite3.c",
+  "bundled official SQLite amalgamation",
 ]) {
   if (!workflow.includes(phrase)) throw new Error(`release orchestrator is missing ${phrase}`);
 }

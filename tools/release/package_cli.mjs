@@ -17,8 +17,8 @@ const output = path.resolve(args.output);
 const stem = path.basename(output).replace(/\.tar\.gz$|\.zip$/, "");
 const windows = args.target.endsWith("windows-gnu");
 const executableName = windows ? "caudex.exe" : "caudex";
-const sqliteFile = args["sqlite-library"] ?? args["sqlite-dll"];
-if (!sqliteFile || !existsSync(path.resolve(sqliteFile))) throw new Error("a SQLite library or DLL is required to record a checksum");
+const sqliteSourceFile = args["sqlite-source-file"];
+if (!sqliteSourceFile || !existsSync(path.resolve(sqliteSourceFile))) throw new Error("the bundled SQLite source file is required to record a checksum");
 
 const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "caudex-cli-package-"));
 try {
@@ -28,8 +28,6 @@ try {
   await fs.copyFile(path.join(repository, "LICENSE"), path.join(stage, "LICENSE"));
   await fs.copyFile(path.join(repository, "NOTICE"), path.join(stage, "NOTICE"));
   await fs.copyFile(path.join(repository, "apps/caudex-cli/README.md"), path.join(stage, "README.md"));
-  if (args["sqlite-dll"]) await fs.copyFile(path.resolve(args["sqlite-dll"]), path.join(stage, "sqlite3.dll"));
-
   const metadata = {
     schemaVersion: 1,
     version: args.version,
@@ -41,7 +39,7 @@ try {
       version: args["sqlite-version"],
       linkage: args["sqlite-linkage"],
       source: args["sqlite-source"],
-      checksum: { algorithm: "sha256", value: args["sqlite-checksum"] ?? await sha256(path.resolve(sqliteFile)) },
+      checksum: { algorithm: "sha256", value: args["sqlite-checksum"] ?? await sha256(path.resolve(sqliteSourceFile)) },
     },
   };
   await fs.writeFile(path.join(stage, "build-metadata.json"), `${JSON.stringify(metadata, null, 2)}\n`);
@@ -75,7 +73,6 @@ function verifyArchive(entries, stem, windows) {
   }
   const files = new Set(entries.filter(({ name }) => !name.endsWith("/")).map(({ name }) => name.slice(prefix.length)));
   const required = new Set(["LICENSE", "NOTICE", "README.md", "build-metadata.json", windows ? "caudex.exe" : "caudex"]);
-  if (windows) required.add("sqlite3.dll");
   if (files.size !== required.size || [...required].some((name) => !files.has(name))) {
     throw new Error(`unexpected files in ${stem}: ${[...files].sort().join(", ")}`);
   }
@@ -94,9 +91,7 @@ function smoke(root, target, version) {
   if (target.endsWith("windows-gnu") && process.platform !== "win32") {
     chmodSync(executable, 0o755);
   }
-  if (target.endsWith("windows-gnu") && !existsSync(path.join(root, "sqlite3.dll"))) throw new Error("Windows archive is missing sqlite3.dll");
   const environment = { ...process.env };
-  if (target.endsWith("windows-gnu")) environment.PATH = root;
   const versionOutput = run(executable, ["version"], environment);
   if (!versionOutput.startsWith(`caudex ${version}\n`)) throw new Error(`unexpected CLI version output: ${versionOutput}`);
   const help = run(executable, ["--help"], environment);

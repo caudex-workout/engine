@@ -10,6 +10,15 @@ fn addRepositoryEmbedPath(b: *std.Build, module: *std.Build.Module) void {
     module.addEmbedPath(b.path("."));
 }
 
+fn addBundledSqlite(b: *std.Build, module: *std.Build.Module) void {
+    module.addIncludePath(b.path("vendor/sqlite"));
+    module.addCSourceFile(.{
+        .file = b.path("vendor/sqlite/sqlite3.c"),
+        .flags = &.{"-DSQLITE_THREADSAFE=1"},
+    });
+    module.link_libc = true;
+}
+
 fn repositoryTestAssets(b: *std.Build) *std.Build.Module {
     const files = b.addWriteFiles();
     const paths = [_][]const u8{
@@ -674,8 +683,7 @@ pub fn build(b: *std.Build) void {
         },
     });
     addRepositoryEmbedPath(b, sqlite_module);
-    sqlite_module.link_libc = true;
-    sqlite_module.linkSystemLibrary("sqlite3", .{});
+    addBundledSqlite(b, sqlite_module);
     const sqlite_adapter_test_module = b.createModule(.{
         .root_source_file = b.path("tests/zig/persistence/sqlite_adapter_test.zig"),
         .target = target,
@@ -689,6 +697,7 @@ pub fn build(b: *std.Build) void {
         },
     });
     addRepositoryEmbedPath(b, sqlite_adapter_test_module);
+    sqlite_adapter_test_module.addIncludePath(b.path("vendor/sqlite"));
     addRepositoryTestAssets(sqlite_adapter_test_module, repository_test_assets);
     const sqlite_adapter_tests = b.addTest(.{ .root_module = sqlite_adapter_test_module });
     const run_sqlite_adapter_tests = b.addRunArtifact(sqlite_adapter_tests);
@@ -734,10 +743,11 @@ pub fn build(b: *std.Build) void {
         .name = "caudex",
         .root_module = cli_module,
     });
-    b.installArtifact(cli);
+    const cli_install = b.addInstallArtifact(cli, .{});
+    b.getInstallStep().dependOn(&cli_install.step);
 
     const cli_build_step = b.step("caudex-cli", "Build the caudex reference client");
-    cli_build_step.dependOn(&cli.step);
+    cli_build_step.dependOn(&cli_install.step);
 
     const run_cli = b.addRunArtifact(cli);
     run_cli.setName("CLI user command");

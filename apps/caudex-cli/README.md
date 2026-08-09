@@ -17,9 +17,8 @@ caudex workout start
 Released binaries are distributed only through the immutable GitHub Release
 for the matching `vX.Y.Z` tag. The release matrix verifies x86_64 and aarch64 Linux GNU, x86_64 and
 aarch64 macOS, and x86_64 Windows GNU. The initial archives are not
-platform-code-signed. Linux and macOS use the documented system SQLite
-runtime; Windows includes the pinned official `sqlite3.dll` beside
-`caudex.exe`.
+platform-code-signed. Every release binary statically includes the pinned
+official SQLite 3.49.1 amalgamation.
 
 Building from the tagged source is also supported. Use Zig 0.16.0 and the
 safe release profile:
@@ -253,9 +252,9 @@ runtime baseline.
 
 - **`caudex: command not found`:** add the extracted release directory to
   `PATH`, or invoke the source build from `zig-out/bin/caudex`.
-- **SQLite library error:** Linux and macOS require the system SQLite runtime;
-  Windows requires the release's adjacent `sqlite3.dll`. Do not mix an
-  archive with a different DLL.
+- **SQLite library error:** release binaries include SQLite and do not require
+  a separately installed SQLite runtime. Source builds use the same bundled
+  amalgamation.
 - **Database is busy:** retry after the other process closes its transaction;
   the CLI uses a bounded busy timeout and returns exit 7 when it expires.
 - **Newer schema:** install the matching Caudex release. The CLI refuses to

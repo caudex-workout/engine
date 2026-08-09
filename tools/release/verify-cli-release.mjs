@@ -43,7 +43,6 @@ function verifyArchive(entries, name, version) {
   if (entries.some(({ name: entry }) => !entry.startsWith(prefix) || entry.includes("\\") || entry.split("/").includes(".."))) throw new Error(`unsafe archive path in ${name}`);
   const files = new Set(entries.filter(({ name: entry }) => !entry.endsWith("/")).map(({ name: entry }) => entry.slice(prefix.length)));
   const required = new Set(["LICENSE", "NOTICE", "README.md", "build-metadata.json", name.endsWith(".zip") ? "caudex.exe" : "caudex"]);
-  if (name.endsWith(".zip")) required.add("sqlite3.dll");
   if (files.size !== required.size || [...required].some((entry) => !files.has(entry))) throw new Error(`unexpected files in ${name}: ${[...files].sort().join(", ")}`);
   const metadataEntry = entries.find(({ name: entry }) => entry === `${stem}/build-metadata.json`);
   const metadata = JSON.parse(metadataEntry.data.toString("utf8"));

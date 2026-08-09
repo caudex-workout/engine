@@ -1,5 +1,4 @@
 import fs from "node:fs/promises";
-import { existsSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { validateRelease, repositoryRoot } from "./validate-release.mjs";
@@ -50,7 +49,6 @@ if (process.platform === "linux" || process.platform === "darwin") {
   run("zig", ["build", "-Doptimize=ReleaseSafe", "install"]);
   const target = `${process.arch === "arm64" ? "aarch64" : "x86_64"}-${process.platform === "darwin" ? "macos" : "linux-gnu"}`;
   const binary = path.join(repositoryRoot, "zig-out", "bin", "caudex");
-  const sqlite = findSqlite(binary);
   await fs.mkdir(path.join(output, "cli"), { recursive: true });
   run("node", [
     "tools/release/package_cli.mjs",
@@ -59,10 +57,10 @@ if (process.platform === "linux" || process.platform === "darwin") {
     "--archive", "tar.gz",
     "--binary", binary,
     "--output", path.join(output, "cli", `caudex-workout-cli-${release.version}-${target}.tar.gz`),
-    "--sqlite-version", run("sqlite3", ["--version"], false).stdout.trim().split(/\s+/)[0],
-    "--sqlite-linkage", "dynamic system library",
-    "--sqlite-source", `local system SQLite (${sqlite})`,
-    "--sqlite-library", sqlite,
+    "--sqlite-version", "3.49.1",
+    "--sqlite-linkage", "bundled official SQLite amalgamation",
+    "--sqlite-source", "https://www.sqlite.org/2025/sqlite-amalgamation-3490100.zip",
+    "--sqlite-source-file", "vendor/sqlite/sqlite3.c",
   ]);
 } else {
   console.log("local release rehearsal: Windows CLI packaging remains covered by the GitHub matrix");
@@ -70,21 +68,6 @@ if (process.platform === "linux" || process.platform === "darwin") {
 
 console.log(`local release rehearsal passed for ${release.tag}`);
 console.log("CI-only remainder: cross-platform CLI matrix, complete C matrix, provenance attestations, and final external publication.");
-
-function findSqlite(binary) {
-  const command = process.platform === "darwin" ? "otool" : "ldd";
-  const args = process.platform === "darwin" ? ["-L", binary] : [binary];
-  const result = run(command, args, false).stdout;
-  const line = result.split("\n").find((value) => value.includes("sqlite3"));
-  const candidate = line?.trim().split(/\s+/)[0];
-  if (candidate && path.isAbsolute(candidate) && exists(candidate)) return candidate;
-  if (process.platform === "darwin" && exists("/usr/bin/sqlite3")) return "/usr/bin/sqlite3";
-  throw new Error(`could not resolve a host SQLite library from ${command}`);
-}
-
-function exists(file) {
-  return existsSync(file);
-}
 
 function run(command, args, inherit = true) {
   const result = spawnSync(command, args, {

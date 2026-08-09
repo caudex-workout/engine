@@ -17,6 +17,7 @@
         "adapters/sqlite.zig",
         "adapters/sqlite/README.md",
         "adapters/sqlite/migrations",
+        "vendor/sqlite",
         "apps/caudex-cli",
         "tracking",
         "workflows",
