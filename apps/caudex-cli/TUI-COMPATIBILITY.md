@@ -1,7 +1,7 @@
 # TUI compatibility and accessibility
 
 The initial TUI is tested on the release platforms: x86_64/aarch64 Linux GNU,
-x86_64/aarch64 macOS, and x86_64 Windows GNU. It targets ordinary ANSI/VT
+Apple Silicon macOS, and x86_64 Windows GNU. It targets ordinary ANSI/VT
 terminals supported by libvaxis. Other terminals and platforms are unverified.
 
 All actions are keyboard-operable. Arrow keys have `j`/`k` alternatives,

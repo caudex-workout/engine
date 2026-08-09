@@ -15,8 +15,9 @@ caudex workout start
 ## Installation and runtime baseline
 
 Released binaries are distributed only through the immutable GitHub Release
-for the matching `vX.Y.Z` tag. The release matrix verifies x86_64 and aarch64 Linux GNU, x86_64 and
-aarch64 macOS, and x86_64 Windows GNU. The initial archives are not
+for the matching `vX.Y.Z` tag. The release matrix verifies x86_64 and aarch64 Linux GNU, Apple Silicon
+macOS, and x86_64 Windows GNU. Prebuilt macOS releases target Apple Silicon.
+Intel Macs can build Caudex from source. The initial archives are not
 platform-code-signed. Every release binary statically includes the pinned
 official SQLite 3.49.1 amalgamation.
 

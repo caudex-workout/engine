@@ -14,7 +14,6 @@ contains `LICENSE`, `NOTICE`, `build-metadata.json`, and `SHA256SUMS`.
 | --- | --- | --- |
 | `x86_64-linux-gnu` | `libcaudex.a` | `libcaudex.so` |
 | `aarch64-linux-gnu` | `libcaudex.a` | `libcaudex.so` |
-| `x86_64-macos` | `libcaudex.a` | `libcaudex.dylib` |
 | `aarch64-macos` | `libcaudex.a` | `libcaudex.dylib` |
 | `x86_64-windows-gnu` | `caudex.lib` | `caudex.dll` and `caudex.import.lib` |
 | `aarch64-windows-gnu` | `caudex.lib` | `caudex.dll` and `caudex.import.lib` |
@@ -31,7 +30,6 @@ Zig 0.16.0 `ReleaseSmall` produced this v0.1.0 baseline:
 | --- | ---: | ---: | ---: | ---: |
 | `x86_64-linux-gnu` | 433,744 B | 357,800 B | — | 791,544 B |
 | `aarch64-linux-gnu` | 430,056 B | 332,272 B | — | 762,328 B |
-| `x86_64-macos` | 412,668 B | 317,621 B | — | 730,289 B |
 | `aarch64-macos` | 481,140 B | 346,176 B | — | 827,316 B |
 | `x86_64-windows-gnu` | 691,084 B | 634,880 B | 3,346 B | 1,329,310 B |
 | `aarch64-windows-gnu` | 659,106 B | 566,272 B | 3,346 B | 1,228,724 B |

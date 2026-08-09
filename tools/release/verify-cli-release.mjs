@@ -6,7 +6,7 @@ import { archiveEntries, sha256 } from "./archive-utils.mjs";
 
 export async function verifyCliRelease(directory, version) {
   const assets = [
-    "x86_64-linux-gnu", "aarch64-linux-gnu", "x86_64-macos", "aarch64-macos", "x86_64-windows-gnu",
+    "x86_64-linux-gnu", "aarch64-linux-gnu", "aarch64-macos", "x86_64-windows-gnu",
   ].map((target) => `caudex-workout-cli-${version}-${target}${target.endsWith("windows-gnu") ? ".zip" : ".tar.gz"}`);
   const sumsPath = path.join(directory, "SHA256SUMS");
   const expected = parseChecksums(await fs.readFile(sumsPath, "utf8"));

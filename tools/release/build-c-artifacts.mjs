@@ -17,7 +17,6 @@ import { basename, dirname, join, resolve } from "node:path";
 const matrix = [
   { target: "x86_64-linux-gnu", os: "linux", arch: "x86_64" },
   { target: "aarch64-linux-gnu", os: "linux", arch: "aarch64" },
-  { target: "x86_64-macos", os: "macos", arch: "x86_64" },
   { target: "aarch64-macos", os: "macos", arch: "aarch64" },
   { target: "x86_64-windows-gnu", os: "windows", arch: "x86_64" },
   { target: "aarch64-windows-gnu", os: "windows", arch: "aarch64" },

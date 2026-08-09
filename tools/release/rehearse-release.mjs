@@ -50,7 +50,7 @@ run("node", [
   "--output", path.join(output, "assets"),
 ]);
 
-if (process.platform === "linux" || process.platform === "darwin") {
+if (process.platform === "linux" || (process.platform === "darwin" && process.arch === "arm64")) {
   // The focused caudex-cli step compiles the executable but does not install
   // it into zig-out/bin. The rehearsal inspects and packages that installed
   // path, so use the install step explicitly for clean checkouts.
@@ -71,7 +71,7 @@ if (process.platform === "linux" || process.platform === "darwin") {
     "--sqlite-source-file", "vendor/sqlite/sqlite3.c",
   ]);
 } else {
-  console.log("local release rehearsal: Windows CLI packaging remains covered by the GitHub matrix");
+  console.log("local release rehearsal: this host does not have a supported native CLI release target; cross-platform CLI packaging remains covered by the GitHub matrix");
 }
 
 console.log(`local release rehearsal passed for ${release.tag}`);
