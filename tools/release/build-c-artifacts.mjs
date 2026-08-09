@@ -362,10 +362,12 @@ async function testNativeCompiler(entry, directory, names) {
       "examples/c/conformance.c",
       `-I${include}`,
       artifact,
-      "-O2",
-      "-o",
-      executable,
     ];
+    // Linux keeps libm separate from libc; the static and shared artifacts
+    // use round/roundq, so ordinary native consumers must link the normal
+    // platform math library after libcaudex.
+    if (entry.os === "linux") args.push("-lm");
+    args.push("-O2", "-o", executable);
     if (linkage === "shared") args.push(`-Wl,-rpath,${library}`);
     run(compiler, args);
     const environment = { ...process.env };

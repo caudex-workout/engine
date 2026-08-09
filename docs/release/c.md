@@ -74,6 +74,10 @@ platform loader path described below. Until a public release exists, there is
 no supported network URL or versioned download to substitute for this local
 staging command.
 
+Linux consumers should add the normal system math library after the Caudex
+library (`-lm`) for both static and shared linking; Linux keeps `round` and
+`roundq` in libm rather than libc. No Zig-specific runtime library is required.
+
 For macOS targets, the builder preserves Zig's embedded `compiler_rt.o` and
 rebuilds the static archive with Zig 0.16.0's Darwin archive mode before it
 writes checksums or runs the native Apple Clang compatibility check. This keeps
