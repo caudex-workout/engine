@@ -66,10 +66,10 @@ try {
   const consumerPackage = {
     private: true,
     type: "module",
-    dependencies: { [packageMetadata.name]: artifact.artifactFileUrl },
+    dependencies: { [packageMetadata.name]: artifact.artifactPath },
   };
-  if (consumerPackage.dependencies[packageMetadata.name] !== artifact.artifactFileUrl) {
-    throw new Error(`${contract}: generated dependency did not retain the local file URL`);
+  if (consumerPackage.dependencies[packageMetadata.name] !== artifact.artifactPath) {
+    throw new Error(`${contract}: generated dependency did not retain the local artifact path`);
   }
   await writeFile(join(project, "package.json"), JSON.stringify(consumerPackage));
   run(
@@ -88,7 +88,11 @@ try {
     await readFile(join(project, "package.json"), "utf8"),
   );
   const dependencySpec = consumerManifest.dependencies?.[packageMetadata.name];
-  if (typeof dependencySpec !== "string" || !dependencySpec.startsWith("file:")) {
+  if (
+    typeof dependencySpec !== "string" ||
+    (!dependencySpec.startsWith("file:") && dependencySpec !== artifact.artifactPath) ||
+    dependencySpec.includes("%20")
+  ) {
     throw new Error(
       `${contract}: npm rewrote the exact artifact dependency ambiguously: ` +
         `${dependencySpec ?? "<missing>"}`,
@@ -291,8 +295,10 @@ function run(
   if (result.signal) details.push(`signal: ${result.signal}`);
   if (result.error) details.push(`launcher error: ${result.error.message}`);
   if (artifact !== undefined) {
-    details.push(`artifact:\n  ${artifact.artifactPath}`);
-    details.push(`npm spec:\n  ${artifact.artifactFileUrl}`);
+    details.push("artifact exists:\n  true");
+    details.push(`artifact filesystem path:\n  ${artifact.artifactPath}`);
+    details.push(`npm spec:\n  ${artifact.artifactPath}`);
+    details.push(`artifact file URL (diagnostic only):\n  ${artifact.artifactFileUrl}`);
     details.push(`fixture:\n  ${cwd ?? process.cwd()}`);
     const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
     if (output.includes("git ls-remote") || output.includes("github.com")) {
