@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname "$0")/test_diagnostics.sh"
-test_diagnostics_init cli-set-commands
+test_diagnostics_init "CLI set-command contract"
 
 cli=$1
 seed=$2

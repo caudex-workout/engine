@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname "$0")/test_diagnostics.sh"
-test_diagnostics_init cli-workout-end
+test_diagnostics_init "CLI workout completion"
 
 cli=$1
 temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/caudex-cli-end.XXXXXX")

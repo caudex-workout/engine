@@ -27,7 +27,7 @@ const outputRoot = resolve(process.argv[2] ?? "zig-out/c-release");
 const hostOnly = process.argv.includes("--host-only");
 const linkTest = process.argv.includes("--test");
 const selected = hostOnly ? matrix.filter(isHostTarget) : matrix;
-console.log(`[c-release-compatibility] running${hostOnly ? " host-only" : " full matrix"}`);
+const contract = "C native-consumer compatibility";
 if (selected.length !== 1 && hostOnly) {
   throw new Error(`unsupported release host: ${process.platform}/${process.arch}`);
 }
@@ -375,7 +375,19 @@ async function testNativeCompiler(entry, directory, names) {
     if (entry.os === "linux") args.push("-lm");
     args.push("-O2", "-o", executable);
     if (linkage === "shared") args.push(`-Wl,-rpath,${library}`);
-    run(compiler, args);
+    run(
+      compiler,
+      args,
+      undefined,
+      false,
+      process.env,
+      [
+        `target: ${entry.target}`,
+        `artifact: ${artifact}`,
+        `compiler: ${compiler}`,
+        `link mode: ${linkage} library into native executable`,
+      ].join("\n"),
+    );
     const environment = { ...process.env };
     if (entry.os === "linux") environment.LD_LIBRARY_PATH = library;
     if (entry.os === "macos") environment.DYLD_LIBRARY_PATH = library;
@@ -435,17 +447,20 @@ async function sha256(path) {
   return createHash("sha256").update(await readFile(path)).digest("hex");
 }
 
-function run(command, args, cwd, capture = false, env = process.env) {
+function run(command, args, cwd, capture = false, env = process.env, context = "") {
   const result = spawnSync(command, args, {
     cwd,
     env,
     encoding: "utf8",
-    stdio: capture ? "pipe" : "inherit",
+    stdio: "pipe",
     timeout: 120_000,
   });
-  if (result.status !== 0) {
+  if (result.error || result.signal || result.status !== 0) {
     throw new Error(
-      `C release compatibility: ${basename(command)} ${args.join(" ")} failed (${result.status})\n` +
+        `${contract}: ${context ? `${context}\n` : ""}` +
+        `failed command: ${basename(command)} ${args.join(" ")}\n` +
+        `exit: ${result.status ?? "unknown"}${result.signal ? ` (${result.signal})` : ""}\n` +
+        (result.error ? `launcher error: ${result.error.message}\n` : "") +
         `${result.stdout ?? ""}${result.stderr ?? ""}`,
     );
   }

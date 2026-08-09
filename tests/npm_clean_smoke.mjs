@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const packageRoot = resolve("packages/npm/workout-engine");
+const contract = "npm clean-consumer packaging";
 const fixturePath = resolve("fixtures/requests/recommendation.json");
 const keep = process.argv.includes("--keep");
 const suppliedTarballIndex = process.argv.indexOf("--tarball");
@@ -18,7 +19,6 @@ const suppliedTarball = suppliedTarballIndex === -1 ? undefined : resolve(proces
 const temporary = await mkdtemp(join(tmpdir(), "caudex-npm-smoke-"));
 const packDirectory = join(temporary, "pack");
 const project = join(temporary, "project");
-console.log("[npm-clean-consumer] running");
 await mkdir(packDirectory);
 await mkdir(project);
 
@@ -69,16 +69,16 @@ const discovered = caudex.listMethodologies();
 caudex.dispose();
 if (!result.ok || result.metadata.resultFingerprint !==
   "83481330a812bb41384d958c104038d230bf93ceee163fd47b7c62a41361fd6f") {
-  throw new Error("canonical tarball fixture failed");
+  throw new Error("npm clean-consumer packaging: canonical tarball fixture failed");
 }
 if (invalid.ok || invalid.issues?.[0]?.code !== "protocol.unsupported_version") {
-  throw new Error("error fixture did not return a structured issue");
+  throw new Error("npm clean-consumer packaging: error fixture did not return a structured issue");
 }
 if (canonicalSchema.$id !== "https://caudex.dev/schemas/v0/canonical.schema.json") {
-  throw new Error("schema subpath export failed");
+  throw new Error("npm clean-consumer packaging: schema subpath export failed");
 }
 if (discoverySchema.$id !== "https://caudex.dev/schemas/discovery/v1/discovery.schema.json" || discovered.methodologies.length !== 2) {
-  throw new Error("discovery schema or runtime metadata export failed");
+  throw new Error("npm clean-consumer packaging: discovery schema or runtime metadata export failed");
 }
 `,
   );
@@ -170,7 +170,7 @@ try {
   caudex.dispose();
   if (!result.ok || invalid.ok ||
       invalid.issues?.[0]?.code !== "protocol.unsupported_version") {
-    throw new Error("browser canonical/error fixture failed");
+    throw new Error("npm clean-consumer packaging: browser canonical/error fixture failed");
   }
   document.body.dataset.status = "passed";
   output.textContent = result.metadata.resultFingerprint;
@@ -198,7 +198,7 @@ try {
   ]);
 
   console.log(
-    `caudex clean npm smoke passed: Node ESM, TypeScript 5.9, ` +
+    `${contract}: Node ESM, TypeScript 5.9, ` +
       `Rollup 4.62; browser fixture ${browser}`,
   );
   if (keep) {
@@ -209,7 +209,6 @@ try {
 }
 
 function run(command, args, cwd = undefined) {
-  console.log(`> ${command} ${args.join(" ")}`);
   const result = spawnSync(command, args, {
     cwd,
     encoding: "utf8",
@@ -218,7 +217,7 @@ function run(command, args, cwd = undefined) {
   });
   if (result.status !== 0) {
     throw new Error(
-      `npm clean consumer: ${command} ${args.join(" ")} failed with status ${result.status}` +
+      `${contract}: ${command} ${args.join(" ")} failed with status ${result.status}` +
         (result.error ? `: ${result.error.message}` : ""),
     );
   }

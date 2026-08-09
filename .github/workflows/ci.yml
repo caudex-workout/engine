@@ -64,7 +64,7 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: packages/npm/workout-engine
       - name: Install persistence adapter workspace links
-        run: npm install --ignore-scripts --no-audit --no-fund
+        run: npm ci --ignore-scripts --no-audit --no-fund
         working-directory: packages/persistence-indexeddb
       - name: Run canonical check
         run: zig build check --summary all

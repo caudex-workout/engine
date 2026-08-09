@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(dirname "$0")/test_diagnostics.sh"
-test_diagnostics_init cli-database-diagnostics
+test_diagnostics_init "CLI database diagnostics"
 
 cli=$1
 temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/caudex-cli-diagnostics.XXXXXX")
