@@ -35,10 +35,6 @@ try {
     resolve("examples/typescript-node/quickstart.ts"),
     join(project, "quickstart.ts"),
   );
-  await cp(
-    resolve("examples/typescript-node/sample-catalog.ts"),
-    join(project, "sample-catalog.ts"),
-  );
   await writeFile(
     join(project, "package.json"),
     JSON.stringify({ private: true, type: "module" }),
@@ -54,7 +50,7 @@ try {
         outDir: "dist",
         lib: ["ES2022", "DOM"],
       },
-      files: ["quickstart.ts", "sample-catalog.ts"],
+      files: ["quickstart.ts"],
     }),
   );
   run(process.execPath, [

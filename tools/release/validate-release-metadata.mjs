@@ -4,6 +4,12 @@ import path from "node:path";
 const root = path.resolve(import.meta.dirname, "../..");
 const metadata = JSON.parse(fs.readFileSync(path.join(root, "tools/release/release-metadata.json"), "utf8"));
 const zon = fs.readFileSync(path.join(root, "build.zig.zon"), "utf8");
+const zigPackageManifests = [
+  "packages/zig/core/build.zig.zon",
+  "packages/zig/sqlite/build.zig.zon",
+  "packages/zig/exercise-catalog/build.zig.zon",
+  "packages/zig/cli/build.zig.zon",
+];
 const npm = JSON.parse(fs.readFileSync(path.join(root, "packages/npm/workout-engine/package.json"), "utf8"));
 const lock = JSON.parse(fs.readFileSync(path.join(root, "packages/npm/workout-engine/package-lock.json"), "utf8"));
 const changelog = fs.readFileSync(path.join(root, "CHANGELOG.md"), "utf8");
@@ -12,6 +18,10 @@ const errors = [];
 if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(metadata.version)) errors.push("version is not semver");
 if (metadata.tag !== `v${metadata.version}`) errors.push("tag/version mismatch");
 if (!zon.includes(`.version = \"${metadata.version}\"`)) errors.push("build.zig.zon version drift");
+for (const manifest of zigPackageManifests) {
+  const source = fs.readFileSync(path.join(root, manifest), "utf8");
+  if (!source.includes(`.version = \"${metadata.version}\"`)) errors.push(`${manifest} version drift`);
+}
 if (npm.version !== metadata.version || lock.version !== metadata.version || lock.packages?.[""]?.version !== metadata.version) errors.push("npm metadata drift");
 if (!changelog.includes(`## [${metadata.version}]`)) errors.push("missing changelog section");
 if (metadata.checksumAlgorithm !== "sha256") errors.push("unsupported checksum algorithm");

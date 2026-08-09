@@ -3,7 +3,17 @@ import {
   methodologies,
   type RecommendationRequest,
 } from "@caudex-workout/engine";
-import { sampleCatalog } from "./sample-catalog.js";
+
+const sampleCatalog = [{
+  id: "incline-dumbbell-press",
+  name: "Incline Dumbbell Press",
+  equipmentIds: ["dumbbell", "adjustable-bench"],
+  movementTags: ["horizontal-push"],
+  muscleContributions: [
+    { muscleId: "pectoralis-major", role: "primary" as const },
+    { muscleId: "triceps", role: "secondary" as const },
+  ],
+}];
 
 const caudex = await createCaudex();
 try {

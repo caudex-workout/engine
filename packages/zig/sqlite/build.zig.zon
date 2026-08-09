@@ -1,6 +1,6 @@
 .{
     .name = .caudex_sqlite,
-    .version = "0.2.0-dev",
+    .version = "0.1.0",
     .fingerprint = 0xed667a7f9300d191,
     .minimum_zig_version = "0.16.0",
     .dependencies = .{ .caudex_core = .{ .path = "../core" } },

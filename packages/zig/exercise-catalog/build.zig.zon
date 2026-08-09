@@ -1,6 +1,6 @@
 .{
     .name = .caudex_exercise_catalog,
-    .version = "0.2.0-dev",
+    .version = "0.1.0",
     .fingerprint = 0xb8bc57789f1846e1,
     .minimum_zig_version = "0.16.0",
     .dependencies = .{ .caudex_core = .{ .path = "../core" } },

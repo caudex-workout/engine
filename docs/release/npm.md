@@ -1,5 +1,9 @@
 # npm release
 
+The package is currently staged but unpublished. Local packaging and dry-run
+checks do not make it available to external consumers; do not run the publish
+workflow as part of ordinary development.
+
 The npm release workflow publishes `@caudex-workout/engine` from a Git tag named
 for the package version, such as `v0.1.0`.
 
@@ -40,4 +44,3 @@ No matrix job can publish a second platform-specific npm artifact. Failures
 before the npm step leave at most a draft GitHub release, while failures after
 npm publication leave the exact published tarball attached to that draft for
 maintainer recovery.
-

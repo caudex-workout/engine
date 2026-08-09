@@ -1,15 +1,37 @@
 # Caudex Workout Engine
 
-Install the ESM package on Node.js 22 or newer:
+Public release status: `@caudex-workout/engine` is staged and tested locally,
+but is not currently published to npm. After a deliberate public release,
+install the ESM package on Node.js 22 or newer:
 
 ```bash
 npm install @caudex-workout/engine
 ```
 
-The repository's
-[quickstart and concepts guide](../../../docs/quickstart-and-concepts.md) shows
-the complete install-to-result flow, explanation inspection, and host data
-ownership model. It requires no database, account, or runtime network request.
+TypeScript projects should use ESM and NodeNext resolution:
+
+```json
+// package.json
+{ "type": "module" }
+```
+
+```json
+// tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "outDir": "dist"
+  }
+}
+```
+
+The [quickstart and concepts guide](https://github.com/caudex-workout/engine/blob/main/docs/quickstart-and-concepts.md)
+shows the complete install-to-result flow, explanation inspection, and host
+data ownership model. It requires no database, account, or runtime network
+request.
 
 ## TypeScript loader and facade
 
@@ -179,7 +201,8 @@ Run it with:
 zig build test-npm-clean
 ```
 
-CommonJS is not exported or supported. Rollup is the documented browser
+CommonJS `require()` is not exported or supported; use an ESM entry point.
+Rollup is the documented browser
 bundler for v0.1; other bundlers are not part of the current compatibility
 claim.
 

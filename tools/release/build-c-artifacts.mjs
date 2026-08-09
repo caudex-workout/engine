@@ -161,6 +161,14 @@ function buildLibrary(target, linkage, output, importLibrary) {
     "--name",
     "caudex",
   ];
+  // Keep compiler-rt symbols inside the static archive so ordinary C
+  // toolchains can link it without knowing that the library was built by Zig.
+  args.push("-fcompiler-rt");
+  if (linkage === "dynamic" && target.endsWith("-macos")) {
+    // A release bundle must be relocatable. The default install name embeds
+    // the build machine's absolute output path.
+    args.push("-install_name", "@rpath/libcaudex.dylib");
+  }
   if (importLibrary) args.push(`-femit-implib=${importLibrary}`);
   run("zig", args);
 }
@@ -208,6 +216,38 @@ async function testLinks(entry, directory, names, execute) {
       }
       run(executable, [fixture], undefined, false, environment);
     }
+    await rm(executable, { force: true });
+  }
+  if (execute && entry.os !== "windows") {
+    await testNativeCompiler(entry, directory, names);
+  }
+}
+
+async function testNativeCompiler(entry, directory, names) {
+  const fixture = resolve("fixtures/operations/recommendation-v1.json");
+  const include = join(directory, "include");
+  const library = join(directory, "lib");
+  const compiler = process.env.CC ?? "cc";
+  for (const linkage of ["static", "shared"]) {
+    const executable = join(directory, `conformance-native-${linkage}`);
+    const artifact = join(
+      library,
+      linkage === "static" ? names.static : names.shared,
+    );
+    const args = [
+      "examples/c/conformance.c",
+      `-I${include}`,
+      artifact,
+      "-O2",
+      "-o",
+      executable,
+    ];
+    if (linkage === "shared") args.push(`-Wl,-rpath,${library}`);
+    run(compiler, args);
+    const environment = { ...process.env };
+    if (entry.os === "linux") environment.LD_LIBRARY_PATH = library;
+    if (entry.os === "macos") environment.DYLD_LIBRARY_PATH = library;
+    run(executable, [fixture], undefined, false, environment);
     await rm(executable, { force: true });
   }
 }

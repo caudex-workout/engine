@@ -482,6 +482,7 @@ fn statusForError(err: ExecuteError) Status {
         error.UnsupportedVersion => .unsupported_version,
         error.UnsupportedMethodology => .unsupported_methodology,
         error.OutputLimitReached => .output_limit_reached,
+        error.CatalogLimitReached,
         error.InvalidRequest,
         error.InputTooLarge,
         error.InvalidUtf8,

@@ -16,8 +16,8 @@ Downstream Zig projects compile those sources for their selected target. The
 root development manifest intentionally remains a convenient monorepo build and
 is not the publishable core archive.
 
-Caudex supports direct source-package consumption with Zig 0.16.0. Tagged
-releases include `build.zig.zon`, the public `caudex` module, license and
+Caudex supports direct source-package consumption with Zig 0.16.0. A future
+tagged release will include `build.zig.zon`, the public `caudex` module, license and
 changelog files, module documentation, and the checked-in Zig consumer.
 
 For a third-party application that builds its own client, see the
@@ -30,13 +30,14 @@ From a Zig 0.16.0 consumer project, add the release archive:
 
 ```bash
 zig fetch --save \
-  https://github.com/OWNER/caudex/archive/refs/tags/v0.1.0.tar.gz
+  https://github.com/caudex-workout/engine/archive/refs/tags/v0.1.0.tar.gz
 ```
 
 `zig fetch --save` records the content hash calculated by Zig. Do not copy a
 hash from an untrusted source or replace it merely because a remote archive
-changed. Replace `OWNER` with the repository owner; a released tag is
-immutable.
+changed. The v0.1.0 tag is not currently published. Until it is, validate the
+package locally with `zig build package-zig` and consume the generated
+`zig-out/zig-packages/core` directory only as a staging dependency.
 
 Expose the package module from the consumer's `build.zig`:
 

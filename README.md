@@ -3,7 +3,12 @@
 [![Required CI](https://github.com/caudex-workout/engine/actions/workflows/ci.yml/badge.svg)](https://github.com/caudex-workout/engine/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Current release: **0.1.0** · supported Zig: **0.16.x**
+Current contract line: **0.1.0** · supported Zig: **0.16.x**
+
+> Public release status: no npm package, Zig tag, or native C release bundle is
+> currently published. The v0.1.0 artifacts are staged and validated locally;
+> the consumer commands below become network-installable only after a release
+> is deliberately published.
 
 Caudex is an open-source, embeddable strength and hypertrophy programming
 engine for developers. It accepts complete host-owned snapshots and returns
@@ -27,10 +32,31 @@ and whether a proposal is accepted or stored.
 
 ## npm quickstart
 
-Install the package into a Node.js 22 or newer project:
+For a future public release, install the package into a Node.js 22 or newer
+project:
 
 ```bash
 npm install @caudex-workout/engine
+```
+
+TypeScript projects should opt into ESM and NodeNext resolution:
+
+```json
+// package.json
+{ "type": "module" }
+```
+
+```json
+// tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "outDir": "dist"
+  }
+}
 ```
 
 Optional npm packages use the same namespace:
@@ -47,7 +73,17 @@ import {
   methodologies,
   type RecommendationRequest,
 } from "@caudex-workout/engine";
-import { sampleCatalog } from "./sample-catalog.js";
+
+const sampleCatalog = [{
+  id: "incline-dumbbell-press",
+  name: "Incline Dumbbell Press",
+  equipmentIds: ["dumbbell", "adjustable-bench"],
+  movementTags: ["horizontal-push"],
+  muscleContributions: [
+    { muscleId: "pectoralis-major", role: "primary" as const },
+    { muscleId: "triceps", role: "secondary" as const },
+  ],
+}];
 
 const caudex = await createCaudex();
 const methodology = methodologies.doubleProgression({
@@ -91,12 +127,15 @@ This produces an `incline-dumbbell-press` recommendation and a structured
 It is compiled and executed against the packed npm artifact by
 `zig build test-docs-quickstart`.
 
-The package is not yet published to the public npm registry. Until the first
-release, the same flow is exercised from the locally packed artifact.
+The package is not yet published to the public npm registry. To validate the
+same flow locally from this checkout, run `zig build package-npm`, then pack
+`packages/npm/workout-engine` with `npm pack` and install the resulting tarball
+into a separate consumer project. Do not interpret that local tarball as a
+published package.
 
 ## Zig package
 
-Direct Zig consumers can add a tagged source archive with `zig fetch --save`
+After a public tag exists, direct Zig consumers can add its source archive with `zig fetch --save`
 and import `@import("caudex")` plus the optional database-independent
 `@import("caudex_persistence")` and host-owned `@import("caudex_tracking")`
 contracts, plus the optional `@import("caudex_sqlite")` adapter. The
@@ -110,7 +149,7 @@ verifies both named imports from a clean copy containing only the source
 package's declared paths.
 
 The first-party [`caudex` CLI guide](apps/caudex-cli/README.md) covers the
-v0.1.0 GitHub Release installation path, first workout, JSON and shell
+planned v0.1.0 GitHub Release installation path, first workout, JSON and shell
 automation, database backup/restore, exit codes, TUI keybindings, and
 troubleshooting. Third-party Zig applications should start with the
 [Zig integrator guide](docs/zig-integrator-guide.md), which uses public
