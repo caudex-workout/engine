@@ -124,7 +124,7 @@ jobs:
           set -euo pipefail
           tarball="release/caudex-workout-engine-${{ needs.validate.outputs.version }}.tgz"
           node tests/npm_clean_smoke.mjs --tarball "$PWD/$tarball" --integrity "$(cat release/npm-integrity)"
-          npm publish "$tarball" --dry-run --ignore-scripts --access public --tag '${{ needs.validate.outputs.npm_tag }}'
+          npm publish "$PWD/$tarball" --dry-run --ignore-scripts --access public --tag '${{ needs.validate.outputs.npm_tag }}'
       - name: Upload exact npm tarball
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -343,11 +343,11 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: |
           test -n "$NODE_AUTH_TOKEN"
-          npm publish "release/assets/caudex-workout-engine-${{ needs.validate.outputs.version }}.tgz" \
+          npm publish "$PWD/release/assets/caudex-workout-engine-${{ needs.validate.outputs.version }}.tgz" \
             --provenance --access public --tag '${{ needs.validate.outputs.npm_tag }}'
       - name: Publish exact npm tarball with Trusted Publishing
         if: env.CAUDEX_NPM_AUTH_MODE != 'bootstrap'
-        run: npm publish "release/assets/caudex-workout-engine-${{ needs.validate.outputs.version }}.tgz" --provenance --access public --tag '${{ needs.validate.outputs.npm_tag }}'
+        run: npm publish "$PWD/release/assets/caudex-workout-engine-${{ needs.validate.outputs.version }}.tgz" --provenance --access public --tag '${{ needs.validate.outputs.npm_tag }}'
       - name: Make the already-created GitHub Release public
         env:
           GH_TOKEN: ${{ github.token }}

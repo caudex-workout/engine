@@ -145,6 +145,13 @@ if (workflow.includes("v0.1.0") || workflow.includes("gh release edit v0.1.0")) 
 if (!workflow.includes("if: github.event_name == 'push'")) {
   throw new Error("workflow dispatch must remain rehearsal-only");
 }
+if (
+  !workflow.includes('npm publish "$PWD/$tarball" --dry-run') ||
+  workflow.includes('npm publish "$tarball"') ||
+  workflow.includes('npm publish "release/')
+) {
+  throw new Error("npm publish must receive an explicit absolute local tarball path");
+}
 for (const obsolete of [".github/workflows/npm-release.yml", ".github/workflows/cli-release.yml", ".github/workflows/c-release.yml"]) {
   try {
     await fs.access(obsolete);
