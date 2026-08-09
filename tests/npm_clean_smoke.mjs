@@ -8,7 +8,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { canonicalNpmArtifact } from "../tools/release/npm-artifact.mjs";
 
 const packageRoot = resolve("packages/npm/workout-engine");
@@ -70,7 +70,7 @@ try {
   };
   if (
     consumerPackage.dependencies[packageMetadata.name] !== artifact.npmDependencySpec ||
-    !artifact.npmDependencySpec.startsWith("file:")
+    !isAbsolute(artifact.npmDependencySpec)
   ) {
     throw new Error(`${contract}: generated dependency did not retain the local npm spec`);
   }
