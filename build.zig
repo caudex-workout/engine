@@ -805,7 +805,7 @@ pub fn build(b: *std.Build) void {
     cli_version.addArg("version");
     cli_version.expectStdOutEqual(
         "caudex 0.1.0\nengine: 0.1.0 (schema 1)\npersistence contract: 3\n" ++
-            "tracking contract: 6\nsqlite adapter: 0.1.0 (schema 1-9)\n",
+            "tracking contract: 6\nsqlite adapter: 0.1.0 (schema 1-10)\n",
     );
 
     const cli_database_human = b.addRunArtifact(cli);
@@ -814,8 +814,8 @@ pub fn build(b: *std.Build) void {
         \\Database: :memory:
         \\Kind: memory
         \\Adapter version: 0.1.0
-        \\Schema version: 9
-        \\Supported schema: 1-9
+        \\Schema version: 10
+        \\Supported schema: 1-10
         \\Compatibility: current
         \\
     );
@@ -832,8 +832,8 @@ pub fn build(b: *std.Build) void {
     cli_database_json.expectStdOutEqual(
         "{\"schemaVersion\":1,\"kind\":\"caudex.database.info\",\"data\":{" ++
             "\"databasePath\":\":memory:\",\"databaseKind\":\"memory\"," ++
-            "\"adapterVersion\":\"0.1.0\",\"databaseSchemaVersion\":9," ++
-            "\"minimumSchemaVersion\":1,\"latestSchemaVersion\":9," ++
+            "\"adapterVersion\":\"0.1.0\",\"databaseSchemaVersion\":10," ++
+            "\"minimumSchemaVersion\":1,\"latestSchemaVersion\":10," ++
             "\"compatibility\":\"current\"}}\n",
     );
 
@@ -878,8 +878,8 @@ pub fn build(b: *std.Build) void {
         "{\"schemaVersion\":1,\"kind\":\"caudex.database.info\",\"data\":{" ++
             "\"databasePath\":\".zig-cache/cwe112-broken-pipe.sqlite\"," ++
             "\"databaseKind\":\"file\",\"adapterVersion\":\"0.1.0\"," ++
-            "\"databaseSchemaVersion\":9,\"minimumSchemaVersion\":1," ++
-            "\"latestSchemaVersion\":9,\"compatibility\":\"current\"}}\n",
+            "\"databaseSchemaVersion\":10,\"minimumSchemaVersion\":1," ++
+            "\"latestSchemaVersion\":10,\"compatibility\":\"current\"}}\n",
     );
 
     const cli_workout_start_test = b.addSystemCommand(&.{

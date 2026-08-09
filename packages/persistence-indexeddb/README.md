@@ -11,19 +11,23 @@ is packaged separately and is never imported or linked by
 | `catalog` | `[hostScopeKey, exerciseId]` | `by_scope(hostScopeKey)` |
 | `history` | `[hostScopeKey, completedAt, workoutId]` | `by_scope_completed(hostScopeKey, completedAt)` |
 | `methodology_state` | `[key.hostScopeKey, key.methodologyId]` | none |
-| `recommendation_journal` | `[hostScopeKey, acceptedAt, id]` | `by_scope_accepted(hostScopeKey, acceptedAt)` |
+| `recommendation_journal` | `[hostScopeKey, acceptedAt, id]` | `by_scope_accepted(hostScopeKey, acceptedAt)`, unique `by_scope_id(hostScopeKey, id)` |
 | `active_workouts` | `[hostScopeKey, workoutId]` | none |
 | `workout_templates` | `[hostScopeKey, template.id]` | none |
 | `workflow_recovery` | `[hostScopeKey, workflowId]` | none |
 | `portable_catalog_references` | `[hostScopeKey, exerciseId]` | none |
 
-The database version is `3`. Version 2 added active tracking snapshots,
+The database version is `4`. Version 2 added active tracking snapshots,
 templates, and workflow recovery records without rewriting v1 stores. Version
 3 adds scoped portable catalog references. Future
 released schema changes must increment the
 version and upgrade stores in `onupgradeneeded`; released upgrade steps are
 forward-only. This physical schema is adapter-private and is not the canonical
 Caudex computation schema.
+
+Version 4 adds a unique journal index so accepted-recommendation IDs are true
+idempotency keys. Reusing an ID with a different payload is rejected; an exact
+retry succeeds without another row.
 
 `compareAndSetState` reads the current record, validates the opaque revision,
 and writes the next revision in one IndexedDB readwrite transaction.

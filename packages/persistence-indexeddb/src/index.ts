@@ -32,7 +32,7 @@ import type {
   PortableIssue,
 } from "@caudex-workout/engine";
 
-export const INDEXEDDB_SCHEMA_VERSION = 3;
+export const INDEXEDDB_SCHEMA_VERSION = 4;
 
 const CATALOG_STORE = "catalog";
 const HISTORY_STORE = "history";
@@ -186,6 +186,14 @@ export class IndexedDbPersistenceAdapter
       const existing = await request<StateRow | undefined>(
         store.get(stateKey(change.key)),
       );
+      if (existing && !Number.isSafeInteger(existing.revisionNumber)) {
+        transaction.abort();
+        throw new PersistenceAdapterError(
+          "invalid_data",
+          "compareAndSetState",
+          "The persisted methodology-state revision is outside JavaScript's exact integer range.",
+        );
+      }
       const actualRevision = existing?.revision ?? null;
       if (actualRevision !== change.expectedRevision) {
         transaction.abort();
@@ -218,8 +226,45 @@ export class IndexedDbPersistenceAdapter
   ): Promise<void> {
     const database = await this.#open();
     const transaction = database.transaction(JOURNAL_STORE, "readwrite");
-    transaction.objectStore(JOURNAL_STORE).add(record satisfies JournalRow);
-    await transactionDone(transaction, "appendAcceptedRecommendation");
+    const store = transaction.objectStore(JOURNAL_STORE);
+    const existing = await request<JournalRow | undefined>(
+      store.index("by_scope_id").get([record.hostScopeKey, record.id]),
+    );
+    if (existing) {
+      if (!sameAcceptedRecommendation(existing, record)) {
+        transaction.abort();
+        throw new PersistenceAdapterError(
+          "invalid_data",
+          "appendAcceptedRecommendation",
+          "An accepted-recommendation ID was reused with a different payload.",
+        );
+      }
+      await transactionDone(transaction, "appendAcceptedRecommendation");
+      return;
+    }
+    store.add(record satisfies JournalRow);
+    try {
+      await transactionDone(transaction, "appendAcceptedRecommendation");
+    } catch (error) {
+      // Two tabs can both observe a missing ID before the unique index is
+      // enforced. Re-read after the losing transaction aborts so a concurrent
+      // exact retry still has idempotent semantics.
+      if (!isConstraintError(error)) throw error;
+      const retryTransaction = database.transaction(JOURNAL_STORE, "readonly");
+      const winner = await request<JournalRow | undefined>(
+        retryTransaction.objectStore(JOURNAL_STORE).index("by_scope_id").get([record.hostScopeKey, record.id]),
+      );
+      await transactionDone(retryTransaction, "appendAcceptedRecommendation");
+      if (winner && sameAcceptedRecommendation(winner, record)) return;
+      if (winner) {
+        throw new PersistenceAdapterError(
+          "invalid_data",
+          "appendAcceptedRecommendation",
+          "An accepted-recommendation ID was reused with a different payload.",
+        );
+      }
+      throw error;
+    }
   }
 
   async appendCompletedWorkout(
@@ -261,6 +306,10 @@ export class IndexedDbPersistenceAdapter
         transaction.abort();
         throw new PersistenceAdapterError("invalid_data", "saveActiveWorkout", "The active-workout snapshot does not contain its workout ID.");
       }
+      if (!isSafeRevision(workout.revision)) {
+        transaction.abort();
+        throw new PersistenceAdapterError("invalid_data", "saveActiveWorkout", "The active-workout revision is outside JavaScript's exact integer range.");
+      }
       store.put({ ...record, revision: workout.revision } satisfies ActiveWorkoutRow);
       await transactionDone(transaction, "saveActiveWorkout");
     } catch (error) {
@@ -288,6 +337,10 @@ export class IndexedDbPersistenceAdapter
       if (actualRevision !== expectedRevision) {
         transaction.abort();
         throw new PersistenceRevisionConflictError("workout_template", record.template.id, expectedRevision, actualRevision);
+      }
+      if (!isSafeRevision(record.template.revision)) {
+        transaction.abort();
+        throw new PersistenceAdapterError("invalid_data", "saveTemplate", "The workout-template revision is outside JavaScript's exact integer range.");
       }
       store.put({ ...record, revision: record.template.revision } satisfies TemplateRow);
       await transactionDone(transaction, "saveTemplate");
@@ -506,6 +559,7 @@ function validatePortableRequest(input: PortableImportRequest): PortableImportPl
       add("portable.active_workout_inconsistent", "/document/activeWorkouts", "An active-workout record must contain exactly its matching active workout and scope.");
     for (const candidate of workouts) for (const exercise of candidate.exercises ?? [])
       if (!exerciseKeys.has(`${record.hostScopeKey}\0${exercise.exerciseId}`)) add("portable.catalog_reference_missing", "/document/activeWorkouts", "An active workout exercise has no catalog reference or embedded custom exercise.");
+    for (const candidate of workouts) if (!isSafeRevision(candidate.revision)) add("portable.revision_invalid", "/document/activeWorkouts", "An active-workout revision must be a non-negative safe integer.");
   }
   for (const record of collections.completedWorkouts) for (const exercise of record.workout.exercises)
     if (!exerciseKeys.has(`${record.hostScopeKey}\0${exercise.exerciseId}`)) add("portable.catalog_reference_missing", "/document/completedWorkouts", "A completed workout exercise has no catalog reference or embedded custom exercise.");
@@ -529,7 +583,11 @@ function validatePortableRequest(input: PortableImportRequest): PortableImportPl
     if (!validTimestamp(record.acceptedAt)) add("portable.timestamp_invalid", "/document/acceptedRecommendations", "An accepted-recommendation timestamp is invalid.");
     for (const exercise of record.result.recommendation?.exercises ?? []) for (const set of exercise.sets) validateMetrics(set.targetMetrics, "/document/acceptedRecommendations");
   }
-  for (const record of collections.methodologyStates) if (!validTimestamp(record.updatedAt)) add("portable.timestamp_invalid", "/document/methodologyStates", "A methodology-state timestamp is invalid.");
+  for (const record of collections.templates) if (!isSafeRevision(record.template.revision)) add("portable.revision_invalid", "/document/templates", "A workout-template revision must be a non-negative safe integer.");
+  for (const record of collections.methodologyStates) {
+    if (!validTimestamp(record.updatedAt)) add("portable.timestamp_invalid", "/document/methodologyStates", "A methodology-state timestamp is invalid.");
+    if (!validRevision(record.revision)) add("portable.revision_invalid", "/document/methodologyStates", "A methodology-state revision must be a non-negative safe integer string.");
+  }
   for (const record of collections.workflowRecovery) if (!validTimestamp(record.updatedAt)) add("portable.timestamp_invalid", "/document/workflowRecovery", "A workflow-recovery timestamp is invalid.");
   return {
     schemaVersion: 1,
@@ -543,11 +601,48 @@ function validatePortableRequest(input: PortableImportRequest): PortableImportPl
 }
 
 const PORTABLE_UNITS = new Set(["count", "g", "kg", "lb", "s", "min", "m", "km", "mi", "rpe", "rir", "level", "percent"]);
+function isSafeRevision(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+function validRevision(value: string): boolean {
+  return /^(0|[1-9][0-9]*)$/.test(value) && isSafeRevision(Number(value));
+}
 function portableCompare(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 function validTimestamp(value: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value));
+  if (value.length > 64) return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(Z|[+-](\d{2}):(\d{2}))$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) return false;
+  const daysInMonth = month === 2
+    ? (year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28)
+    : [4, 6, 9, 11].includes(month) ? 30 : 31;
+  if (day < 1 || day > daysInMonth) return false;
+  if (match[7] !== "Z" && (Number(match[8]) > 23 || Number(match[9]) > 59)) return false;
+  return true;
+}
+
+function sameAcceptedRecommendation(
+  left: AcceptedRecommendationRecord,
+  right: AcceptedRecommendationRecord,
+): boolean {
+  return left.id === right.id &&
+    left.hostScopeKey === right.hostScopeKey &&
+    left.acceptedAt === right.acceptedAt &&
+    JSON.stringify(left.result) === JSON.stringify(right.result);
+}
+
+function isConstraintError(error: unknown): boolean {
+  return error instanceof PersistenceAdapterError &&
+    error.cause instanceof DOMException &&
+    error.cause.name === "ConstraintError";
 }
 
 function portableScopes(document: PortableDocument): Set<string> {
@@ -597,8 +692,14 @@ function withConflictIssues(plan: PortableImportPlan, conflicts: Set<string>): P
 }
 
 function parseRevision(value: string): number {
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : 0;
+  if (!validRevision(value)) {
+    throw new PersistenceAdapterError(
+      "invalid_data",
+      "importPortable",
+      "A methodology-state revision is not representable exactly by IndexedDB's JavaScript adapter.",
+    );
+  }
+  return Number(value);
 }
 
 function openDatabase(
@@ -637,6 +738,18 @@ function openDatabase(
           "by_scope_accepted",
           ["hostScopeKey", "acceptedAt"],
         );
+        journal.createIndex("by_scope_id", ["hostScopeKey", "id"], {
+          unique: true,
+        });
+      } else {
+        const journal = open.transaction?.objectStore(JOURNAL_STORE);
+        if (journal && !journal.indexNames.contains("by_scope_id")) {
+          // An old database with duplicate IDs must fail the upgrade instead
+          // of silently choosing which persisted record wins.
+          journal.createIndex("by_scope_id", ["hostScopeKey", "id"], {
+            unique: true,
+          });
+        }
       }
       if (!database.objectStoreNames.contains(ACTIVE_WORKOUT_STORE)) {
         database.createObjectStore(ACTIVE_WORKOUT_STORE, { keyPath: ["hostScopeKey", "workoutId"] });

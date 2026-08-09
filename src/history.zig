@@ -52,10 +52,10 @@ pub fn lastCompletedExercise(
                 .workout = workout,
                 .exercise = exercise,
             };
-            if (latest == null or
-                workout.completed_at.unixSeconds() >
-                    latest.?.workout.completed_at.unixSeconds())
-            {
+            if (latest == null or performanceComesBefore(
+                candidate,
+                latest.?,
+            )) {
                 latest = candidate;
             }
         }
@@ -81,10 +81,10 @@ pub fn recentPerformances(
                 .exercise = exercise,
             };
             var insertion = len;
-            while (insertion > 0 and
-                out[insertion - 1].workout.completed_at.unixSeconds() <
-                    workout.completed_at.unixSeconds())
-            {
+            while (insertion > 0 and performanceComesBefore(
+                candidate,
+                out[insertion - 1],
+            )) {
                 out[insertion] = out[insertion - 1];
                 insertion -= 1;
             }
@@ -93,6 +93,19 @@ pub fn recentPerformances(
         }
     }
     return out[0..len];
+}
+
+/// Orders performances newest-first with an explicit ID tie-break. Host
+/// snapshots are not required to arrive in chronological order, and equal
+/// timestamps are common when a host only records second precision.
+fn performanceComesBefore(
+    left: ExercisePerformance,
+    right: ExercisePerformance,
+) bool {
+    const left_seconds = left.workout.completed_at.unixSeconds();
+    const right_seconds = right.workout.completed_at.unixSeconds();
+    if (left_seconds != right_seconds) return left_seconds > right_seconds;
+    return std.mem.order(u8, left.workout.id.bytes, right.workout.id.bytes) == .lt;
 }
 
 /// Returns elapsed whole seconds from a completed workout to explicit `as_of`.
@@ -351,6 +364,23 @@ test "last and recent exercise performances use completion time" {
             &insufficient_storage,
         ),
     );
+}
+
+test "equal completion timestamps use stable workout ID ordering" {
+    var history: TestHistory = undefined;
+    try history.init();
+    history.workouts[0].completed_at = try .parse("2026-07-24T11:00:00Z");
+    history.workouts[1].completed_at = history.workouts[0].completed_at;
+    history.workouts[0].id = try .parse("z-workout");
+    history.workouts[1].id = try .parse("a-workout");
+
+    const last = lastCompletedExercise(history.snapshot(), history.exercise_id).?;
+    try std.testing.expectEqualStrings("a-workout", last.workout.id.bytes);
+
+    var storage: [2]ExercisePerformance = undefined;
+    const recent = try recentPerformances(history.snapshot(), history.exercise_id, &storage);
+    try std.testing.expectEqualStrings("a-workout", recent[0].workout.id.bytes);
+    try std.testing.expectEqualStrings("z-workout", recent[1].workout.id.bytes);
 }
 
 test "recency is relative to explicit as-of instant" {

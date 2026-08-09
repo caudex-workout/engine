@@ -263,6 +263,17 @@ test "exercise add remove and reorder persist atomically" {
         .anchor = .end,
     });
     try expectOrder(bench.accepted.workout, &.{"bench-membership"});
+    const bench_replay = try database.addExercise(allocator, .{
+        .metadata = metadata("add-bench"),
+        .scope = scope,
+        .workout_id = start.workout_id,
+        .expected_revision = 1,
+        .membership_id = .{ .bytes = "bench-membership" },
+        .exercise_id = .{ .bytes = "bench" },
+        .anchor = .end,
+    });
+    try std.testing.expectEqual(tracking.CommandDisposition.replayed, bench_replay.accepted.disposition);
+    try std.testing.expectEqual(@as(u64, 2), bench_replay.accepted.workout.revision);
     const row = try database.addExercise(allocator, .{
         .metadata = metadata("add-row"),
         .scope = scope,

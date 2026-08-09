@@ -295,7 +295,13 @@ pub const Timestamp = struct {
     bytes: []const u8,
 
     pub fn parse(bytes: []const u8) error{InvalidTimestamp}!Timestamp {
-        if (!isValidRfc3339(bytes)) return error.InvalidTimestamp;
+        // Keep the direct typed API bounded just like the JSON boundaries.
+        // Fractional seconds are preserved, but accepting arbitrary precision
+        // would permit unbounded validation and copied output at every public
+        // boundary.
+        if (bytes.len > 64 or !isValidRfc3339(bytes)) {
+            return error.InvalidTimestamp;
+        }
         return .{ .bytes = bytes };
     }
 
@@ -500,5 +506,14 @@ test "timestamp is explicit and round-trips" {
     try std.testing.expectEqual(
         (try Timestamp.parse("2026-07-25T18:00:00Z")).unixSeconds(),
         timestamp.unixSeconds(),
+    );
+    try std.testing.expectEqual(@as(usize, 64), (try Timestamp.parse(
+        "2026-07-25T14:00:00.1234567890123456789012345678901234567890123Z",
+    )).bytes.len);
+    try std.testing.expectError(
+        error.InvalidTimestamp,
+        Timestamp.parse(
+            "2026-07-25T14:00:00.12345678901234567890123456789012345678901234Z",
+        ),
     );
 }

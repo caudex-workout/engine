@@ -16,5 +16,9 @@ grep -q '^table=compact$' <<<"$shown"
 
 help=$("$cli" history --help)
 grep -q 'history correct-set' <<<"$help"
+help_database="$temporary_directory/missing-parent/database.sqlite"
+help_with_missing_database=$("$cli" --database "$help_database" history --help)
+grep -q 'history correct-set' <<<"$help_with_missing_database"
+test ! -e "$help_database"
 alias_output=$("$cli" --database :memory: e list --limit 1)
 test "$alias_output" = 'No exercises.'

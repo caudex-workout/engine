@@ -218,6 +218,16 @@ fn run(
 
     const global = try parseGlobalOptions(args);
     const command = args[global.command_index..];
+    // Help is a parser concern, not a database command. Handle it before
+    // resolving paths or opening SQLite so `history --help` works on a fresh
+    // machine and never creates state as a side effect.
+    if (command.len > 0 and
+        (std.mem.eql(u8, command[command.len - 1], "--help") or
+            std.mem.eql(u8, command[command.len - 1], "help")))
+    {
+        try output.writeHelp(stdout, help_text);
+        return null;
+    }
     if (command.len == 2 and std.mem.eql(u8, command[0], "completion")) {
         const shell = commands.parseCompletionShell(command[1]) orelse return error.InvalidArguments;
         try commands.writeCompletion(stdout, shell);
@@ -257,10 +267,6 @@ fn run(
         .quiet = global.quiet,
     };
     var remaining = args[global.command_index..];
-    if (remaining.len > 0 and (std.mem.eql(u8, remaining[remaining.len - 1], "--help") or std.mem.eql(u8, remaining[remaining.len - 1], "help"))) {
-        try output.writeHelp(stdout, help_text);
-        return null;
-    }
     if (remaining.len > 0) {
         const alias: ?[]const u8 = if (std.mem.eql(u8, remaining[0], "w")) "workout" else if (std.mem.eql(u8, remaining[0], "s")) "set" else if (std.mem.eql(u8, remaining[0], "e")) "exercise" else if (std.mem.eql(u8, remaining[0], "h")) "history" else null;
         if (alias) |noun| {

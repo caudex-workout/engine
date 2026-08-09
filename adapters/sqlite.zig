@@ -15,7 +15,7 @@ const c = @cImport({
 });
 
 pub const adapter_version = "0.1.0";
-pub const schema_version: u32 = 9;
+pub const schema_version: u32 = 10;
 pub const minimum_schema_version: u32 = 1;
 
 pub const Options = struct {
@@ -573,6 +573,10 @@ pub const Adapter = opaque {
             9,
             @embedFile("sqlite/migrations/009_accepted_recommendations.sql"),
         );
+        if (current < 10) try self.applyMigration(
+            10,
+            @embedFile("sqlite/migrations/010_tracking_exercise_receipts.sql"),
+        );
     }
 
     fn applyMigration(
@@ -938,7 +942,7 @@ fn lastTrackedPerformance(self: *Adapter, allocator: std.mem.Allocator, query: t
         \\WHERE w.host_scope_key = ?1 AND w.athlete_id = ?2 AND w.status = 'completed'
         \\ AND EXISTS (SELECT 1 FROM tracking_workout_exercises e WHERE e.host_scope_key = w.host_scope_key
         \\   AND e.athlete_id = w.athlete_id AND e.workout_id = w.workout_id AND e.exercise_id = ?3)
-        \\ORDER BY w.completed_at DESC, w.workout_id DESC LIMIT 1
+        \\ORDER BY w.completed_at DESC, w.workout_id ASC LIMIT 1
     );
     defer statement.finalize();
     try statement.bindText(1, query.scope.host_scope_key.bytes);
@@ -1208,8 +1212,34 @@ fn changeTrackedExercises(
     allocator: std.mem.Allocator,
     change: ExerciseChange,
 ) TrackingError!tracking.CommandResult {
+    const payload = try encodeAlloc(allocator, change);
+    defer allocator.free(payload);
     try self.execute("BEGIN IMMEDIATE");
     errdefer self.execute("ROLLBACK") catch {};
+
+    const command_id = exerciseChangeCommandId(change);
+    if (try loadExerciseReceipt(self, allocator, change.scope(), command_id)) |prior_payload| {
+        defer allocator.free(prior_payload);
+        if (!std.mem.eql(u8, prior_payload, payload)) {
+            var issue: [1]tracking.Issue = .{.{
+                .code = tracking.issue_codes.command_payload_conflict,
+                .category = .conflict,
+                .severity = .@"error",
+                .message = "The command ID was already used with another payload.",
+            }};
+            const owned = try ownRejected(allocator, .{ .command_id = command_id, .issues = &issue });
+            try self.execute("ROLLBACK");
+            return owned;
+        }
+        const current = (try loadTrackedWorkout(self, allocator, change.scope(), change.workoutId())) orelse return error.InvalidData;
+        const accepted = try ownAccepted(allocator, .{
+            .command_id = command_id,
+            .disposition = .replayed,
+            .workout = current,
+        });
+        try self.execute("COMMIT");
+        return .{ .accepted = accepted };
+    }
 
     const workout = try loadTrackedWorkout(
         self,
@@ -1281,8 +1311,51 @@ fn changeTrackedExercises(
     };
     const accepted = try ownAccepted(allocator, proposed);
     try persistWorkoutState(self, allocator, accepted.workout);
+    try insertExerciseReceipt(self, change.scope(), command_id, change.workoutId(), payload);
     try self.execute("COMMIT");
     return .{ .accepted = accepted };
+}
+
+fn exerciseChangeCommandId(change: ExerciseChange) tracking.Id {
+    return switch (change) {
+        inline else => |command| command.metadata.command_id,
+    };
+}
+
+fn loadExerciseReceipt(
+    self: *Adapter,
+    allocator: std.mem.Allocator,
+    scope: tracking.Scope,
+    command_id: tracking.Id,
+) TrackingError!?[]const u8 {
+    var statement = try self.prepare(
+        "SELECT payload_json FROM tracking_exercise_command_receipts WHERE host_scope_key = ?1 AND athlete_id = ?2 AND command_id = ?3",
+    );
+    defer statement.finalize();
+    try statement.bindText(1, scope.host_scope_key.bytes);
+    try statement.bindText(2, athleteKey(scope));
+    try statement.bindText(3, command_id.bytes);
+    if (!try statement.row()) return null;
+    return try dupeColumn(allocator, statement.raw, 0);
+}
+
+fn insertExerciseReceipt(
+    self: *Adapter,
+    scope: tracking.Scope,
+    command_id: tracking.Id,
+    workout_id: tracking.Id,
+    payload: []const u8,
+) persistence.AdapterError!void {
+    var statement = try self.prepare(
+        "INSERT INTO tracking_exercise_command_receipts (host_scope_key, athlete_id, command_id, payload_json, workout_id) VALUES (?1, ?2, ?3, ?4, ?5)",
+    );
+    defer statement.finalize();
+    try statement.bindText(1, scope.host_scope_key.bytes);
+    try statement.bindText(2, athleteKey(scope));
+    try statement.bindText(3, command_id.bytes);
+    try statement.bindText(4, payload);
+    try statement.bindText(5, workout_id.bytes);
+    try statement.done();
 }
 
 fn loadExerciseCatalogEntry(
@@ -2419,6 +2492,7 @@ fn deletePortableScopes(self: *Adapter, allocator: std.mem.Allocator, document: 
     for (document.workflowRecovery) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
     const statements = [_][]const u8{
         "DELETE FROM tracking_set_command_receipts WHERE host_scope_key=?1",
+        "DELETE FROM tracking_exercise_command_receipts WHERE host_scope_key=?1",
         "DELETE FROM tracking_workout_end_receipts WHERE host_scope_key=?1",
         "DELETE FROM tracking_correction_receipts WHERE host_scope_key=?1",
         "DELETE FROM tracking_command_receipts WHERE host_scope_key=?1",
@@ -2453,6 +2527,7 @@ fn executeScopeDelete(self: *Adapter, sql: []const u8, scope: []const u8) persis
 fn deletePortableWorkout(self: *Adapter, scope: []const u8, athlete: []const u8, workout_id: []const u8) persistence.AdapterError!void {
     const statements = [_][]const u8{
         "DELETE FROM tracking_set_command_receipts WHERE host_scope_key=?1 AND athlete_id=?2 AND workout_id=?3",
+        "DELETE FROM tracking_exercise_command_receipts WHERE host_scope_key=?1 AND athlete_id=?2 AND workout_id=?3",
         "DELETE FROM tracking_workout_end_receipts WHERE host_scope_key=?1 AND athlete_id=?2 AND workout_id=?3",
         "DELETE FROM tracking_correction_receipts WHERE host_scope_key=?1 AND athlete_id=?2 AND workout_id=?3",
         "DELETE FROM tracking_command_receipts WHERE host_scope_key=?1 AND athlete_id=?2 AND workout_id=?3",

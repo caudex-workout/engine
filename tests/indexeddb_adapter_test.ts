@@ -84,6 +84,76 @@ try {
     throw new Error("state compare-and-set did not round trip");
   }
 
+  const acceptedRecommendation = {
+    id: "accepted-1",
+    hostScopeKey: "athlete-1",
+    acceptedAt: "2026-07-26T12:02:30Z",
+    result: {
+      ok: false,
+      metadata: {
+        engineVersion: "test",
+        schemaVersion: 1,
+        methodology: { id: "caudex.double-progression", version: "1", configVersion: 1 },
+        inputFingerprint: "input",
+        resultFingerprint: "result",
+      },
+    },
+  };
+  await adapter.appendAcceptedRecommendation(acceptedRecommendation);
+  await adapter.appendAcceptedRecommendation(structuredClone(acceptedRecommendation));
+  let journalConflict: unknown;
+  try {
+    await adapter.appendAcceptedRecommendation({
+      ...acceptedRecommendation,
+      acceptedAt: "2026-07-26T12:02:31Z",
+    });
+  } catch (error) {
+    journalConflict = error;
+  }
+  if (!(journalConflict instanceof Error) || !journalConflict.message.includes("reused")) {
+    throw new Error("accepted-recommendation ID reuse was not rejected");
+  }
+  const journalExport = await adapter.exportPortable({ hostScopeKey: "athlete-1", exportedAt: "2026-08-04T12:00:00Z" });
+  if (journalExport.acceptedRecommendations?.length !== 1) {
+    throw new Error("accepted-recommendation retry created a duplicate journal row");
+  }
+
+  const invalidDatePlan = await adapter.importPortable({
+    schemaVersion: 1,
+    mode: "merge",
+    conflictPolicy: "reject",
+    dryRun: true,
+    document: {
+      schemaVersion: 1,
+      exportedAt: "2026-02-31T12:00:00Z",
+    },
+  });
+  if (invalidDatePlan.valid || !invalidDatePlan.issues.some((issue) => issue.code === "portable.timestamp_invalid")) {
+    throw new Error("portable import accepted an impossible calendar date");
+  }
+
+  const invalidRevisionPlan = await adapter.importPortable({
+    schemaVersion: 1,
+    mode: "merge",
+    conflictPolicy: "reject",
+    dryRun: true,
+    document: {
+      schemaVersion: 1,
+      exportedAt: "2026-08-04T12:00:00Z",
+      methodologyStates: [{
+        hostScopeKey: "athlete-1",
+        methodologyId: "caudex.double-progression",
+        methodologyVersion: "0.1.0",
+        state: { schemaVersion: 1, data: {} },
+        revision: "9007199254740992",
+        updatedAt: "2026-08-04T12:00:00Z",
+      }],
+    },
+  });
+  if (invalidRevisionPlan.valid || !invalidRevisionPlan.issues.some((issue) => issue.code === "portable.revision_invalid")) {
+    throw new Error("portable import accepted an unsafe revision number");
+  }
+
   const active = {
     hostScopeKey: "athlete-1",
     workoutId: "active-1",

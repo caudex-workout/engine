@@ -138,7 +138,7 @@ keys; unrelated host services are explicitly not presented as one transaction.
 
 The npm persistence contract v3 and IndexedDB schema v3 now persist
 revision-aware active snapshots, templates, and workflow recovery records.
-SQLite schema v9 preserves recommendation/template provenance and immutable
+SQLite schema v10 preserves recommendation/template provenance and immutable
 prescriptions, adds revision-aware templates and workflow recovery records, and
 persists workflow-instantiated workouts transactionally. The reusable contract
 kit now verifies template compare-and-set and pending-to-completed recovery

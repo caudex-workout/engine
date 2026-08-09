@@ -151,6 +151,13 @@ pub fn validateState(
                 break;
             }
         }
+        if (primitives.Id.parse(exercise.exerciseId) catch null == null) {
+            try appendStateInvalid(
+                issues,
+                "A state exercise ID must be a non-empty valid UTF-8 identifier.",
+            );
+            continue;
+        }
         const resolved = resolvedForExercise(config, exercise.exerciseId);
         if (exercise.targetRepetitions < resolved.repRange.min or
             exercise.targetRepetitions > resolved.repRange.max)
@@ -174,10 +181,20 @@ pub fn validateState(
             );
             continue;
         };
-        if (load_value.mantissa < 0 or load_unit.dimension() != .mass) {
+        const configured_load_unit = primitives.Unit.parse(resolved.initialLoad.unit) catch {
             try appendStateInvalid(
                 issues,
-                "A state load must be a non-negative mass measurement.",
+                "A state load must use the resolved configuration load unit.",
+            );
+            continue;
+        };
+        if (load_value.mantissa < 0 or
+            load_unit.dimension() != .mass or
+            load_unit != configured_load_unit)
+        {
+            try appendStateInvalid(
+                issues,
+                "A state load must be a non-negative mass measurement in the resolved configuration unit.",
             );
         }
     }
@@ -1014,6 +1031,30 @@ test "valid config and state collect no issues" {
         &issues,
     );
     try std.testing.expectEqual(@as(usize, 0), issues.items().len);
+}
+
+test "state validation rejects malformed IDs and mismatched load units" {
+    const config = validConfig(&.{});
+    const states = [_]ExerciseState{
+        .{
+            .exerciseId = "",
+            .load = .{ .amount = "225", .unit = "kg" },
+            .targetRepetitions = 10,
+        },
+        .{
+            .exerciseId = "squat",
+            .load = .{ .amount = "225", .unit = "kg" },
+            .targetRepetitions = 10,
+        },
+    };
+    var issue_storage: [8]canonical.ValidationIssue = undefined;
+    var issues: diagnostics.IssueWriter = .init(&issue_storage);
+    try validateState(
+        config,
+        .{ .schemaVersion = 1, .data = .{ .exercises = &states } },
+        &issues,
+    );
+    try std.testing.expectEqual(@as(usize, 2), issues.items().len);
 }
 
 test "config validation collects independent failures" {

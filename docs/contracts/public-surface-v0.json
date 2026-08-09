@@ -108,7 +108,8 @@
     "adapters/sqlite/migrations/006_catalog_management.sql",
     "adapters/sqlite/migrations/007_history_queries.sql",
     "adapters/sqlite/migrations/008_workflow_persistence.sql",
-    "adapters/sqlite/migrations/009_accepted_recommendations.sql"
+    "adapters/sqlite/migrations/009_accepted_recommendations.sql",
+    "adapters/sqlite/migrations/010_tracking_exercise_receipts.sql"
   ],
   "methodologyIds": [
     "caudex.double-progression",

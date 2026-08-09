@@ -286,6 +286,18 @@ pub fn recommendSession(
     }
     var issue_storage: [16]canonical.ValidationIssue = undefined;
     var issues: diagnostics.IssueWriter = .init(&issue_storage);
+    var training_issue_storage: [64]training.ValidationIssue = undefined;
+    const training_issues = training.validate(
+        request.catalog,
+        request.history,
+        &training_issue_storage,
+    ) catch return error.OutputLimitReached;
+    if (training_issues.len != 0) return error.InvalidRequest;
+    for (request.history.workouts) |workout| {
+        if (workout.completed_at.unixSeconds() > request.as_of.unixSeconds()) {
+            return error.InvalidRequest;
+        }
+    }
     implementation.validate_config(
         .{ .context = &request.config },
         &issues,
@@ -334,10 +346,16 @@ pub fn evaluatePerformance(
         request.methodology_id,
         request.methodology_version,
     ) orelse return error.UnsupportedMethodology;
-    for (request.completed_workout.exercises) |exercise| {
-        if (request.catalog.find(exercise.exercise_id) == null) {
-            return error.InvalidRequest;
-        }
+    var training_issue_storage: [64]training.ValidationIssue = undefined;
+    const workout_snapshot = [_]training.CompletedWorkout{request.completed_workout.*};
+    const training_issues = training.validate(
+        request.catalog,
+        .{ .workouts = &workout_snapshot },
+        &training_issue_storage,
+    ) catch return error.OutputLimitReached;
+    if (training_issues.len != 0) return error.InvalidRequest;
+    if (request.completed_workout.completed_at.unixSeconds() > request.as_of.unixSeconds()) {
+        return error.InvalidRequest;
     }
     var destination = MethodologyEvaluationOutput{
         .request = &request,
@@ -664,6 +682,90 @@ test "one exercise recommendation repeats identically" {
     );
     try std.testing.expectEqual(@as(usize, 64), first.metadata.inputFingerprint.len);
     try std.testing.expectEqual(@as(usize, 64), first.metadata.resultFingerprint.len);
+}
+
+test "recommendation rejects history references outside the supplied catalog" {
+    const catalog = [_]training.Exercise{.{ .id = try .parse("squat") }};
+    const history_exercise = [_]training.CompletedExercise{.{
+        .exercise_id = try .parse("bench-press"),
+        .sets = &.{},
+    }};
+    const history_workouts = [_]training.CompletedWorkout{.{
+        .id = try .parse("workout-1"),
+        .started_at = try .parse("2026-07-25T14:00:00Z"),
+        .completed_at = try .parse("2026-07-25T14:30:00Z"),
+        .exercises = &history_exercise,
+    }};
+    var output: Output = .{};
+    try std.testing.expectError(
+        error.InvalidRequest,
+        recommendSession(
+            .{
+                .as_of = try .parse("2026-07-25T15:00:00Z"),
+                .methodology_id = try .parse("caudex.double-progression"),
+                .methodology_version = .{ .major = 0, .minor = 1, .patch = 0 },
+                .config = testConfig(),
+                .catalog = .{ .exercises = &catalog },
+                .history = .{ .workouts = &history_workouts },
+                .available_equipment_ids = &.{},
+            },
+            &output,
+        ),
+    );
+}
+
+test "evaluation rejects duplicate catalog identifiers" {
+    const duplicate_catalog = [_]training.Exercise{
+        .{ .id = try .parse("squat") },
+        .{ .id = try .parse("squat") },
+    };
+    const workout = training.CompletedWorkout{
+        .id = try .parse("workout-1"),
+        .started_at = try .parse("2026-07-25T14:00:00Z"),
+        .completed_at = try .parse("2026-07-25T14:30:00Z"),
+        .exercises = &.{},
+    };
+    var output: EvaluationOutput = .{};
+    try std.testing.expectError(
+        error.InvalidRequest,
+        evaluatePerformance(
+            .{
+                .as_of = try .parse("2026-07-25T15:00:00Z"),
+                .methodology_id = try .parse("caudex.double-progression"),
+                .methodology_version = .{ .major = 0, .minor = 1, .patch = 0 },
+                .config = testConfig(),
+                .catalog = .{ .exercises = &duplicate_catalog },
+                .completed_workout = &workout,
+            },
+            &output,
+        ),
+    );
+}
+
+test "recommendation rejects history completed after as-of" {
+    const catalog = [_]training.Exercise{.{ .id = try .parse("squat") }};
+    const future_workouts = [_]training.CompletedWorkout{.{
+        .id = try .parse("future-workout"),
+        .started_at = try .parse("2026-07-25T15:00:00Z"),
+        .completed_at = try .parse("2026-07-25T16:00:00Z"),
+        .exercises = &.{},
+    }};
+    var output: Output = .{};
+    try std.testing.expectError(
+        error.InvalidRequest,
+        recommendSession(
+            .{
+                .as_of = try .parse("2026-07-25T15:00:00Z"),
+                .methodology_id = try .parse("caudex.double-progression"),
+                .methodology_version = .{ .major = 0, .minor = 1, .patch = 0 },
+                .config = testConfig(),
+                .catalog = .{ .exercises = &catalog },
+                .history = .{ .workouts = &future_workouts },
+                .available_equipment_ids = &.{},
+            },
+            &output,
+        ),
+    );
 }
 
 fn testConfig() DoubleProgressionConfig {

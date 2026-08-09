@@ -15,7 +15,10 @@ const workflows = @import("caudex_workflows");
 const portable = @import("caudex_portable");
 
 pub const abi_version: u32 = 2;
-const max_result_bytes: usize = portable.max_input_bytes;
+// The C contract intentionally exposes a smaller result bound than the
+// portable request envelope. Keep this separate from the input limit so a
+// caller can never infer an unbounded output allocation from a valid request.
+const max_result_bytes: usize = 1 * 1024 * 1024;
 const max_execution_request_bytes: usize = portable.max_input_bytes + 1024;
 const tracking_workspace_items: usize = 4096;
 
