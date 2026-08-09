@@ -7,7 +7,7 @@ before making architectural or public-contract changes.
 
 ## Start here
 
-1. Install Zig 0.16.0, Node.js 22+, Python 3.9+, SQLite 3.35+, and a C11
+1. Install Zig 0.16.0, Node.js 22+, SQLite 3.35+, and a C11
    compiler/linker. CI uses Node 24.
 2. Run `./tools/dev/doctor` (use `--strict` to require the CI Node major).
 3. Run `zig build check-fast` for the short loop.

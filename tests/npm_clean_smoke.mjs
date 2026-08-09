@@ -13,6 +13,8 @@ import { join, resolve } from "node:path";
 const packageRoot = resolve("packages/npm/workout-engine");
 const fixturePath = resolve("fixtures/requests/recommendation.json");
 const keep = process.argv.includes("--keep");
+const suppliedTarballIndex = process.argv.indexOf("--tarball");
+const suppliedTarball = suppliedTarballIndex === -1 ? undefined : resolve(process.argv[suppliedTarballIndex + 1]);
 const temporary = await mkdtemp(join(tmpdir(), "caudex-npm-smoke-"));
 const packDirectory = join(temporary, "pack");
 const project = join(temporary, "project");
@@ -20,16 +22,19 @@ await mkdir(packDirectory);
 await mkdir(project);
 
 try {
-  run("npm", [
-    "pack",
-    "--json",
-    "--ignore-scripts",
-    "--pack-destination",
-    packDirectory,
-    packageRoot,
-  ]);
-  const [tarballName] = await readdir(packDirectory);
-  const tarball = join(packDirectory, tarballName);
+  let tarball = suppliedTarball;
+  if (!tarball) {
+    run("npm", [
+      "pack",
+      "--json",
+      "--ignore-scripts",
+      "--pack-destination",
+      packDirectory,
+      packageRoot,
+    ]);
+    const [tarballName] = await readdir(packDirectory);
+    tarball = join(packDirectory, tarballName);
+  }
   await writeFile(
     join(project, "package.json"),
     JSON.stringify({ private: true, type: "module" }),

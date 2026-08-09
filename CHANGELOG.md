@@ -7,6 +7,8 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-08
+
 ### Added
 
 - Versioned canonical active-workout tracking protocol with bounded atomic
@@ -17,6 +19,13 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   state acceptance proposals, and structured modification reporting.
 - Minimal versioned workout-template model, canonical JSON schema, optional
   persistence capability, and deterministic template fixture.
+- Initial stateless Zig workout engine, C ABI, and npm/WebAssembly package.
+- Direct Zig source package, public module guide, and custom-methodology
+  consumer.
+- Native C static/shared release matrix with checksums, build metadata, size
+  reports, and artifact-first link tests.
+- Double-progression and RPE top-set/backoff recommendation support in the
+  official npm/WebAssembly runtime.
 
 ### Changed
 
@@ -48,15 +57,3 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `@caudex-workout/exercise-catalog` npm package, generated offline from pinned
   free-exercise-db commit `b0eed061e1c832b3ed815fbaa4b45b3cdc14df49`.
   The 873-record textual artifact excludes all upstream image data.
-
-## [0.1.0] - 2026-07-26
-
-### Added
-
-- Initial stateless Zig workout engine, C ABI, and npm/WebAssembly package.
-- Direct Zig source package, public module guide, and custom-methodology
-  consumer.
-- Native C static/shared release matrix with checksums, build metadata, size
-  reports, and artifact-first link tests.
-- Double-progression and RPE top-set/backoff recommendation support in the
-  official npm/WebAssembly runtime.

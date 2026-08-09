@@ -2,7 +2,6 @@
   "zig": "0.16.0",
   "node_min": "22",
   "node_ci": "24",
-  "python": ">=3.9",
   "sqlite": ">=3.35",
   "c_standard": "c11"
 }

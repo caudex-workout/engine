@@ -3,16 +3,16 @@
 This guide is for a third-party Zig application that wants to use Caudex
 without depending on repository-relative source files or copying the reference
 client's presentation logic. It is tested against Zig 0.16.0 and the staged
-v0.1.0 source package. No public v0.1.0 tag is currently available.
+source package. No public release tag is currently available.
 
 ## Add the public package
 
-When the v0.1.0 tag is deliberately published, fetch the immutable release
+When a release tag is deliberately published, fetch the immutable release
 archive and let Zig record the content hash:
 
 ```sh
 zig fetch --save \
-  https://github.com/caudex-workout/engine/archive/refs/tags/v0.1.0.tar.gz
+  https://github.com/caudex-workout/engine/archive/refs/tags/vX.Y.Z.tar.gz
 ```
 
 Until then, maintainers can validate the same consumer path without a public

@@ -20,7 +20,7 @@ commands validate or stage artifacts and must never publish.
 - Keep cross-platform target matrices and package allowlists synchronized with
   the public contract. A staged artifact must be the exact artifact verified
   before publication; release promotion must not rebuild or bypass validation.
-- Node and Python are appropriate for ecosystem release tooling. Do not rewrite
+- Node.js is the repository release-tooling runtime. Do not rewrite
   functioning release scripts into Zig merely to match core style.
 
 Use `docs/release/validation.md`, `docs/release/versioning.md`, and the release

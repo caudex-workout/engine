@@ -1,12 +1,18 @@
 {
-  "version": "0.1.0",
-  "tag": "v0.1.0",
   "cliTargets": [
     "x86_64-linux-gnu",
     "aarch64-linux-gnu",
     "x86_64-macos",
     "aarch64-macos",
     "x86_64-windows-gnu"
+  ],
+  "cTargets": [
+    "x86_64-linux-gnu",
+    "aarch64-linux-gnu",
+    "x86_64-macos",
+    "aarch64-macos",
+    "x86_64-windows-gnu",
+    "aarch64-windows-gnu"
   ],
   "optimize": "ReleaseSafe",
   "checksumAlgorithm": "sha256"

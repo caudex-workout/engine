@@ -1040,15 +1040,15 @@ pub fn build(b: *std.Build) void {
     );
     npm_smoke_step.dependOn(&npm_clean_smoke.step);
 
-    const npm_release_test = b.addSystemCommand(&.{
+    const release_workflow_test = b.addSystemCommand(&.{
         "node",
-        "tests/npm_release_test.mjs",
+        "tests/release_workflow_test.mjs",
     });
-    const npm_release_step = b.step(
-        "test-npm-release",
-        "Test npm release metadata validation",
+    const release_workflow_step = b.step(
+        "test-release-workflow",
+        "Test release tag parsing, orchestration, and asset manifest contracts",
     );
-    npm_release_step.dependOn(&npm_release_test.step);
+    release_workflow_step.dependOn(&release_workflow_test.step);
 
     const docs_quickstart_test = b.addSystemCommand(&.{
         "node",
@@ -1070,16 +1070,6 @@ pub fn build(b: *std.Build) void {
         "Check reference-client and Zig integrator documentation coverage",
     );
     cli_documentation_step.dependOn(&cli_documentation_test.step);
-
-    const cli_release_workflow_test = b.addSystemCommand(&.{
-        "node",
-        "tests/cli_release_workflow_test.mjs",
-    });
-    const cli_release_workflow_step = b.step(
-        "test-cli-release-workflow",
-        "Check CLI release targets, packaging, attestation, and publication gates",
-    );
-    cli_release_workflow_step.dependOn(&cli_release_workflow_test.step);
 
     const methodology_guides_test = b.addSystemCommand(&.{
         "node",
@@ -1245,10 +1235,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&cli_database_diagnostics_test.step);
     test_step.dependOn(&private_import_check.step);
     test_step.dependOn(&npm_clean_smoke.step);
-    test_step.dependOn(&npm_release_test.step);
     test_step.dependOn(&docs_quickstart_test.step);
     test_step.dependOn(&cli_documentation_test.step);
-    test_step.dependOn(&cli_release_workflow_test.step);
+    test_step.dependOn(&release_workflow_test.step);
     test_step.dependOn(&methodology_guides_test.step);
     test_step.dependOn(&data_mapping_guide_test.step);
     test_step.dependOn(&custom_repository_test.step);
@@ -1278,9 +1267,8 @@ pub fn build(b: *std.Build) void {
     check.dependOn(fast_check);
     check.dependOn(test_step);
 
-    const release_validation = b.addSystemCommand(&.{ "node", "tools/release/validate-npm-release.mjs", "v0.1.0" });
-    const release_metadata_validation = b.addSystemCommand(&.{ "node", "tools/release/validate-release-metadata.mjs" });
-    const release_workflow_validation = b.addSystemCommand(&.{ "node", "tests/cli_release_workflow_test.mjs" });
+    const release_validation = b.addSystemCommand(&.{ "node", "tools/release/validate-release.mjs" });
+    const release_workflow_validation = b.addSystemCommand(&.{ "node", "tests/release_workflow_test.mjs" });
     const compatibility_validation = b.addSystemCommand(&.{ "node", "tools/repo/compatibility-check.mjs" });
     const check_release = b.step(
         "check-release",
@@ -1288,7 +1276,6 @@ pub fn build(b: *std.Build) void {
     );
     check_release.dependOn(check);
     check_release.dependOn(&release_validation.step);
-    check_release.dependOn(&release_metadata_validation.step);
     check_release.dependOn(&release_workflow_validation.step);
     check_release.dependOn(&compatibility_validation.step);
     check_release.dependOn(fuzz_smoke_step);
@@ -1308,6 +1295,17 @@ pub fn build(b: *std.Build) void {
     release_stage_step.dependOn(npm_package_step);
     release_stage_step.dependOn(zig_package_archive_step);
     release_stage_step.dependOn(&c_release_package.step);
+
+    const release_check_command = b.addSystemCommand(&.{
+        "node",
+        "tools/release/rehearse-release.mjs",
+    });
+    const release_check_step = b.step(
+        "release-check",
+        "Rehearse release validation and host-runnable packaging without publishing",
+    );
+    release_check_step.dependOn(check_release);
+    release_check_step.dependOn(&release_check_command.step);
 
     const clean = b.addSystemCommand(&.{ "rm", "-rf", ".zig-cache", "zig-out" });
     const clean_step = b.step("clean", "Remove generated Zig cache and build output");

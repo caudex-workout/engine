@@ -6,7 +6,7 @@
   "forwardPorts": [8080],
   "customizations": {
     "vscode": {
-      "extensions": ["ziglang.vscode-zig", "ms-vscode.cpptools", "ms-python.python"],
+      "extensions": ["ziglang.vscode-zig", "ms-vscode.cpptools"],
       "settings": {
         "zig.path": "/opt/zig/zig"
       }

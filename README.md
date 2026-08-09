@@ -149,7 +149,7 @@ verifies both named imports from a clean copy containing only the source
 package's declared paths.
 
 The first-party [`caudex` CLI guide](apps/caudex-cli/README.md) covers the
-planned v0.1.0 GitHub Release installation path, first workout, JSON and shell
+GitHub Release installation path, first workout, JSON and shell
 automation, database backup/restore, exit codes, TUI keybindings, and
 troubleshooting. Third-party Zig applications should start with the
 [Zig integrator guide](docs/zig-integrator-guide.md), which uses public
@@ -162,6 +162,10 @@ artifact sizes.
 
 Release compatibility, migration rules, and completed security/license reviews
 are indexed in the [v0.1.0 release record](docs/release/v0.1.0.md).
+
+Maintainers should use the single [release guide](docs/releasing.md) for
+rehearsals and future tagged releases; the first public release has not been
+performed.
 
 See the [quickstart and concepts guide](docs/quickstart-and-concepts.md) for the
 request/result model, explanation references, data ownership, deterministic

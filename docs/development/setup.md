@@ -6,7 +6,6 @@ The checked-in source of truth is [`tools/support/versions.json`](../../tools/su
 
 - Zig 0.16.0
 - Node.js 22 or newer; CI tests Node 24
-- Python 3.9 or newer
 - SQLite 3.35 or newer and its development headers/library
 - C11-capable compiler and linker
 

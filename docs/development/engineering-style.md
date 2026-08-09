@@ -176,10 +176,10 @@ tracking, and canonical behavior belongs in Zig; JavaScript validates the
 crossing, manages the WASM lifetime, and presents an ergonomic host API.
 Generated declarations and bundled artifacts are governed by their generators.
 
-## Python, shell, build, and release tooling
+## JavaScript, shell, build, and release tooling
 
 - Keep each tool in the language best suited to its ecosystem. Do not rewrite
-  functioning Node or Python tooling into Zig for ideological reasons.
+  functioning Node.js tooling into Zig for ideological reasons.
 - Bound file reads, argument counts, archive entries, subprocess time or work,
   and generated output when they consume untrusted or release-provided data.
 - Shell uses strict failure handling where appropriate, quotes expansions, and

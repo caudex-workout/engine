@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "description": "Deterministic exercise-programming and active-workout tracking SDK",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/caudex-workout/engine.git"
+  },
   "type": "module",
   "sideEffects": false,
   "exports": {
