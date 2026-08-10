@@ -40,6 +40,16 @@ export interface DoubleProgressionConfig {
   rounding: LoadRounding;
   exerciseOverrides?: DoubleProgressionExerciseOverride[];
 }
+export interface DoubleProgressionHypertrophyOptions {
+  initialLoad: Measurement;
+  repRange?: RepRange;
+  workingSets?: number;
+  loadIncrement?: Measurement;
+  advancementCriteria?: AdvancementCriteria;
+  failurePolicy?: FailurePolicy;
+  rounding?: LoadRounding;
+  exerciseOverrides?: DoubleProgressionExerciseOverride[];
+}
 export interface DoubleProgressionMethodology
   extends MethodologyRef<DoubleProgressionConfig> {
   id: "caudex.double-progression";
@@ -85,4 +95,7 @@ export declare const methodologies: {
   readonly rpeTopSetBackoff: (
     config: RpeTopSetBackoffConfig,
   ) => RpeTopSetBackoffMethodology;
+  readonly presets: {
+    readonly hypertrophy: (options: DoubleProgressionHypertrophyOptions) => DoubleProgressionMethodology;
+  };
 };

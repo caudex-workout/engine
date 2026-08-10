@@ -121,13 +121,21 @@ try {
   await writeFile(
     join(project, "node-smoke.mjs"),
     `import { readFile } from "node:fs/promises";
-import { createCaudex, methodologies } from "@caudex-workout/engine";
+import { createCaudex, lb, methodologies } from "@caudex-workout/engine";
+import {} from "@caudex-workout/engine/runtime";
+import {} from "@caudex-workout/engine/canonical";
 import canonicalSchema from "@caudex-workout/engine/schema/canonical" with { type: "json" };
 import discoverySchema from "@caudex-workout/engine/schema/discovery" with { type: "json" };
 
 const request = JSON.parse(await readFile(new URL("./request.json", import.meta.url)));
 request.methodology = methodologies.doubleProgression(request.methodology.config);
 const caudex = await createCaudex();
+const program = caudex.createProgram({
+  hostScopeKey: "clean-consumer",
+  catalog: request.catalog,
+  methodology: methodologies.presets.hypertrophy({ initialLoad: lb(45) }),
+});
+const ergonomic = program.recommend({ asOf: request.asOf, session: request.session });
 const result = caudex.recommendSession(request);
 const invalid = caudex.recommendSession({ ...request, schemaVersion: 2 });
 const discovered = caudex.listMethodologies();
@@ -135,6 +143,9 @@ caudex.dispose();
 if (!result.ok || result.metadata.resultFingerprint !==
   "83481330a812bb41384d958c104038d230bf93ceee163fd47b7c62a41361fd6f") {
   throw new Error("npm clean-consumer packaging: canonical tarball fixture failed");
+}
+if (!ergonomic.ok || ergonomic.recommendation.exercises.length !== 1) {
+  throw new Error("npm clean-consumer packaging: application facade failed");
 }
 if (invalid.ok || invalid.issues?.[0]?.code !== "protocol.unsupported_version") {
   throw new Error("npm clean-consumer packaging: error fixture did not return a structured issue");
@@ -153,10 +164,13 @@ if (discoverySchema.$id !== "https://caudex.dev/schemas/discovery/v1/discovery.s
     join(project, "smoke.ts"),
     `import {
   createCaudex,
+  lb,
   methodologies,
   type RecommendationRequest,
   type RecommendationResult,
 } from "@caudex-workout/engine";
+import type { RuntimeFacade } from "@caudex-workout/engine/runtime";
+import type { Measurement } from "@caudex-workout/engine/canonical";
 
 const methodology = methodologies.doubleProgression({
   repRange: { min: 8, max: 12 },
@@ -190,6 +204,10 @@ const check = async (): Promise<RecommendationResult> => {
   return result;
 };
 void check;
+const exact: Measurement = lb("45.00");
+declare const runtime: RuntimeFacade;
+void exact;
+void runtime;
 `,
   );
   await writeFile(

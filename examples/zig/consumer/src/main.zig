@@ -76,6 +76,7 @@ const simple_methodology = caudex.methodology.Methodology{
 };
 
 pub fn main() !void {
+    try verifyMultiExerciseRecommendation();
     if (caudex_persistence.contract_version != 3)
         return error.UnsupportedPersistenceContract;
     if (caudex_persistence.canonical != caudex.canonical)
@@ -113,8 +114,15 @@ pub fn main() !void {
     var writer = caudex.methodology.RecommendationWriter{
         .context = &output,
     };
-    try implementation.recommend_session(
-        .{ .context = &config },
+    const TypedRequest = caudex.methodology.TypedRecommendationRequest(
+        Config,
+        Config,
+        Config,
+    );
+    try caudex.methodology.recommendTyped(
+        implementation,
+        TypedRequest{ .config = config, .payload = config },
+        &issues,
         &scratch,
         &writer,
     );
@@ -130,4 +138,40 @@ pub fn main() !void {
             catalog.value.fingerprint,
         },
     );
+}
+
+fn verifyMultiExerciseRecommendation() !void {
+    const exercises = [_]caudex.training.Exercise{
+        .{ .id = try .parse("squat") },
+        .{ .id = try .parse("bench-press") },
+    };
+    var output: caudex.engine.Output = .{};
+    const result = try caudex.engine.recommendSession(.{
+        .as_of = try .parse("2026-08-10T12:00:00Z"),
+        .methodology_id = try .parse(caudex.double_progression.methodology_id),
+        .methodology_version = .{ .major = 0, .minor = 1, .patch = 0 },
+        .config = .{
+            .repRange = .{ .min = 8, .max = 12 },
+            .workingSets = 3,
+            .advancementCriteria = .{
+                .minimumSuccessfulSets = 3,
+                .minimumRepetitions = 12,
+            },
+            .initialLoad = .{ .amount = "45", .unit = "lb" },
+            .loadIncrement = .{ .amount = "5", .unit = "lb" },
+            .failurePolicy = .{
+                .onPartial = .hold,
+                .onFailure = .regress,
+                .regressionAmount = .{ .amount = "5", .unit = "lb" },
+            },
+            .rounding = .{
+                .mode = .nearest,
+                .quantum = .{ .amount = "2.5", .unit = "lb" },
+            },
+        },
+        .catalog = .{ .exercises = &exercises },
+        .available_equipment_ids = &.{},
+    }, &output);
+    if (result.recommendation.?.exercises.len != 2)
+        return error.UnexpectedExerciseCount;
 }

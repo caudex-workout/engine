@@ -3,6 +3,12 @@
 C ABI v2 replaces v1's caller-visible allocation metadata with caller-owned
 output.
 
+The intentionally small C surface is asymmetric with the TypeScript package.
+TypeScript can offer context objects and typed measurement helpers without ABI
+cost; C remains a stable FFI/protocol boundary. Hosts exchange complete,
+versioned canonical documents rather than depending on a growing family of
+methodology- or workout-specific C structs and functions.
+
 ## Lifetime and synchronization
 
 `caudex_runtime_create` creates an independent opaque runtime and

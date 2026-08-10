@@ -3,7 +3,10 @@ import { pathToFileURL } from "node:url";
 import {
   CaudexInitializationError,
   CaudexRuntimeError,
+  CaudexMeasurementError,
   createCaudex,
+  lb,
+  reps,
   type RecommendationRequest,
   type TrackingBatchRequest,
   type TrackingCommandRequest,
@@ -64,6 +67,36 @@ const caudex = await createCaudex({
 const result = caudex.recommendSession(request);
 if (!result.ok || !result.recommendation) {
   throw new Error("ordinary object request did not produce a recommendation");
+}
+const program = caudex.createProgram({
+  catalog: request.catalog,
+  methodology: request.methodology,
+  hostScopeKey: "scope-program",
+  athlete: request.athlete,
+  history: request.history,
+  methodologyState: request.methodologyState,
+});
+const programResult = program.recommend({ asOf: request.asOf, session: request.session, alternativeLimit: request.alternativeLimit });
+if (!programResult.ok || programResult.metadata.resultFingerprint !== result.metadata.resultFingerprint) {
+  throw new Error("bound program and canonical runtime did not produce equivalent behavior");
+}
+program.replaceHistory({ workouts: [] });
+const refreshedHistoryResult = program.recommend({ asOf: request.asOf, session: request.session, alternativeLimit: request.alternativeLimit });
+if (refreshedHistoryResult.metadata.inputFingerprint === programResult.metadata.inputFingerprint) {
+  throw new Error("replacing program history did not affect the next complete canonical request");
+}
+program.replaceHistory(request.history);
+if (caudex.runtime.recommend(request).metadata.resultFingerprint !== result.metadata.resultFingerprint) {
+  throw new Error("runtime namespace is not equivalent to the v0.1 alias");
+}
+if (lb("185.00").amount !== "185.00" || reps(8).value.amount !== "8") {
+  throw new Error("measurement helpers did not preserve exact canonical values");
+}
+try {
+  lb(Number.NaN);
+  throw new Error("invalid measurement was accepted");
+} catch (error) {
+  if (!(error instanceof CaudexMeasurementError)) throw error;
 }
 if (
   result.metadata.resultFingerprint !==
@@ -141,6 +174,13 @@ await highLevel.completeSet({
   setId: firstSet.id,
   actual: firstSet.targetMetrics ?? [],
 });
+const programWorkout = await program.startWorkout(programResult, { acceptedRecommendationId: "accepted-program" });
+const programSet = programWorkout.workout.exercises?.[0]?.sets?.[0];
+if (!programSet) throw new Error("program did not instantiate its recommendation");
+await programWorkout.completeSet(programSet.id, { reps: 8, load: lb(65) });
+if (programWorkout.workout.exercises?.[0]?.sets?.[0]?.actualMetrics?.length !== 2) {
+  throw new Error("ergonomic set completion did not resolve membership and metrics");
+}
 const reloaded = await caudex.workflows.reloadActiveWorkout({
   hostScopeKey: "scope-high-level",
   workoutId: highLevel.workout.id,
@@ -160,6 +200,7 @@ for (const membership of reloaded.workout.exercises ?? []) {
   }
 }
 const completion = await reloaded.complete();
+program.appendCompletedWorkout(completion);
 const retriedCompletion = await reloaded.complete();
 if (retriedCompletion.id !== completion.id || completedWorkoutIds.length !== 1) {
   throw new Error("completed-workout persistence was not idempotently resumable");

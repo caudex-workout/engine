@@ -7,6 +7,25 @@ export interface Measurement {
   unit: string;
 }
 
+export {
+  CaudexMeasurementError,
+  kg,
+  lb,
+  load,
+  metrics,
+  minutes,
+  reps,
+  rir,
+  rpe,
+  seconds,
+  type DecimalInput,
+  type MassMeasurement,
+} from "./measurements.ts";
+import { type DecimalInput, type MassMeasurement } from "./measurements.ts";
+import { createProgramFacade } from "./application.ts";
+import { createActiveWorkout } from "./active-workout.ts";
+import { initializeWasm, type WasmExports } from "./wasm-runtime.ts";
+
 export interface Metric {
   code: string;
   value: Measurement;
@@ -66,6 +85,7 @@ export {
   type BackoffCalculation,
   type DoubleProgressionConfig,
   type DoubleProgressionExerciseOverride,
+  type DoubleProgressionHypertrophyOptions,
   type DoubleProgressionMethodology,
   type FailureAction,
   type FailurePolicy,
@@ -198,16 +218,28 @@ export interface ResultMetadata {
   resultFingerprint: string;
 }
 
-export interface RecommendationResult {
-  ok: boolean;
-  recommendation?: SessionRecommendation;
-  alternatives?: SessionRecommendation[];
-  nextMethodologyState?: MethodologyState;
+interface ProgrammingResultCommon {
   explanations?: Explanation[];
   warnings?: ValidationIssue[];
-  issues?: ValidationIssue[];
   metadata: ResultMetadata;
 }
+
+export type RecommendationResult = ProgrammingResultCommon & (
+  | {
+      ok: true;
+      recommendation: SessionRecommendation;
+      alternatives?: SessionRecommendation[];
+      nextMethodologyState?: MethodologyState;
+      issues?: never;
+    }
+  | {
+      ok: false;
+      recommendation?: never;
+      alternatives?: never;
+      nextMethodologyState?: never;
+      issues: ValidationIssue[];
+    }
+);
 
 export interface ExerciseEvaluation {
   exerciseId: string;
@@ -220,15 +252,10 @@ export interface PerformanceEvaluation {
   exercises: ExerciseEvaluation[];
 }
 
-export interface EvaluationResult {
-  ok: boolean;
-  evaluation?: PerformanceEvaluation;
-  nextMethodologyState?: MethodologyState;
-  explanations?: Explanation[];
-  warnings?: ValidationIssue[];
-  issues?: ValidationIssue[];
-  metadata: ResultMetadata;
-}
+export type EvaluationResult = ProgrammingResultCommon & (
+  | { ok: true; evaluation: PerformanceEvaluation; nextMethodologyState?: MethodologyState; issues?: never }
+  | { ok: false; evaluation?: never; nextMethodologyState?: never; issues: ValidationIssue[] }
+);
 
 export type TrackingWorkoutStatus = "active" | "completed" | "cancelled";
 export type TrackingSetStatus = "open" | "completed" | "partial" | "failed" | "skipped";
@@ -400,11 +427,9 @@ export interface DiscoveryRegistry {
   methodologies: MethodologyDescriptor[];
   supportedOperations: string[];
 }
-export interface MethodologyValidationResult {
-  schemaVersion: 1;
-  valid: boolean;
-  issues: ValidationIssue[];
-}
+export type MethodologyValidationResult =
+  | { schemaVersion: 1; valid: true; issues: [] }
+  | { schemaVersion: 1; valid: false; issues: ValidationIssue[] };
 
 export type InitializationErrorCode =
   | "wasm_load_failed"
@@ -578,8 +603,57 @@ export interface CreateCaudexOptions {
 export interface ActiveWorkout {
   readonly snapshot: TrackingSnapshot;
   readonly workout: TrackedWorkout;
+  completeSet(setId: string, result: SetResult): Promise<TrackedWorkout>;
   completeSet(input: { membershipId: string; setId: string; actual: Metric[]; status?: "completed" | "partial" | "failed" }): Promise<TrackedWorkout>;
   complete(): Promise<CompletedWorkout>;
+}
+
+export interface SetResult {
+  reps?: number;
+  load?: MassMeasurement;
+  rpe?: DecimalInput;
+  rir?: DecimalInput;
+  metrics?: readonly Metric[];
+  status?: "completed" | "partial" | "failed";
+}
+
+export interface ProgramOptions {
+  catalog: readonly Exercise[];
+  methodology: MethodologyRef<unknown>;
+  hostScopeKey: string;
+  athlete?: Athlete;
+  history?: RecommendationRequest["history"];
+  methodologyState?: MethodologyState;
+  methodologyStateRevision?: string | null;
+}
+
+export interface RecommendationOptions {
+  asOf?: string;
+  session?: RecommendationRequest["session"];
+  alternativeLimit?: number;
+  tieBreakSeed?: string;
+}
+
+export interface Program {
+  recommend(options?: RecommendationOptions): RecommendationResult;
+  startWorkout(result: RecommendationResult, options?: { acceptedRecommendationId?: string }): Promise<ActiveWorkout>;
+  reloadWorkout(workoutId: string): Promise<ActiveWorkout | null>;
+  /** Replaces the host-authoritative history used by subsequent calls. */
+  replaceHistory(history: RecommendationRequest["history"]): void;
+  /** Adds or replaces one completed workout in the retained history snapshot. */
+  appendCompletedWorkout(workout: CompletedWorkout): void;
+  evaluate(completedWorkout: CompletedWorkout, options?: { asOf?: string; history?: EvaluationRequest["history"] }): EvaluationResult;
+  acceptState(evaluation: EvaluationResult): Promise<unknown>;
+}
+
+export interface RuntimeFacade {
+  recommend(request: RecommendationRequest): RecommendationResult;
+  evaluate(request: EvaluationRequest): EvaluationResult;
+  applyTrackingCommand(request: TrackingCommandRequest): TrackingCommandResult;
+  applyTrackingBatch(request: TrackingBatchRequest): TrackingBatchResult;
+  instantiateRecommendation(request: RecommendationInstantiationRequest): InstantiationResult;
+  instantiateTemplate(request: TemplateInstantiationRequest): InstantiationResult;
+  completeForEvaluation(request: CompletionConversionRequest): CompletionConversionResult;
 }
 
 export interface WorkflowFacade {
@@ -603,6 +677,10 @@ export interface WorkflowFacade {
 }
 
 export interface Caudex {
+  /** Direct deterministic operations over complete canonical request snapshots. */
+  readonly runtime: RuntimeFacade;
+  /** Binds stable host context while constructing complete requests for every engine call. */
+  createProgram(options: ProgramOptions): Program;
   recommendSession(request: RecommendationRequest): RecommendationResult;
   evaluatePerformance(request: EvaluationRequest): EvaluationResult;
   applyTrackingCommand(request: TrackingCommandRequest): TrackingCommandResult;
@@ -621,33 +699,6 @@ export interface Caudex {
   dispose(): void;
 }
 
-interface WasmExports extends WebAssembly.Exports {
-  memory: WebAssembly.Memory;
-  caudex_abi_version(): number;
-  caudex_runtime_execute(
-    runtime: number,
-    requestPointer: number,
-    requestLength: number,
-    outputPointer: number,
-    outputCapacity: number,
-    requiredPointer: number,
-  ): number;
-  caudex_wasm_alloc(length: number): number;
-  caudex_wasm_free(pointer: number, length: number): void;
-  caudex_wasm_runtime_create(): number;
-  caudex_wasm_runtime_destroy(runtime: number): void;
-}
-
-const REQUIRED_EXPORTS = [
-  "memory",
-  "caudex_abi_version",
-  "caudex_runtime_execute",
-  "caudex_wasm_alloc",
-  "caudex_wasm_free",
-  "caudex_wasm_runtime_create",
-  "caudex_wasm_runtime_destroy",
-] as const;
-
 const STATUS_INVALID_REQUEST = 3;
 const STATUS_UNSUPPORTED_VERSION = 4;
 const STATUS_UNSUPPORTED_METHODOLOGY = 5;
@@ -656,108 +707,11 @@ const STATUS_INSUFFICIENT_OUTPUT = 7;
 export async function createCaudex(
   options: CreateCaudexOptions = {},
 ): Promise<Caudex> {
-  const instance = await instantiate(options);
-  const exports = requireExports(instance.exports);
-  if (exports.caudex_abi_version() !== 2) {
-    throw new CaudexInitializationError(
-      "abi_mismatch",
-      "The WebAssembly runtime does not implement Caudex ABI version 2.",
-    );
-  }
-  const runtime = exports.caudex_wasm_runtime_create();
-  if (runtime === 0) {
-    throw new CaudexInitializationError(
-      "runtime_create_failed",
-      "The WebAssembly runtime could not be created.",
-    );
-  }
+  const { exports, runtime } = await initializeWasm(
+    options,
+    (code, message, cause) => new CaudexInitializationError(code, message, cause),
+  );
   return createFacade(exports, runtime, options);
-}
-
-async function instantiate(
-  options: CreateCaudexOptions,
-): Promise<WebAssembly.Instance> {
-  if (options.wasm) {
-    try {
-      const module =
-        options.wasm instanceof WebAssembly.Module
-          ? options.wasm
-          : await WebAssembly.compile(options.wasm as BufferSource);
-      return await WebAssembly.instantiate(module, {});
-    } catch (cause) {
-      throw new CaudexInitializationError(
-        "wasm_compile_failed",
-        "The supplied Caudex WebAssembly module could not be instantiated.",
-        cause,
-      );
-    }
-  }
-
-  const url = options.wasmUrl
-    ? new URL(options.wasmUrl, import.meta.url)
-    : new URL("../wasm/caudex.wasm", import.meta.url);
-  if (url.protocol === "file:" && isNode()) {
-    try {
-      const dynamicImport = new Function(
-        "specifier",
-        "return import(specifier)",
-      ) as (specifier: string) => Promise<{
-        readFile(url: URL): Promise<Uint8Array>;
-      }>;
-      const { readFile } = await dynamicImport("node:fs/promises");
-      const bytes = await readFile(url);
-      const module = await WebAssembly.compile(bytes as BufferSource);
-      return await WebAssembly.instantiate(module, {});
-    } catch (cause) {
-      throw new CaudexInitializationError(
-        "wasm_load_failed",
-        `The Caudex WebAssembly module could not be loaded from ${url}.`,
-        cause,
-      );
-    }
-  }
-
-  const fetchImplementation = options.fetch ?? globalThis.fetch;
-  if (!fetchImplementation) {
-    throw new CaudexInitializationError(
-      "wasm_load_failed",
-      "No fetch implementation is available to load the Caudex WebAssembly module.",
-    );
-  }
-  try {
-    const response = await fetchImplementation(url);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    if (typeof WebAssembly.instantiateStreaming === "function") {
-      try {
-        return (await WebAssembly.instantiateStreaming(response.clone(), {}))
-          .instance;
-      } catch {
-        // Incorrect development-server MIME types use the ArrayBuffer fallback.
-      }
-    }
-    const module = await WebAssembly.compile(await response.arrayBuffer());
-    return await WebAssembly.instantiate(module, {});
-  } catch (cause) {
-    throw new CaudexInitializationError(
-      "wasm_load_failed",
-      `The Caudex WebAssembly module could not be loaded from ${url}.`,
-      cause,
-    );
-  }
-}
-
-function requireExports(raw: WebAssembly.Exports): WasmExports {
-  for (const name of REQUIRED_EXPORTS) {
-    if (!(name in raw)) {
-      throw new CaudexInitializationError(
-        "missing_export",
-        `The WebAssembly runtime is missing the required export "${name}".`,
-      );
-    }
-  }
-  return raw as WasmExports;
 }
 
 function createFacade(exports: WasmExports, runtime: number, options: CreateCaudexOptions): Caudex {
@@ -856,76 +810,45 @@ function createFacade(exports: WasmExports, runtime: number, options: CreateCaud
     }
     volatileActiveWorkouts.set(`${hostScopeKey}/${workoutId}`, structuredClone(record));
   };
-  const activeWorkout = (snapshot: TrackingSnapshot, workoutId: string, catalog: Exercise[]): ActiveWorkout => {
-    let current = snapshot;
-    const currentWorkout = (): TrackedWorkout => {
-      const workout = current.workouts?.find((candidate) => candidate.id === workoutId);
-      if (!workout) throw new CaudexRuntimeError(`Active workout "${workoutId}" is absent from its snapshot.`);
-      return workout;
-    };
-    const apply = async (command: TrackingCommand): Promise<TrackedWorkout> => {
-      const before = currentWorkout();
-      const result = execute<TrackingCommandRequest, TrackingCommandResult>({ schemaVersion: 1, snapshot: current, command }, "applyTrackingCommand", false);
-      current = result.snapshot;
-      if ("rejected" in result.outcome) throw new CaudexTrackingRejectedError(result.outcome.rejected.issues);
-      await persistSnapshot(before.scope.hostScopeKey, workoutId, current, before.revision);
-      return result.outcome.accepted.workout;
-    };
-    return {
-      get snapshot() { return current; },
-      get workout() { return currentWorkout(); },
-      async completeSet(input) {
-        const workout = currentWorkout();
-        return apply({ completeSet: {
-          metadata: { commandId: ids.next("command"), occurredAt: clock.now() },
-          scope: workout.scope,
-          workoutId,
-          expectedRevision: workout.revision,
-          membershipId: input.membershipId,
-          setId: input.setId,
-          actualMetrics: input.actual,
-          status: input.status ?? "completed",
-          completedAt: clock.now(),
-        } });
-      },
-      async complete() {
-        const workout = currentWorkout();
-        if (workout.status !== "completed") {
-          await apply({ completeWorkout: {
-            metadata: { commandId: ids.next("command"), occurredAt: clock.now() },
-            scope: workout.scope,
-            workoutId,
-            expectedRevision: workout.revision,
-            completedAt: clock.now(),
-          } });
-        }
-        const converted = execute<CompletionConversionRequest, CompletionConversionResult>(
-          { schemaVersion: 1, workout: currentWorkout(), catalog },
-          "completeForEvaluation",
-          false,
-        );
-        if ("rejected" in converted.outcome) throw new CaudexTrackingRejectedError(converted.outcome.rejected);
-        const completed = converted.outcome.accepted;
-        if (persistence?.appendCompletedWorkout || persistence?.saveWorkflowRecovery) {
-          const workflowId = `completion:${workoutId}`;
-          const recovery: WorkflowRecoveryRecord = {
-            hostScopeKey: workout.scope.hostScopeKey,
-            workflowId,
-            kind: "workout_completion",
-            status: "pending",
-            idempotencyKey: workoutId,
-            payload: completed as unknown as JsonValue,
-            updatedAt: clock.now(),
-          };
-          await persistence.saveWorkflowRecovery?.(recovery);
-          await persistence.appendCompletedWorkout?.(workout.scope.hostScopeKey, completed);
-          await persistence.saveWorkflowRecovery?.({ ...recovery, status: "completed", updatedAt: clock.now() });
-        }
-        return completed;
-      },
-    };
+  const activeWorkout = (snapshot: TrackingSnapshot, workoutId: string, catalog: Exercise[]): ActiveWorkout =>
+    createActiveWorkout(snapshot, workoutId, catalog, {
+      clock,
+      ids,
+      persistence,
+      applyTracking: (current, command) => execute(
+        { schemaVersion: 1, snapshot: current, command },
+        "applyTrackingCommand",
+        false,
+      ),
+      convertCompletion: (workout, workoutCatalog) => execute(
+        { schemaVersion: 1, workout, catalog: workoutCatalog },
+        "completeForEvaluation",
+        false,
+      ),
+      persistSnapshot,
+      runtimeError: (message) => new CaudexRuntimeError(message),
+      trackingRejected: (issues) => new CaudexTrackingRejectedError(issues),
+    });
+  const runtimeFacade: RuntimeFacade = {
+    recommend: (request) => execute(request, "recommend", true),
+    evaluate: (request) => execute(request, "evaluate", true),
+    applyTrackingCommand: (request) => execute(request, "applyTrackingCommand", false),
+    applyTrackingBatch: (request) => execute(request, "applyTrackingBatch", false),
+    instantiateRecommendation: (request) => execute(request, "instantiateRecommendation", false),
+    instantiateTemplate: (request) => execute(request, "instantiateTemplate", false),
+    completeForEvaluation: (request) => execute(request, "completeForEvaluation", false),
   };
   const facade: Caudex = {
+    runtime: runtimeFacade,
+    createProgram(programOptions) {
+      return createProgramFacade(programOptions, {
+        clock,
+        runtime: runtimeFacade,
+        workflows: facade.workflows,
+        hasStatePersistence: Boolean(persistence?.compareAndSetState),
+        runtimeError: (message) => new CaudexRuntimeError(message),
+      });
+    },
     recommendSession(request) {
       return execute<RecommendationRequest, RecommendationResult>(
         request,
@@ -1223,11 +1146,4 @@ function invalidResult<
       resultFingerprint: "",
     },
   } as unknown as Result;
-}
-
-function isNode(): boolean {
-  return Boolean(
-    (globalThis as { process?: { versions?: { node?: string } } }).process
-      ?.versions?.node,
-  );
 }

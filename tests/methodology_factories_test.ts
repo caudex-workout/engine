@@ -22,6 +22,18 @@ const rpeConfig = JSON.parse(
 ) as RpeTopSetBackoffConfig;
 
 const doubleMethodology = methodologies.doubleProgression(doubleConfig);
+const preset = methodologies.presets.hypertrophy({
+  initialLoad: { amount: "45", unit: "lb" },
+  loadIncrement: { amount: "5", unit: "lb" },
+});
+if (
+  preset.config.repRange.min !== 8 ||
+  preset.config.repRange.max !== 12 ||
+  preset.config.workingSets !== 3 ||
+  preset.config.advancementCriteria.minimumRepetitions !== 12
+) {
+  throw new Error("hypertrophy preset did not expose its documented canonical policy");
+}
 if (
   doubleMethodology.id !== "caudex.double-progression" ||
   doubleMethodology.versionRequirement !== "^0.1.0" ||

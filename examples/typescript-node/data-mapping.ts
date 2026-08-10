@@ -153,6 +153,7 @@ const stateStore: MethodologyStateStore = {
 };
 const proposedResult: RecommendationResult = {
   ok: true,
+  recommendation: { exercises: [] },
   nextMethodologyState: {
     schemaVersion: 1,
     data: { exercises: [] },

@@ -1,43 +1,23 @@
 # npm quickstart and concepts
 
 Caudex turns a complete workout snapshot into a deterministic recommendation.
-The shortest integration is install, initialize, recommend, inspect, and
-dispose:
+The v0.2 application facade binds stable context once; it still constructs a
+complete deterministic snapshot for every runtime call:
 
 ```bash
 npm install @caudex-workout/engine
 ```
 
 ```ts
-import {
-  createCaudex,
-  methodologies,
-  type RecommendationRequest,
-} from "@caudex-workout/engine";
+import { createCaudex, lb, methodologies } from "@caudex-workout/engine";
 
 const caudex = await createCaudex();
 try {
-  const request: RecommendationRequest = {
-    schemaVersion: 1,
-    asOf: "2026-07-25T14:00:00Z",
-    methodology: methodologies.doubleProgression({
-      repRange: { min: 8, max: 12 },
-      workingSets: 3,
-      advancementCriteria: {
-        minimumSuccessfulSets: 3,
-        minimumRepetitions: 12,
-      },
-      initialLoad: { amount: "45", unit: "lb" },
-      loadIncrement: { amount: "5", unit: "lb" },
-      failurePolicy: {
-        onPartial: "hold",
-        onFailure: "regress",
-        regressionAmount: { amount: "5", unit: "lb" },
-      },
-      rounding: {
-        mode: "nearest",
-        quantum: { amount: "2.5", unit: "lb" },
-      },
+  const program = caudex.createProgram({
+    hostScopeKey: "profile-1",
+    methodology: methodologies.presets.hypertrophy({
+      initialLoad: lb(45),
+      loadIncrement: lb(5),
     }),
     catalog: [{
       id: "incline-dumbbell-press",
@@ -45,18 +25,19 @@ try {
       movementTags: ["horizontal-push"],
     }],
     history: { workouts: [] },
+  });
+  const result = program.recommend({
+    asOf: "2026-07-25T14:00:00Z",
     session: {
       availableMinutes: 35,
       availableEquipmentIds: ["dumbbell", "adjustable-bench"],
     },
-  };
-
-  const result = caudex.recommendSession(request);
+  });
   if (!result.ok) {
     throw new Error(`Request rejected: ${JSON.stringify(result.issues)}`);
   }
 
-  const exercise = result.recommendation?.exercises[0];
+  const exercise = result.recommendation.exercises[0];
   const explanation = result.explanations?.[0];
   console.log(exercise?.exerciseId);
   console.log(explanation?.code, explanation?.summary);
@@ -142,4 +123,3 @@ initialization throw `CaudexRuntimeError`.
 Dispose the engine when its WASM instance is no longer needed. Disposal releases
 engine-owned runtime resources; it does not affect host-owned request or result
 objects.
-

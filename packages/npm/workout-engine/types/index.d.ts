@@ -6,6 +6,8 @@ export interface Measurement {
   amount: string;
   unit: string;
 }
+export { CaudexMeasurementError, kg, lb, load, metrics, minutes, reps, rir, rpe, seconds, type DecimalInput, type MassMeasurement } from "./measurements.js";
+import type { DecimalInput, MassMeasurement } from "./measurements.js";
 
 export interface Metric {
   code: string;
@@ -174,16 +176,15 @@ export interface ResultMetadata {
   resultFingerprint: string;
 }
 
-export interface RecommendationResult {
-  ok: boolean;
-  recommendation?: SessionRecommendation;
-  alternatives?: SessionRecommendation[];
-  nextMethodologyState?: MethodologyState;
+interface ProgrammingResultCommon {
   explanations?: Explanation[];
   warnings?: ValidationIssue[];
-  issues?: ValidationIssue[];
   metadata: ResultMetadata;
 }
+export type RecommendationResult = ProgrammingResultCommon & (
+  | { ok: true; recommendation: SessionRecommendation; alternatives?: SessionRecommendation[]; nextMethodologyState?: MethodologyState; issues?: never }
+  | { ok: false; recommendation?: never; alternatives?: never; nextMethodologyState?: never; issues: ValidationIssue[] }
+);
 
 export interface ExerciseEvaluation {
   exerciseId: string;
@@ -196,15 +197,10 @@ export interface PerformanceEvaluation {
   exercises: ExerciseEvaluation[];
 }
 
-export interface EvaluationResult {
-  ok: boolean;
-  evaluation?: PerformanceEvaluation;
-  nextMethodologyState?: MethodologyState;
-  explanations?: Explanation[];
-  warnings?: ValidationIssue[];
-  issues?: ValidationIssue[];
-  metadata: ResultMetadata;
-}
+export type EvaluationResult = ProgrammingResultCommon & (
+  | { ok: true; evaluation: PerformanceEvaluation; nextMethodologyState?: MethodologyState; issues?: never }
+  | { ok: false; evaluation?: never; nextMethodologyState?: never; issues: ValidationIssue[] }
+);
 
 export type TrackingWorkoutStatus = "active" | "completed" | "cancelled";
 export type TrackingSetStatus = "open" | "completed" | "partial" | "failed" | "skipped";
@@ -303,7 +299,7 @@ export interface MethodologyDescriptor {
   configurationSchemaRef: string; stateSchemaRef: string; deprecated?: boolean;
 }
 export interface DiscoveryRegistry { schemaVersion: 1; methodologies: MethodologyDescriptor[]; supportedOperations: string[] }
-export interface MethodologyValidationResult { schemaVersion: 1; valid: boolean; issues: ValidationIssue[] }
+export type MethodologyValidationResult = { schemaVersion: 1; valid: true; issues: [] } | { schemaVersion: 1; valid: false; issues: ValidationIssue[] };
 
 export type InitializationErrorCode =
   | "wasm_load_failed"
@@ -391,8 +387,30 @@ export interface CreateCaudexOptions {
 export interface ActiveWorkout {
   readonly snapshot: TrackingSnapshot;
   readonly workout: TrackedWorkout;
+  completeSet(setId: string, result: SetResult): Promise<TrackedWorkout>;
   completeSet(input: { membershipId: string; setId: string; actual: Metric[]; status?: "completed" | "partial" | "failed" }): Promise<TrackedWorkout>;
   complete(): Promise<CompletedWorkout>;
+}
+export interface SetResult { reps?: number; load?: MassMeasurement; rpe?: DecimalInput; rir?: DecimalInput; metrics?: readonly Metric[]; status?: "completed" | "partial" | "failed" }
+export interface ProgramOptions { catalog: readonly Exercise[]; methodology: MethodologyRef<unknown>; hostScopeKey: string; athlete?: Athlete; history?: RecommendationRequest["history"]; methodologyState?: MethodologyState; methodologyStateRevision?: string | null }
+export interface RecommendationOptions { asOf?: string; session?: RecommendationRequest["session"]; alternativeLimit?: number; tieBreakSeed?: string }
+export interface Program {
+  recommend(options?: RecommendationOptions): RecommendationResult;
+  startWorkout(result: RecommendationResult, options?: { acceptedRecommendationId?: string }): Promise<ActiveWorkout>;
+  reloadWorkout(workoutId: string): Promise<ActiveWorkout | null>;
+  replaceHistory(history: RecommendationRequest["history"]): void;
+  appendCompletedWorkout(workout: CompletedWorkout): void;
+  evaluate(completedWorkout: CompletedWorkout, options?: { asOf?: string; history?: EvaluationRequest["history"] }): EvaluationResult;
+  acceptState(evaluation: EvaluationResult): Promise<unknown>;
+}
+export interface RuntimeFacade {
+  recommend(request: RecommendationRequest): RecommendationResult;
+  evaluate(request: EvaluationRequest): EvaluationResult;
+  applyTrackingCommand(request: TrackingCommandRequest): TrackingCommandResult;
+  applyTrackingBatch(request: TrackingBatchRequest): TrackingBatchResult;
+  instantiateRecommendation(request: RecommendationInstantiationRequest): InstantiationResult;
+  instantiateTemplate(request: TemplateInstantiationRequest): InstantiationResult;
+  completeForEvaluation(request: CompletionConversionRequest): CompletionConversionResult;
 }
 export interface WorkflowFacade {
   recommend(request: RecommendationRequest): RecommendationResult;
@@ -406,6 +424,8 @@ export interface WorkflowFacade {
 }
 
 export interface Caudex {
+  readonly runtime: RuntimeFacade;
+  createProgram(options: ProgramOptions): Program;
   recommendSession(request: RecommendationRequest): RecommendationResult;
   evaluatePerformance(request: EvaluationRequest): EvaluationResult;
   applyTrackingCommand(request: TrackingCommandRequest): TrackingCommandResult;
@@ -434,6 +454,7 @@ export {
   type DoubleProgressionConfig,
   type DoubleProgressionExerciseOverride,
   type DoubleProgressionMethodology,
+  type DoubleProgressionHypertrophyOptions,
   type FailureAction,
   type FailurePolicy,
   type LoadRounding,

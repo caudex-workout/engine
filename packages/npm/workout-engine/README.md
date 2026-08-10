@@ -7,6 +7,27 @@ on Node.js 22 or newer:
 npm install @caudex-workout/engine
 ```
 
+For new integrations, bind stable host context once and let the application
+facade construct complete canonical requests:
+
+```ts
+import { createCaudex, lb, methodologies } from "@caudex-workout/engine";
+
+const caudex = await createCaudex();
+const program = caudex.createProgram({
+  hostScopeKey: "profile-1",
+  catalog,
+  methodology: methodologies.presets.hypertrophy({ initialLoad: lb(45) }),
+});
+const result = program.recommend();
+if (!result.ok) throw new Error(result.issues[0].message);
+console.log(result.recommendation.exercises);
+```
+
+Use `caudex.runtime` or the existing v0.1 top-level methods when you want to
+supply complete canonical request snapshots directly. The convenience facade
+does not add hidden engine state; clocks and IDs remain injectable.
+
 TypeScript projects should use ESM and NodeNext resolution:
 
 ```json

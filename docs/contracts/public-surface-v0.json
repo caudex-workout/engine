@@ -49,7 +49,9 @@
     "version": "0.1.0",
     "exports": [
       ".",
+      "./canonical",
       "./methodologies",
+      "./runtime",
       "./schema/canonical",
       "./schema/discovery",
       "./schema/double-progression-config",

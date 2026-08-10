@@ -50,6 +50,17 @@ export interface DoubleProgressionConfig {
   exerciseOverrides?: DoubleProgressionExerciseOverride[];
 }
 
+export interface DoubleProgressionHypertrophyOptions {
+  initialLoad: Measurement;
+  repRange?: RepRange;
+  workingSets?: number;
+  loadIncrement?: Measurement;
+  advancementCriteria?: AdvancementCriteria;
+  failurePolicy?: FailurePolicy;
+  rounding?: LoadRounding;
+  exerciseOverrides?: DoubleProgressionExerciseOverride[];
+}
+
 export interface DoubleProgressionMethodology
   extends MethodologyRef<DoubleProgressionConfig> {
   id: "caudex.double-progression";
@@ -125,6 +136,33 @@ export const methodologies = {
       configVersion: 1,
       config: normalized,
     };
+  },
+
+  presets: {
+    /**
+     * An explicit 8–12 repetition, three-set double-progression policy.
+     * The returned value is an ordinary inspectable canonical methodology ref.
+     */
+    hypertrophy(options: DoubleProgressionHypertrophyOptions): DoubleProgressionMethodology {
+      const increment = options.loadIncrement ?? { amount: "5", unit: options.initialLoad.unit };
+      return methodologies.doubleProgression({
+        repRange: options.repRange ?? { min: 8, max: 12 },
+        workingSets: options.workingSets ?? 3,
+        advancementCriteria: options.advancementCriteria ?? {
+          minimumSuccessfulSets: options.workingSets ?? 3,
+          minimumRepetitions: options.repRange?.max ?? 12,
+        },
+        initialLoad: options.initialLoad,
+        loadIncrement: increment,
+        failurePolicy: options.failurePolicy ?? {
+          onPartial: "hold",
+          onFailure: "regress",
+          regressionAmount: increment,
+        },
+        rounding: options.rounding ?? { mode: "nearest", quantum: increment },
+        exerciseOverrides: options.exerciseOverrides,
+      });
+    },
   },
 } as const;
 

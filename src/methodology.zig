@@ -96,6 +96,50 @@ pub const Methodology = struct {
     evaluate_performance: EvaluatePerformanceFn,
 };
 
+/// A fully typed, borrowed request for direct methodology integration.
+///
+/// `config`, optional `state`, and `payload` are values owned by the caller.
+/// The methodology receives borrowed views only for the duration of dispatch.
+pub fn TypedRecommendationRequest(
+    comptime Config: type,
+    comptime State: type,
+    comptime Payload: type,
+) type {
+    return struct {
+        config: Config,
+        state: ?State = null,
+        payload: Payload,
+    };
+}
+
+pub const DispatchError = MethodologyError || diagnostics.IssueWriter.AppendError;
+
+/// Validates and dispatches any registered methodology using caller-owned
+/// scratch, issue storage, and output. No allocation or domain logic is hidden.
+pub fn recommendTyped(
+    implementation: *const Methodology,
+    request: anytype,
+    issues: *diagnostics.IssueWriter,
+    scratch: *Scratch,
+    writer: *RecommendationWriter,
+) DispatchError!void {
+    const issue_count_before = issues.items().len;
+    try implementation.validate_config(.{ .context = &request.config }, issues);
+    if (request.state) |*state| {
+        try implementation.validate_state(
+            .{ .context = &request.config },
+            .{ .context = state },
+            issues,
+        );
+    }
+    if (issues.items().len != issue_count_before) return error.InvalidInput;
+    try implementation.recommend_session(
+        .{ .context = &request.payload },
+        scratch,
+        writer,
+    );
+}
+
 /// A deterministic borrowed view over compiled methodology implementations.
 pub const Registry = struct {
     methodologies: []const Methodology,
@@ -306,4 +350,27 @@ test "methodology callbacks are explicit and callable" {
         &evaluation_writer,
     );
     try std.testing.expectEqual(@as(usize, 1), evaluation_output.calls);
+}
+
+test "typed recommendation dispatch validates and preserves caller ownership" {
+    const implementation = testMethodology(
+        "vendor.typed-test",
+        .{ .major = 1, .minor = 0, .patch = 0 },
+    );
+    const Request = TypedRecommendationRequest(TestConfig, TestConfig, u8);
+    var issue_storage: [2]@import("canonical.zig").ValidationIssue = undefined;
+    var issues: diagnostics.IssueWriter = .init(&issue_storage);
+    var scratch_bytes: [16]u8 = undefined;
+    var scratch = Scratch{ .bytes = &scratch_bytes };
+    var output = TestOutput{};
+    var writer = RecommendationWriter{ .context = &output };
+    try recommendTyped(
+        &implementation,
+        Request{ .config = .{ .valid = true }, .payload = 7 },
+        &issues,
+        &scratch,
+        &writer,
+    );
+    try std.testing.expectEqual(@as(usize, 1), output.calls);
+    try std.testing.expectEqual(@as(usize, 0), issues.items().len);
 }

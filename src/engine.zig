@@ -8,6 +8,7 @@ const training = @import("training.zig");
 
 pub const engine_version = "0.1.0";
 pub const schema_version: u32 = 1;
+pub const max_recommended_exercises: usize = 16;
 
 pub const DoubleProgressionConfig = double_progression_contract.Config;
 
@@ -61,25 +62,29 @@ pub const RecommendError = error{
 
 /// Caller-owned storage for the bounded CWE-015 recommendation result.
 pub const Output = struct {
-    metrics: [128]canonical.Metric = undefined,
-    sets: [64]canonical.SetRecommendation = undefined,
-    exercises: [1]canonical.ExerciseRecommendation = undefined,
-    explanations: [3]canonical.Explanation = undefined,
-    warnings: [1]canonical.ValidationIssue = undefined,
+    metrics: [max_recommended_exercises * 64 * 2]canonical.Metric = undefined,
+    sets: [max_recommended_exercises * 64]canonical.SetRecommendation = undefined,
+    exercises: [max_recommended_exercises]canonical.ExerciseRecommendation = undefined,
+    explanations: [max_recommended_exercises * 3]canonical.Explanation = undefined,
+    warnings: [max_recommended_exercises]canonical.ValidationIssue = undefined,
+    explanation_ids: [max_recommended_exercises][3][32]u8 = undefined,
+    explanation_id_lens: [max_recommended_exercises][3]usize = @splat(@splat(0)),
+    explanation_refs: [max_recommended_exercises][3][]const u8 = undefined,
     input_fingerprint: [64]u8 = undefined,
     result_fingerprint: [64]u8 = undefined,
-    rep_amount: [20]u8 = undefined,
-    rep_amount_len: usize = 0,
-    load_amount: [32]u8 = undefined,
-    load_amount_len: usize = 0,
-    set_len: usize = 0,
+    rep_amounts: [max_recommended_exercises][20]u8 = undefined,
+    rep_amount_lens: [max_recommended_exercises]usize = @splat(0),
+    load_amounts: [max_recommended_exercises][32]u8 = undefined,
+    load_amount_lens: [max_recommended_exercises]usize = @splat(0),
+    set_lens: [max_recommended_exercises]usize = @splat(0),
+    exercise_len: usize = 0,
     explanation_len: usize = 0,
     warning_len: usize = 0,
 
     fn result(self: *Output, request: RecommendationRequest) canonical.RecommendationResult {
         return .{
             .ok = true,
-            .recommendation = .{ .exercises = self.exercises[0..1] },
+            .recommendation = .{ .exercises = self.exercises[0..self.exercise_len] },
             .explanations = self.explanations[0..self.explanation_len],
             .warnings = self.warnings[0..self.warning_len],
             .metadata = .{
@@ -100,6 +105,7 @@ pub const Output = struct {
 const MethodologyOutput = struct {
     request: *const RecommendationRequest,
     output: *Output,
+    exercise_index: usize,
 };
 
 const MethodologyEvaluationOutput = struct {
@@ -109,12 +115,6 @@ const MethodologyEvaluationOutput = struct {
 
 const available_equipment_evidence = [_]canonical.EvidenceRef{
     .{ .path = "/session/availableEquipmentIds" },
-};
-const set_explanation_refs = [_][]const u8{ "explanation-1", "explanation-2" };
-const reduced_set_explanation_refs = [_][]const u8{
-    "explanation-1",
-    "explanation-2",
-    "explanation-3",
 };
 
 fn validateDoubleProgressionConfig(
@@ -147,7 +147,8 @@ fn recommendDoubleProgression(
         @ptrCast(@alignCast(view.context));
     const destination: *MethodologyOutput =
         @ptrCast(@alignCast(writer.context));
-    const exercise = &request.catalog.exercises[0];
+    const exercise_index = destination.exercise_index;
+    const exercise = &request.catalog.exercises[exercise_index];
     const prescription = double_progression_contract.recommendExerciseWithConstraints(
         request.config,
         request.methodology_state,
@@ -155,49 +156,59 @@ fn recommendDoubleProgression(
         exercise.id,
         .{ .max_working_sets = request.max_working_sets },
     ) catch return error.InvalidInput;
-    const explanation_refs = if (prescription.session_explanation != null)
-        &reduced_set_explanation_refs
-    else
-        &set_explanation_refs;
+    const explanation_offset = destination.output.explanation_len;
+    const explanation_count: usize = if (prescription.session_explanation != null) 3 else 2;
+    for (0..explanation_count) |local_index| {
+        const id = std.fmt.bufPrint(
+            &destination.output.explanation_ids[exercise_index][local_index],
+            "explanation-{d}",
+            .{explanation_offset + local_index + 1},
+        ) catch return error.OutputLimitReached;
+        destination.output.explanation_id_lens[exercise_index][local_index] = id.len;
+        destination.output.explanation_refs[exercise_index][local_index] = id;
+    }
+    const explanation_refs = destination.output.explanation_refs[exercise_index][0..explanation_count];
 
-    destination.output.rep_amount_len = (std.fmt.bufPrint(
-        &destination.output.rep_amount,
+    destination.output.rep_amount_lens[exercise_index] = (std.fmt.bufPrint(
+        &destination.output.rep_amounts[exercise_index],
         "{d}",
         .{prescription.repetitions},
     ) catch return error.OutputLimitReached).len;
-    destination.output.load_amount_len = (prescription.load.value.format(
-        &destination.output.load_amount,
+    destination.output.load_amount_lens[exercise_index] = (prescription.load.value.format(
+        &destination.output.load_amounts[exercise_index],
     ) catch return error.OutputLimitReached).len;
-    destination.output.set_len = prescription.working_sets;
-    for (0..destination.output.set_len) |set_index| {
-        const metric_index = set_index * 2;
+    destination.output.set_lens[exercise_index] = prescription.working_sets;
+    const set_offset = exercise_index * 64;
+    const metric_offset = exercise_index * 64 * 2;
+    for (0..destination.output.set_lens[exercise_index]) |set_index| {
+        const metric_index = metric_offset + set_index * 2;
         destination.output.metrics[metric_index] = .{
             .code = "load",
             .value = .{
-                .amount = destination.output.load_amount[0..destination.output.load_amount_len],
+                .amount = destination.output.load_amounts[exercise_index][0..destination.output.load_amount_lens[exercise_index]],
                 .unit = prescription.load.unit.code(),
             },
         };
         destination.output.metrics[metric_index + 1] = .{
             .code = "repetitions",
             .value = .{
-                .amount = destination.output.rep_amount[0..destination.output.rep_amount_len],
+                .amount = destination.output.rep_amounts[exercise_index][0..destination.output.rep_amount_lens[exercise_index]],
                 .unit = "count",
             },
         };
-        destination.output.sets[set_index] = .{
+        destination.output.sets[set_offset + set_index] = .{
             .kind = "working",
             .targetMetrics = destination.output.metrics[metric_index .. metric_index + 2],
             .explanationRefs = explanation_refs,
         };
     }
-    destination.output.exercises[0] = .{
+    destination.output.exercises[exercise_index] = .{
         .exerciseId = exercise.id.bytes,
-        .sets = destination.output.sets[0..destination.output.set_len],
+        .sets = destination.output.sets[set_offset .. set_offset + destination.output.set_lens[exercise_index]],
         .explanationRefs = explanation_refs,
     };
-    destination.output.explanations[0] = .{
-        .id = "explanation-1",
+    destination.output.explanations[explanation_offset] = .{
+        .id = explanation_refs[0],
         .code = "exercise.selected.available_equipment",
         .category = "selection",
         .summary = "Available equipment supported the exercise selection.",
@@ -206,8 +217,8 @@ fn recommendDoubleProgression(
         .ruleId = "double-progression.initial-working-set",
         .severity = .info,
     };
-    destination.output.explanations[1] = .{
-        .id = "explanation-2",
+    destination.output.explanations[explanation_offset + 1] = .{
+        .id = explanation_refs[1],
         .code = prescription.explanation.code,
         .category = "progression",
         .summary = prescription.explanation.summary,
@@ -216,10 +227,10 @@ fn recommendDoubleProgression(
         .ruleId = prescription.explanation.rule_id,
         .severity = .info,
     };
-    destination.output.explanation_len = 2;
+    destination.output.explanation_len = explanation_offset + 2;
     if (prescription.session_explanation) |session_explanation| {
-        destination.output.explanations[2] = .{
-            .id = "explanation-3",
+        destination.output.explanations[explanation_offset + 2] = .{
+            .id = explanation_refs[2],
             .code = session_explanation.code,
             .category = "session",
             .summary = session_explanation.summary,
@@ -228,13 +239,11 @@ fn recommendDoubleProgression(
             .ruleId = session_explanation.rule_id,
             .severity = .warning,
         };
-        destination.output.explanation_len = 3;
+        destination.output.explanation_len = explanation_offset + 3;
     }
     if (prescription.warning) |warning| {
-        destination.output.warnings[0] = warning;
-        destination.output.warning_len = 1;
-    } else {
-        destination.output.warning_len = 0;
+        destination.output.warnings[destination.output.warning_len] = warning;
+        destination.output.warning_len += 1;
     }
 }
 
@@ -282,7 +291,9 @@ pub fn recommendSession(
         request.methodology_id,
         request.methodology_version,
     ) orelse return error.UnsupportedMethodology;
-    if (request.catalog.exercises.len != 1) {
+    if (request.catalog.exercises.len == 0 or
+        request.catalog.exercises.len > max_recommended_exercises)
+    {
         return error.CatalogLimitReached;
     }
     var issue_storage: [16]canonical.ValidationIssue = undefined;
@@ -311,27 +322,35 @@ pub fn recommendSession(
         ) catch return error.OutputLimitReached;
     }
     if (issues.items().len != 0) return error.InvalidRequest;
-    if (!equipmentAvailable(
-        request.catalog.exercises[0].equipment_ids,
-        request.available_equipment_ids,
-    )) return error.InvalidRequest;
+    for (request.catalog.exercises) |exercise| {
+        if (!equipmentAvailable(
+            exercise.equipment_ids,
+            request.available_equipment_ids,
+        )) return error.InvalidRequest;
+    }
 
+    output.explanation_len = 0;
+    output.warning_len = 0;
     var scratch = methodology.Scratch{ .bytes = &.{} };
-    var methodology_output = MethodologyOutput{
-        .request = &request,
-        .output = output,
-    };
-    var writer = methodology.RecommendationWriter{
-        .context = &methodology_output,
-    };
-    implementation.recommend_session(
-        .{ .context = &request },
-        &scratch,
-        &writer,
-    ) catch |err| return switch (err) {
-        error.InvalidInput => error.InvalidRequest,
-        error.OutputLimitReached => error.OutputLimitReached,
-    };
+    output.exercise_len = request.catalog.exercises.len;
+    for (0..output.exercise_len) |exercise_index| {
+        var methodology_output = MethodologyOutput{
+            .request = &request,
+            .output = output,
+            .exercise_index = exercise_index,
+        };
+        var writer = methodology.RecommendationWriter{
+            .context = &methodology_output,
+        };
+        implementation.recommend_session(
+            .{ .context = &request },
+            &scratch,
+            &writer,
+        ) catch |err| return switch (err) {
+            error.InvalidInput => error.InvalidRequest,
+            error.OutputLimitReached => error.OutputLimitReached,
+        };
+    }
 
     fingerprintRequest(request, &output.input_fingerprint);
     fingerprintResult(request, output, &output.result_fingerprint);
@@ -532,15 +551,18 @@ fn fingerprintResult(
     hash.update("caudex:recommendation-result:v1\x00");
     hash.update(request.methodology_id.bytes);
     hash.update("\x00");
-    hash.update(output.exercises[0].exerciseId);
-    hash.update("\x00working\x00load\x00");
-    hash.update(output.load_amount[0..output.load_amount_len]);
-    hash.update("\x00");
-    hash.update(output.metrics[0].value.unit);
-    hash.update("\x00repetitions\x00");
-    hash.update(output.rep_amount[0..output.rep_amount_len]);
-    updateU64(&hash, output.set_len);
-    hash.update("\x00count\x00");
+    for (0..output.exercise_len) |exercise_index| {
+        const metric_offset = exercise_index * 64 * 2;
+        hash.update(output.exercises[exercise_index].exerciseId);
+        hash.update("\x00working\x00load\x00");
+        hash.update(output.load_amounts[exercise_index][0..output.load_amount_lens[exercise_index]]);
+        hash.update("\x00");
+        hash.update(output.metrics[metric_offset].value.unit);
+        hash.update("\x00repetitions\x00");
+        hash.update(output.rep_amounts[exercise_index][0..output.rep_amount_lens[exercise_index]]);
+        updateU64(&hash, output.set_lens[exercise_index]);
+        hash.update("\x00count\x00");
+    }
     for (output.explanations[0..output.explanation_len]) |explanation| {
         hash.update(explanation.code);
         hash.update("\x00");
@@ -715,27 +737,34 @@ test "recommendation rejects history references outside the supplied catalog" {
     );
 }
 
-test "recommendation reports the bounded catalog limit" {
+test "recommendation supports a multi-exercise catalog" {
     const catalog = [_]training.Exercise{
         .{ .id = try .parse("squat") },
         .{ .id = try .parse("bench-press") },
     };
     var output: Output = .{};
-    try std.testing.expectError(
-        error.CatalogLimitReached,
-        recommendSession(
-            .{
-                .as_of = try .parse("2026-07-25T15:00:00Z"),
-                .methodology_id = try .parse("caudex.double-progression"),
-                .methodology_version = .{ .major = 0, .minor = 1, .patch = 0 },
-                .config = testConfig(),
-                .catalog = .{ .exercises = &catalog },
-                .history = .{},
-                .available_equipment_ids = &.{},
-            },
-            &output,
-        ),
+    const result = try recommendSession(
+        .{
+            .as_of = try .parse("2026-07-25T15:00:00Z"),
+            .methodology_id = try .parse("caudex.double-progression"),
+            .methodology_version = .{ .major = 0, .minor = 1, .patch = 0 },
+            .config = testConfig(),
+            .catalog = .{ .exercises = &catalog },
+            .history = .{},
+            .available_equipment_ids = &.{},
+        },
+        &output,
     );
+    try std.testing.expectEqual(@as(usize, 2), result.recommendation.?.exercises.len);
+    try std.testing.expectEqualStrings("squat", result.recommendation.?.exercises[0].exerciseId);
+    try std.testing.expectEqualStrings("bench-press", result.recommendation.?.exercises[1].exerciseId);
+    try std.testing.expectEqual(@as(usize, 2), result.recommendation.?.exercises[1].explanationRefs.len);
+    try std.testing.expectEqualStrings(
+        "explanation-3",
+        result.recommendation.?.exercises[1].explanationRefs[0],
+    );
+    try std.testing.expectEqual(@as(usize, 4), result.explanations.len);
+    try std.testing.expectEqualStrings("bench-press", result.explanations[2].subject.?.exerciseId.?);
 }
 
 test "evaluation rejects duplicate catalog identifiers" {

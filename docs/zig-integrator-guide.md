@@ -83,8 +83,9 @@ pub fn recommend(request: caudex.engine.RecommendationRequest) !void {
 ```
 
 The following is a complete minimal recommendation using the first-party
-double-progression implementation. It is intentionally one exercise because
-the v0.1 typed vertical slice is bounded to one catalog exercise:
+double-progression implementation. `exercises` may contain as many as
+`caudex.engine.max_recommended_exercises` entries; all result storage remains
+caller-owned and statically bounded:
 
 ```zig
 const std = @import("std");
@@ -145,9 +146,9 @@ The request, catalog backing arrays, and output are caller-owned. Keep them
 alive while reading the result. The engine does not allocate, persist, read a
 clock, or accept the proposal on the host's behalf.
 
-`recommendSession` returns `error.CatalogLimitReached` when more than one
-catalog exercise is supplied. This is an intentional v0.1 typed-result bound;
-use one exercise until the multi-exercise result storage is expanded. Other
+`recommendSession` returns `error.CatalogLimitReached` only when the catalog
+exceeds `max_recommended_exercises`. Multi-exercise catalogs and distinct
+equipment lists are supported without a canonical JSON escape hatch. Other
 validation failures return `error.InvalidRequest`, while an unknown
 methodology/version returns `error.UnsupportedMethodology`.
 
@@ -155,6 +156,33 @@ For a tracking client, use the public `caudex_tracking` commands and the
 optional `caudex_sqlite` adapter. The adapter owns migrations and transactions;
 the engine remains stateless. A host using a different database can implement
 the public `caudex_persistence` capabilities instead.
+
+## Dispatch a host-defined methodology with typed values
+
+`caudex.methodology.TypedRecommendationRequest` and `recommendTyped` provide a
+generic direct path without changing the specialized first-party engine API.
+The request owns typed configuration, optional typed state, and a typed payload;
+the caller still supplies issue storage, scratch bytes, and the output writer:
+
+```zig
+const Request = caudex.methodology.TypedRecommendationRequest(Config, State, Payload);
+var issue_storage: [16]caudex.canonical.ValidationIssue = undefined;
+var issues = caudex.diagnostics.IssueWriter.init(&issue_storage);
+var scratch = caudex.methodology.Scratch{ .bytes = scratch_bytes };
+var writer = caudex.methodology.RecommendationWriter{ .context = &output };
+
+try caudex.methodology.recommendTyped(
+    implementation,
+    Request{ .config = config, .state = state, .payload = payload },
+    &issues,
+    &scratch,
+    &writer,
+);
+```
+
+This helper performs validation and callback dispatch only. It does not
+allocate, select a methodology, interpret configuration, or define output
+ownership.
 
 ## Keep presentation separate
 

@@ -1,7 +1,7 @@
 import {
   createCaudex,
+  lb,
   methodologies,
-  type RecommendationRequest,
 } from "@caudex-workout/engine";
 
 const sampleCatalog = [{
@@ -17,44 +17,29 @@ const sampleCatalog = [{
 
 const caudex = await createCaudex();
 try {
-  const methodology = methodologies.doubleProgression({
-    repRange: { min: 8, max: 12 },
-    workingSets: 3,
-    advancementCriteria: {
-      minimumSuccessfulSets: 3,
-      minimumRepetitions: 12,
-    },
-    initialLoad: { amount: "45", unit: "lb" },
-    loadIncrement: { amount: "5", unit: "lb" },
-    failurePolicy: {
-      onPartial: "hold",
-      onFailure: "regress",
-      regressionAmount: { amount: "5", unit: "lb" },
-    },
-    rounding: {
-      mode: "nearest",
-      quantum: { amount: "2.5", unit: "lb" },
-    },
+  const methodology = methodologies.presets.hypertrophy({
+    initialLoad: lb(45),
+    loadIncrement: lb(5),
+    rounding: { mode: "nearest", quantum: lb("2.5") },
   });
-
-  const request: RecommendationRequest = {
-    schemaVersion: 1,
-    asOf: "2026-07-25T14:00:00Z",
+  const program = caudex.createProgram({
+    hostScopeKey: "quickstart-profile",
     methodology,
     catalog: sampleCatalog,
     history: { workouts: [] },
+  });
+  const result = program.recommend({
+    asOf: "2026-07-25T14:00:00Z",
     session: {
       availableMinutes: 35,
       availableEquipmentIds: ["dumbbell", "adjustable-bench"],
     },
-  };
-
-  const result = caudex.recommendSession(request);
+  });
   if (!result.ok) {
     throw new Error(`Request rejected: ${JSON.stringify(result.issues)}`);
   }
 
-  const exercise = result.recommendation?.exercises[0];
+  const exercise = result.recommendation.exercises[0];
   const explanation = result.explanations?.[0];
   if (!exercise || !explanation) {
     throw new Error("Expected a recommendation with an explanation");

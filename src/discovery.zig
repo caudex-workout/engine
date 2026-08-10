@@ -93,6 +93,8 @@ const double_progression_fields = [_]FieldDescriptor{
     .{ .name = "repRange.max", .description = "Maximum target repetitions.", .fieldType = .integer, .required = true, .minimum = "1", .maximum = "65535" },
     .{ .name = "workingSets", .description = "Number of prescribed working sets.", .fieldType = .integer, .required = true, .minimum = "1", .maximum = "64" },
     .{ .name = "advancementCriteria", .description = "Success thresholds used to advance load or repetitions.", .fieldType = .object, .required = true },
+    .{ .name = "advancementCriteria.minimumSuccessfulSets", .description = "Minimum number of successful sets required to advance.", .fieldType = .integer, .required = true, .minimum = "1", .maximum = "64" },
+    .{ .name = "advancementCriteria.minimumRepetitions", .description = "Minimum repetitions per successful set required to advance.", .fieldType = .integer, .required = true, .minimum = "1", .maximum = "65535" },
     .{ .name = "initialLoad", .description = "Initial load when history and methodology state have no value.", .fieldType = .measurement, .required = true, .exactDecimal = true, .unitDimension = "mass" },
     .{ .name = "loadIncrement", .description = "Exact load increase after successful progression.", .fieldType = .measurement, .required = true, .exactDecimal = true, .unitDimension = "mass" },
     .{ .name = "failurePolicy.onPartial", .description = "Action after a partial performance.", .fieldType = .enumeration, .required = true, .enumChoices = &hold_regress_choices },
