@@ -343,6 +343,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: |
           test -n "$NODE_AUTH_TOKEN"
+          npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
           npm publish "$PWD/release/assets/caudex-workout-engine-${{ needs.validate.outputs.version }}.tgz" \
             --provenance --access public --tag '${{ needs.validate.outputs.npm_tag }}'
       - name: Publish exact npm tarball with Trusted Publishing
