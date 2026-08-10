@@ -338,7 +338,7 @@ jobs:
             --title "Caudex ${{ needs.validate.outputs.version }}" --notes-file release/notes.md \
             ${{ needs.validate.outputs.prerelease == 'true' && '--prerelease' || '' }}
       - name: Publish exact npm tarball with temporary bootstrap token
-        if: env.CAUDEX_NPM_AUTH_MODE == 'bootstrap'
+        if: vars.CAUDEX_NPM_AUTH_MODE == 'bootstrap'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: |
@@ -346,7 +346,7 @@ jobs:
           npm publish "$PWD/release/assets/caudex-workout-engine-${{ needs.validate.outputs.version }}.tgz" \
             --provenance --access public --tag '${{ needs.validate.outputs.npm_tag }}'
       - name: Publish exact npm tarball with Trusted Publishing
-        if: env.CAUDEX_NPM_AUTH_MODE != 'bootstrap'
+        if: vars.CAUDEX_NPM_AUTH_MODE != 'bootstrap'
         run: npm publish "$PWD/release/assets/caudex-workout-engine-${{ needs.validate.outputs.version }}.tgz" --provenance --access public --tag '${{ needs.validate.outputs.npm_tag }}'
       - name: Make the already-created GitHub Release public
         env:
