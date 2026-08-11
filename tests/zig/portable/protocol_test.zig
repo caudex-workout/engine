@@ -68,6 +68,26 @@ test "portable protocol rejects unsupported versions and byte limits" {
     try std.testing.expectError(error.InputTooLarge, portable.decodeDocument(std.testing.allocator, oversized));
 }
 
+test "portable document round-trips mixed progression provenance and isolated states" {
+    const input =
+        \\{"schemaVersion":1,"exportedAt":"2026-08-10T14:00:00Z","catalogReferences":[],"customExercises":[],"templates":[],"activeWorkouts":[],"completedWorkouts":[],"acceptedRecommendations":[],"acceptedProgramRecommendations":[{"id":"accepted-mixed","hostScopeKey":"scope-1","acceptedAt":"2026-08-10T14:00:00Z","result":{"ok":true,"recommendation":{"exercises":[{"exerciseId":"a","sets":[],"programming":{"slotId":"slot-a","stateId":"state-a","progression":{"id":"caudex.double-progression","version":"0.1.0","configVersion":1},"config":{}}},{"exerciseId":"b","sets":[],"programming":{"slotId":"slot-b","stateId":"state-b","progression":{"id":"caudex.rpe-top-set-backoff","version":"0.1.0","configVersion":1},"config":{}}}],"programming":{"strategy":{"id":"caudex.fixed-session","version":"0.1.0","configVersion":1},"config":{}}},"metadata":{"engineVersion":"0.1.0","schemaVersion":1,"programStrategy":{"id":"caudex.fixed-session","version":"0.1.0","configVersion":1},"inputFingerprint":"input","resultFingerprint":"result"}}}],"methodologyStates":[],"progressionStates":[{"hostScopeKey":"scope-1","stateId":"state-a","progressionId":"caudex.double-progression","progressionVersion":"0.1.0","state":{"schemaVersion":1,"data":{}},"revision":"1","updatedAt":"2026-08-10T14:00:00Z"},{"hostScopeKey":"scope-1","stateId":"state-b","progressionId":"caudex.rpe-top-set-backoff","progressionVersion":"0.1.0","state":{"schemaVersion":1,"data":{}},"revision":"1","updatedAt":"2026-08-10T14:00:00Z"}],"programStates":[],"workflowRecovery":[]}
+    ;
+    const parsed = try portable.decodeDocument(std.testing.allocator, input);
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(usize, 1), parsed.value.acceptedProgramRecommendations.len);
+    try std.testing.expectEqual(@as(usize, 2), parsed.value.progressionStates.len);
+    const recommendation = parsed.value.acceptedProgramRecommendations[0].result.recommendation.?;
+    try std.testing.expectEqualStrings("state-a", recommendation.exercises[0].programming.?.stateId);
+    try std.testing.expectEqualStrings("caudex.rpe-top-set-backoff", recommendation.exercises[1].programming.?.progression.id);
+    var output: [8192]u8 = undefined;
+    const encoded = try portable.encode(parsed.value, &output);
+    const replayed = try portable.decodeDocument(std.testing.allocator, encoded);
+    defer replayed.deinit();
+    try std.testing.expectEqualStrings("state-b", replayed.value.progressionStates[1].stateId);
+    var replay_output: [8192]u8 = undefined;
+    try std.testing.expectEqualStrings(encoded, try portable.encode(replayed.value, &replay_output));
+}
+
 test "portable semantic validation returns stable timestamp decimal and unit issues" {
     const document: portable.Document = .{
         .schemaVersion = 1,

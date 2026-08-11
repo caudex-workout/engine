@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://caudex.dev/schemas/program-strategies/fixed-session-config-v1.schema.json",
+  "title": "FixedSessionStrategyConfigV1",
+  "description": "The first fixed-session strategy has no strategy-owned tuning values; ordered exercise slots are request data.",
+  "type": "object",
+  "maxProperties": 0,
+  "additionalProperties": false
+}

@@ -25,6 +25,7 @@ pub const load_math = @import("load_math.zig");
 pub const methodology = @import("methodology.zig");
 pub const ordering = @import("ordering.zig");
 pub const primitives = @import("primitives.zig");
+pub const programming = @import("programming.zig");
 pub const rpe_top_set_backoff = @import("rpe_top_set_backoff.zig");
 pub const training = @import("training.zig");
 

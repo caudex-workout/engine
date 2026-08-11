@@ -41,7 +41,12 @@
     "./schema/double-progression-config": "./schemas/methodologies/double-progression-config-v1.schema.json",
     "./schema/double-progression-state": "./schemas/methodologies/double-progression-state-v1.schema.json",
     "./schema/rpe-top-set-backoff-config": "./schemas/methodologies/rpe-top-set-backoff-config-v1.schema.json",
-    "./schema/rpe-top-set-backoff-state": "./schemas/methodologies/rpe-top-set-backoff-state-v1.schema.json"
+    "./schema/rpe-top-set-backoff-state": "./schemas/methodologies/rpe-top-set-backoff-state-v1.schema.json",
+    "./schema/fixed-session-config": "./schemas/program-strategies/fixed-session-config-v1.schema.json",
+    "./schema/program-recommendation-request": "./schemas/programming/v1/program-recommendation-request.schema.json",
+    "./schema/program-evaluation-request": "./schemas/programming/v1/program-evaluation-request.schema.json",
+    "./schema/program-recommendation-result": "./schemas/programming/v1/program-recommendation-result.schema.json",
+    "./schema/program-evaluation-result": "./schemas/programming/v1/program-evaluation-result.schema.json"
   },
   "files": [
     "dist/",

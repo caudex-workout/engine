@@ -84,6 +84,24 @@
       },
       "additionalProperties": false
     },
+    "acceptedProgramRecommendation": {
+      "type": "object",
+      "required": ["id", "hostScopeKey", "acceptedAt", "result"],
+      "properties": { "id": { "$ref": "#/$defs/id" }, "hostScopeKey": { "$ref": "#/$defs/scope" }, "acceptedAt": { "type": "string", "format": "date-time" }, "result": { "type": "object" } },
+      "additionalProperties": false
+    },
+    "progressionState": {
+      "type": "object",
+      "required": ["hostScopeKey", "stateId", "progressionId", "progressionVersion", "state", "revision", "updatedAt"],
+      "properties": { "hostScopeKey": { "$ref": "#/$defs/scope" }, "stateId": { "$ref": "#/$defs/id" }, "progressionId": { "$ref": "#/$defs/id" }, "progressionVersion": { "type": "string" }, "state": { "$ref": "../../v0/canonical.schema.json#/$defs/methodologyState" }, "revision": { "type": "string" }, "updatedAt": { "type": "string", "format": "date-time" } },
+      "additionalProperties": false
+    },
+    "programState": {
+      "type": "object",
+      "required": ["hostScopeKey", "programId", "strategyId", "strategyVersion", "state", "revision", "updatedAt"],
+      "properties": { "hostScopeKey": { "$ref": "#/$defs/scope" }, "programId": { "$ref": "#/$defs/id" }, "strategyId": { "$ref": "#/$defs/id" }, "strategyVersion": { "type": "string" }, "state": { "type": "object", "required": ["schemaVersion", "data"], "properties": { "schemaVersion": { "type": "integer", "minimum": 1 }, "data": { "type": "object" } }, "additionalProperties": false }, "revision": { "type": "string" }, "updatedAt": { "type": "string", "format": "date-time" } },
+      "additionalProperties": false
+    },
     "recovery": {
       "type": "object",
       "required": ["hostScopeKey", "workflowId", "kind", "status", "idempotencyKey", "payload", "updatedAt"],
@@ -110,7 +128,10 @@
         "activeWorkouts": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/activeWorkout" } },
         "completedWorkouts": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/completedWorkout" } },
         "acceptedRecommendations": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/acceptedRecommendation" } },
+        "acceptedProgramRecommendations": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/acceptedProgramRecommendation" } },
         "methodologyStates": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/methodologyState" } },
+        "progressionStates": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/progressionState" } },
+        "programStates": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/programState" } },
         "workflowRecovery": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/recovery" } }
       },
       "additionalProperties": false
@@ -128,7 +149,7 @@
     },
     "counts": {
       "type": "object",
-      "required": ["catalogReferences", "customExercises", "templates", "activeWorkouts", "completedWorkouts", "acceptedRecommendations", "methodologyStates", "workflowRecovery"],
+      "required": ["catalogReferences", "customExercises", "templates", "activeWorkouts", "completedWorkouts", "acceptedRecommendations", "acceptedProgramRecommendations", "methodologyStates", "progressionStates", "programStates", "workflowRecovery"],
       "properties": {
         "catalogReferences": { "type": "integer", "minimum": 0, "maximum": 10000 },
         "customExercises": { "type": "integer", "minimum": 0, "maximum": 10000 },
@@ -136,7 +157,10 @@
         "activeWorkouts": { "type": "integer", "minimum": 0, "maximum": 10000 },
         "completedWorkouts": { "type": "integer", "minimum": 0, "maximum": 10000 },
         "acceptedRecommendations": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "acceptedProgramRecommendations": { "type": "integer", "minimum": 0, "maximum": 10000 },
         "methodologyStates": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "progressionStates": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "programStates": { "type": "integer", "minimum": 0, "maximum": 10000 },
         "workflowRecovery": { "type": "integer", "minimum": 0, "maximum": 10000 }
       },
       "additionalProperties": false

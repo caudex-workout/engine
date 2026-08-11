@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://caudex.dev/schemas/programming/v1/program-evaluation-result.schema.json",
+  "title": "ProgramEvaluationResultV1",
+  "type": "object",
+  "required": ["ok", "progressionStateProposals", "metadata"],
+  "properties": {
+    "ok": { "type": "boolean" }, "evaluation": { "type": "object" },
+    "nextProgramState": { "type": "object" },
+    "progressionStateProposals": { "type": "array", "items": { "type": "object", "required": ["stateId", "progression", "state"] } },
+    "explanations": { "type": "array" }, "warnings": { "type": "array" }, "issues": { "type": "array" },
+    "metadata": { "type": "object", "required": ["engineVersion", "schemaVersion", "programStrategy", "inputFingerprint", "resultFingerprint"] }
+  },
+  "additionalProperties": false
+}

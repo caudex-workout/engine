@@ -168,6 +168,15 @@ issues decide when they are emitted.
 | `methodology.unknown` | error | No installed methodology matches the requested ID. |
 | `methodology.config_invalid` | error | Methodology configuration is invalid. |
 | `methodology.state_unsupported_version` | error | Methodology state cannot be read or migrated. |
+| `program_strategy.unknown` | error | No compiled program strategy matches the requested ID. |
+| `program_strategy.unsupported_version` | error | The requested program-strategy version is unsupported. |
+| `program_strategy.config_invalid` | error | Program-strategy configuration or required slots are invalid. |
+| `program_strategy.duplicate_slot_id` | error | Two session slots use the same stable slot identity. |
+| `progression.assignment_missing` | error | An exercise slot has no progression assignment. |
+| `progression.unknown` | error | No compiled exercise progression method matches the assignment. |
+| `progression.unsupported_version` | error | The assigned progression version is unsupported. |
+| `progression.duplicate_state_id` | error | Two slots conflict on one stable progression-state identity. |
+| `progression.state_mismatch` | error | Supplied state belongs to a different progression implementation. |
 
 ## Representative explanation codes
 

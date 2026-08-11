@@ -101,6 +101,45 @@ export interface MethodologyState {
   data: JsonValue;
 }
 
+export interface ProgramState {
+  schemaVersion: number;
+  data: JsonValue;
+}
+
+export interface ProgramStrategyRef<TConfig = JsonValue> {
+  id: string;
+  versionRequirement?: string;
+  configVersion: number;
+  config: TConfig;
+}
+
+export interface ProgressionAssignment<TConfig = JsonValue> {
+  /** Stable program-slot/lane identity; it is intentionally not exerciseId. */
+  stateId: string;
+  methodology: MethodologyRef<TConfig>;
+  state?: MethodologyState;
+}
+
+export interface ProgramExerciseSlot<TConfig = JsonValue> {
+  slotId: string;
+  exerciseId: string;
+  progression: ProgressionAssignment<TConfig>;
+}
+
+export interface ProgramRecommendationRequest {
+  schemaVersion: 1;
+  asOf: string;
+  program: {
+    strategy: ProgramStrategyRef;
+    state?: ProgramState;
+    exercises: ProgramExerciseSlot[];
+  };
+  catalog: Exercise[];
+  athlete?: Athlete;
+  history?: { workouts?: CompletedWorkout[]; summaries?: JsonValue };
+  session?: RecommendationRequest["session"];
+}
+
 export interface AthletePreferences {
   preferredExerciseIds?: string[];
   dislikedExerciseIds?: string[];
@@ -203,7 +242,27 @@ export interface SessionRecommendation {
     sets: SetRecommendation[];
     substitutionGroup?: string;
     explanationRefs?: string[];
+    programming?: ExerciseProgrammingProvenance;
   }>;
+  programming?: {
+    strategy: ResolvedComponent;
+    config: JsonValue;
+    inputState?: ProgramState;
+  };
+}
+
+export interface ResolvedComponent {
+  id: string;
+  version: string;
+  configVersion: number;
+}
+
+export interface ExerciseProgrammingProvenance {
+  slotId: string;
+  stateId: string;
+  progression: ResolvedComponent;
+  config: JsonValue;
+  inputState?: MethodologyState;
 }
 
 export interface ResultMetadata {
@@ -256,6 +315,38 @@ export type EvaluationResult = ProgrammingResultCommon & (
   | { ok: true; evaluation: PerformanceEvaluation; nextMethodologyState?: MethodologyState; issues?: never }
   | { ok: false; evaluation?: never; nextMethodologyState?: never; issues: ValidationIssue[] }
 );
+
+export interface ProgramEvaluationRequest {
+  schemaVersion: 1;
+  asOf: string;
+  recommendation: SessionRecommendation;
+  catalog: Exercise[];
+  athlete?: Athlete;
+  history?: { workouts?: CompletedWorkout[]; summaries?: JsonValue };
+  completedWorkout: CompletedWorkout;
+}
+
+export interface ProgramResultMetadata {
+  engineVersion: string;
+  schemaVersion: number;
+  programStrategy: ResolvedComponent;
+  inputFingerprint: string;
+  resultFingerprint: string;
+}
+
+export type ProgramRecommendationResult =
+  | { ok: true; recommendation: SessionRecommendation; explanations?: Explanation[]; warnings?: ValidationIssue[]; metadata: ProgramResultMetadata; issues?: never }
+  | { ok: false; recommendation?: never; explanations?: Explanation[]; warnings?: ValidationIssue[]; issues: ValidationIssue[]; metadata: ProgramResultMetadata };
+
+export interface ProgressionStateProposal {
+  stateId: string;
+  progression: ResolvedComponent;
+  state: MethodologyState;
+}
+
+export type ProgramEvaluationResult =
+  | { ok: true; evaluation: PerformanceEvaluation; nextProgramState?: ProgramState; progressionStateProposals: ProgressionStateProposal[]; explanations?: Explanation[]; warnings?: ValidationIssue[]; metadata: ProgramResultMetadata; issues?: never }
+  | { ok: false; evaluation?: never; nextProgramState?: never; progressionStateProposals?: never; explanations?: Explanation[]; warnings?: ValidationIssue[]; issues: ValidationIssue[]; metadata: ProgramResultMetadata };
 
 export type TrackingWorkoutStatus = "active" | "completed" | "cancelled";
 export type TrackingSetStatus = "open" | "completed" | "partial" | "failed" | "skipped";
@@ -425,7 +516,20 @@ export interface MethodologyDescriptor {
 export interface DiscoveryRegistry {
   schemaVersion: 1;
   methodologies: MethodologyDescriptor[];
+  progressionMethods: MethodologyDescriptor[];
+  programStrategies: ProgramStrategyDescriptor[];
   supportedOperations: string[];
+}
+export interface ProgramStrategyDescriptor {
+  id: string;
+  displayName: string;
+  description: string;
+  strategyVersion: string;
+  configurationSchemaVersion: number;
+  stateSchemaVersion: number;
+  supportedOperations: MethodologyOperation[];
+  configurationSchemaRef: string;
+  stateSchemaRef?: string;
 }
 export type MethodologyValidationResult =
   | { schemaVersion: 1; valid: true; issues: [] }
@@ -500,7 +604,7 @@ export interface OrchestrationPersistence {
     id: string;
     hostScopeKey: string;
     acceptedAt: string;
-    result: RecommendationResult;
+    result: RecommendationResult | ProgramRecommendationResult;
   }): Promise<void>;
   appendCompletedWorkout(hostScopeKey: string, workout: CompletedWorkout): Promise<void>;
   loadWorkflowRecovery(hostScopeKey: string, workflowId: string): Promise<WorkflowRecoveryRecord | null>;
@@ -532,6 +636,30 @@ export interface PortableAcceptedRecommendationRecord {
   acceptedAt: string;
   result: RecommendationResult;
 }
+export interface PortableAcceptedProgramRecommendationRecord {
+  id: string;
+  hostScopeKey: string;
+  acceptedAt: string;
+  result: ProgramRecommendationResult;
+}
+export interface PortableProgressionStateRecord {
+  hostScopeKey: string;
+  stateId: string;
+  progressionId: string;
+  progressionVersion: string;
+  state: MethodologyState;
+  revision: string;
+  updatedAt: string;
+}
+export interface PortableProgramStateRecord {
+  hostScopeKey: string;
+  programId: string;
+  strategyId: string;
+  strategyVersion: string;
+  state: ProgramState;
+  revision: string;
+  updatedAt: string;
+}
 export interface PortableMethodologyStateRecord {
   hostScopeKey: string;
   methodologyId: string;
@@ -549,7 +677,10 @@ export interface PortableDocument {
   activeWorkouts?: ActiveWorkoutRecord[];
   completedWorkouts?: PortableCompletedWorkoutRecord[];
   acceptedRecommendations?: PortableAcceptedRecommendationRecord[];
+  acceptedProgramRecommendations?: PortableAcceptedProgramRecommendationRecord[];
   methodologyStates?: PortableMethodologyStateRecord[];
+  progressionStates?: PortableProgressionStateRecord[];
+  programStates?: PortableProgramStateRecord[];
   workflowRecovery?: WorkflowRecoveryRecord[];
 }
 export type PortableImportMode = "merge" | "replace";
@@ -574,7 +705,10 @@ export interface PortableCounts {
   activeWorkouts: number;
   completedWorkouts: number;
   acceptedRecommendations: number;
+  acceptedProgramRecommendations: number;
   methodologyStates: number;
+  progressionStates: number;
+  programStates: number;
   workflowRecovery: number;
 }
 export interface PortableImportPlan {
@@ -649,11 +783,44 @@ export interface Program {
 export interface RuntimeFacade {
   recommend(request: RecommendationRequest): RecommendationResult;
   evaluate(request: EvaluationRequest): EvaluationResult;
+  recommendProgram(request: ProgramRecommendationRequest): ProgramRecommendationResult;
+  evaluateProgram(request: ProgramEvaluationRequest): ProgramEvaluationResult;
   applyTrackingCommand(request: TrackingCommandRequest): TrackingCommandResult;
   applyTrackingBatch(request: TrackingBatchRequest): TrackingBatchResult;
   instantiateRecommendation(request: RecommendationInstantiationRequest): InstantiationResult;
   instantiateTemplate(request: TemplateInstantiationRequest): InstantiationResult;
   completeForEvaluation(request: CompletionConversionRequest): CompletionConversionResult;
+}
+
+function invalidProgramRequest(request: ProgramRecommendationRequest): ProgramRecommendationResult | null {
+  const reject = (code: string, path: string, message: string): ProgramRecommendationResult => ({
+    ok: false,
+    issues: [{ code, path, message, severity: "error" }],
+    metadata: {
+      engineVersion: "unresolved", schemaVersion: 1,
+      programStrategy: { id: request.program?.strategy?.id ?? "unresolved", version: "unresolved", configVersion: request.program?.strategy?.configVersion ?? 0 },
+      inputFingerprint: "", resultFingerprint: "",
+    },
+  });
+  if (request.program?.strategy?.id !== "caudex.fixed-session") return reject("program_strategy.unknown", "/program/strategy/id", "The requested program strategy is not compiled into this runtime.");
+  if (request.program.strategy.configVersion !== 1 || ![undefined, "0.1.0", "^0.1.0"].includes(request.program.strategy.versionRequirement)) return reject("program_strategy.unsupported_version", "/program/strategy", "The fixed-session strategy version is unsupported.");
+  if (!Array.isArray(request.program.exercises) || request.program.exercises.length === 0) return reject("program_strategy.config_invalid", "/program/exercises", "The fixed-session strategy requires at least one exercise slot.");
+  const slots = new Set<string>();
+  const states = new Set<string>();
+  for (let index = 0; index < request.program.exercises.length; index++) {
+    const slot = request.program.exercises[index];
+    if (!slot?.progression?.methodology) return reject("progression.assignment_missing", `/program/exercises/${index}/progression`, "Every exercise slot requires a progression assignment.");
+    if (slots.has(slot.slotId)) return reject("program_strategy.duplicate_slot_id", `/program/exercises/${index}/slotId`, "Exercise slot identities must be unique.");
+    if (states.has(slot.progression.stateId)) return reject("progression.duplicate_state_id", `/program/exercises/${index}/progression/stateId`, "Progression state identities must be unique within the program request.");
+    slots.add(slot.slotId); states.add(slot.progression.stateId);
+    const method = slot.progression.methodology;
+    if (method.id !== "caudex.double-progression" && method.id !== "caudex.rpe-top-set-backoff") return reject("progression.unknown", `/program/exercises/${index}/progression/methodology/id`, "The requested exercise progression method is not compiled into this runtime.");
+    if (method.configVersion !== 1 || ![undefined, "0.1.0", "^0.1.0"].includes(method.versionRequirement)) return reject("progression.unsupported_version", `/program/exercises/${index}/progression/methodology`, "The requested exercise progression version is unsupported.");
+    const stateData = slot.progression.state?.data as Record<string, unknown> | undefined;
+    const first = Array.isArray(stateData?.exercises) ? stateData.exercises[0] as Record<string, unknown> | undefined : undefined;
+    if ((method.id === "caudex.double-progression" && first?.estimatedOneRepMax !== undefined) || (method.id === "caudex.rpe-top-set-backoff" && first?.load !== undefined)) return reject("progression.state_mismatch", `/program/exercises/${index}/progression/state`, "The supplied state belongs to a different progression implementation.");
+  }
+  return null;
 }
 
 export interface WorkflowFacade {
@@ -683,6 +850,9 @@ export interface Caudex {
   createProgram(options: ProgramOptions): Program;
   recommendSession(request: RecommendationRequest): RecommendationResult;
   evaluatePerformance(request: EvaluationRequest): EvaluationResult;
+  recommendProgram(request: ProgramRecommendationRequest): ProgramRecommendationResult;
+  evaluateProgram(request: ProgramEvaluationRequest): ProgramEvaluationResult;
+  startProgramWorkout(result: ProgramRecommendationResult, input: { catalog: Exercise[]; scope: { hostScopeKey: string; athleteId?: string }; acceptedRecommendationId?: string }): Promise<ActiveWorkout>;
   applyTrackingCommand(request: TrackingCommandRequest): TrackingCommandResult;
   applyTrackingBatch(request: TrackingBatchRequest): TrackingBatchResult;
   instantiateRecommendation(request: RecommendationInstantiationRequest): InstantiationResult;
@@ -722,7 +892,7 @@ function createFacade(exports: WasmExports, runtime: number, options: CreateCaud
   const volatileActiveWorkouts = new Map<string, ActiveWorkoutRecord>();
   const execute = <Request, Result>(
     request: Request,
-    operation: "recommend" | "evaluate" | "applyTrackingCommand" | "applyTrackingBatch" | "instantiateRecommendation" | "instantiateTemplate" | "completeForEvaluation" | "listMethodologies" | "describeMethodology" | "validateMethodologyConfig" | "validateMethodologyState" | "listCapabilities" | "exportPortable" | "validatePortableImport",
+    operation: "recommend" | "evaluate" | "recommendProgram" | "evaluateProgram" | "applyTrackingCommand" | "applyTrackingBatch" | "instantiateRecommendation" | "instantiateTemplate" | "completeForEvaluation" | "listMethodologies" | "describeMethodology" | "validateMethodologyConfig" | "validateMethodologyState" | "listCapabilities" | "exportPortable" | "validatePortableImport",
     programmingResult: boolean,
   ): Result => {
     if (disposed) {
@@ -766,7 +936,7 @@ function createFacade(exports: WasmExports, runtime: number, options: CreateCaud
       );
       if (sizingStatus !== STATUS_INSUFFICIENT_OUTPUT) {
         if (programmingResult) return statusResult(
-          request as RecommendationRequest | EvaluationRequest,
+          request as RecommendationRequest | EvaluationRequest | ProgramRecommendationRequest | ProgramEvaluationRequest,
           sizingStatus,
         ) as Result;
         throw new CaudexRuntimeError("The canonical tracking request was rejected by the runtime boundary.", sizingStatus);
@@ -832,6 +1002,8 @@ function createFacade(exports: WasmExports, runtime: number, options: CreateCaud
   const runtimeFacade: RuntimeFacade = {
     recommend: (request) => execute(request, "recommend", true),
     evaluate: (request) => execute(request, "evaluate", true),
+    recommendProgram: (request) => invalidProgramRequest(request) ?? execute(request, "recommendProgram", true),
+    evaluateProgram: (request) => execute(request, "evaluateProgram", true),
     applyTrackingCommand: (request) => execute(request, "applyTrackingCommand", false),
     applyTrackingBatch: (request) => execute(request, "applyTrackingBatch", false),
     instantiateRecommendation: (request) => execute(request, "instantiateRecommendation", false),
@@ -862,6 +1034,41 @@ function createFacade(exports: WasmExports, runtime: number, options: CreateCaud
         "evaluate",
         true,
       );
+    },
+    recommendProgram(request) {
+      return invalidProgramRequest(request) ?? execute<ProgramRecommendationRequest, ProgramRecommendationResult>(request, "recommendProgram", true);
+    },
+    evaluateProgram(request) {
+      return execute<ProgramEvaluationRequest, ProgramEvaluationResult>(request, "evaluateProgram", true);
+    },
+    async startProgramWorkout(result, input) {
+      if (!result.ok) throw new CaudexRuntimeError("A rejected program recommendation cannot start a workout.");
+      const acceptedRecommendationId = input.acceptedRecommendationId ?? ids.next("acceptedRecommendation");
+      const membershipIds = result.recommendation.exercises.map(() => ids.next("membership"));
+      const setIds = result.recommendation.exercises.flatMap((exercise) => exercise.sets.map(() => ids.next("set")));
+      const compatibilityResult: RecommendationResult = {
+        ok: true,
+        recommendation: result.recommendation,
+        explanations: result.explanations,
+        warnings: result.warnings,
+        metadata: {
+          engineVersion: result.metadata.engineVersion,
+          schemaVersion: result.metadata.schemaVersion,
+          methodology: result.metadata.programStrategy,
+          inputFingerprint: result.metadata.inputFingerprint,
+          resultFingerprint: result.metadata.resultFingerprint,
+        },
+      };
+      const instantiated = execute<RecommendationInstantiationRequest, InstantiationResult>({
+        schemaVersion: 1, recommendationResult: compatibilityResult, catalog: input.catalog, scope: input.scope,
+        ids: { workoutId: ids.next("workout"), membershipIds, setIds },
+        createdAt: clock.now(), acceptedRecommendationId,
+      }, "instantiateRecommendation", false);
+      if ("rejected" in instantiated.outcome) throw new CaudexTrackingRejectedError(instantiated.outcome.rejected);
+      const snapshot: TrackingSnapshot = { workouts: [instantiated.outcome.accepted], startReceipts: [], exerciseCatalog: input.catalog.map((exercise) => ({ exerciseId: exercise.id, availability: "active" })) };
+      await persistence?.appendAcceptedRecommendation?.({ id: acceptedRecommendationId, hostScopeKey: input.scope.hostScopeKey, acceptedAt: instantiated.outcome.accepted.startedAt, result });
+      await persistSnapshot(input.scope.hostScopeKey, instantiated.outcome.accepted.id, snapshot, null);
+      return activeWorkout(snapshot, instantiated.outcome.accepted.id, input.catalog);
     },
     applyTrackingCommand(request) {
       return execute<TrackingCommandRequest, TrackingCommandResult>(request, "applyTrackingCommand", false);
@@ -1084,8 +1291,8 @@ function parseInstantiationRecovery(record: WorkflowRecoveryRecord): {
   }
 }
 
-function statusResult<Result extends RecommendationResult | EvaluationResult>(
-  request: RecommendationRequest | EvaluationRequest,
+function statusResult<Result extends RecommendationResult | EvaluationResult | ProgramRecommendationResult | ProgramEvaluationResult>(
+  request: RecommendationRequest | EvaluationRequest | ProgramRecommendationRequest | ProgramEvaluationRequest,
   status: number,
 ): Result {
   if (status === STATUS_INVALID_REQUEST) {
@@ -1116,12 +1323,34 @@ function statusResult<Result extends RecommendationResult | EvaluationResult>(
 }
 
 function invalidResult<
-  Result extends RecommendationResult | EvaluationResult,
+  Result extends RecommendationResult | EvaluationResult | ProgramRecommendationResult | ProgramEvaluationResult,
 >(
-  request: RecommendationRequest | EvaluationRequest,
+  request: RecommendationRequest | EvaluationRequest | ProgramRecommendationRequest | ProgramEvaluationRequest,
   code: string,
   message: string,
 ): Result {
+  const programRequest = "program" in request || "recommendation" in request;
+  const metadata = programRequest ? {
+    engineVersion: "unresolved",
+    schemaVersion: 1,
+    programStrategy: {
+      id: "program" in request ? request.program?.strategy?.id ?? "unresolved" : request.recommendation?.programming?.strategy?.id ?? "unresolved",
+      version: "unresolved",
+      configVersion: "program" in request ? request.program?.strategy?.configVersion ?? 0 : request.recommendation?.programming?.strategy?.configVersion ?? 0,
+    },
+    inputFingerprint: "",
+    resultFingerprint: "",
+  } : {
+    engineVersion: "unresolved",
+    schemaVersion: 1,
+    methodology: {
+      id: "methodology" in request ? request.methodology?.id ?? "unresolved" : "unresolved",
+      version: "unresolved",
+      configVersion: "methodology" in request ? request.methodology?.configVersion ?? 0 : 0,
+    },
+    inputFingerprint: "",
+    resultFingerprint: "",
+  };
   return {
     ok: false,
     explanations: [],
@@ -1134,16 +1363,6 @@ function invalidResult<
         severity: "error",
       },
     ],
-    metadata: {
-      engineVersion: "unresolved",
-      schemaVersion: 1,
-      methodology: {
-        id: request?.methodology?.id ?? "unresolved",
-        version: "unresolved",
-        configVersion: request?.methodology?.configVersion ?? 0,
-      },
-      inputFingerprint: "",
-      resultFingerprint: "",
-    },
+    metadata,
   } as unknown as Result;
 }

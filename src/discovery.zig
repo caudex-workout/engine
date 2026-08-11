@@ -60,7 +60,23 @@ pub const MethodologyDescriptor = struct {
 pub const RegistryDescriptor = struct {
     schemaVersion: u32 = schema_version,
     methodologies: []const MethodologyDescriptor,
+    /// Compatibility alias: v0.1 methodologies are exercise progression
+    /// methods in the compositional programming architecture.
+    progressionMethods: []const MethodologyDescriptor,
+    programStrategies: []const ProgramStrategyDescriptor,
     supportedOperations: []const []const u8,
+};
+
+pub const ProgramStrategyDescriptor = struct {
+    id: []const u8,
+    displayName: []const u8,
+    description: []const u8,
+    strategyVersion: []const u8,
+    configurationSchemaVersion: u32,
+    stateSchemaVersion: u32,
+    supportedOperations: []const Operation,
+    configurationSchemaRef: []const u8,
+    stateSchemaRef: ?[]const u8 = null,
 };
 
 const all_operations = [_]Operation{ .recommend, .evaluate, .validateConfig, .validateState };
@@ -78,6 +94,8 @@ const canonical_operations = [_][]const u8{
     "validateMethodologyConfig",
     "validateMethodologyState",
     "listCapabilities",
+    "recommendProgram",
+    "evaluateProgram",
 };
 
 const rounding_choices = [_][]const u8{ "nearest", "up", "down" };
@@ -149,8 +167,25 @@ pub const descriptors = [_]MethodologyDescriptor{
     },
 };
 
+const program_operations = [_]Operation{ .recommend, .evaluate, .validateConfig, .validateState };
+pub const program_strategy_descriptors = [_]ProgramStrategyDescriptor{.{
+    .id = "caudex.fixed-session",
+    .displayName = "Fixed session",
+    .description = "Preserves an explicit ordered set of exercise slots and dispatches each slot to its assigned progression method.",
+    .strategyVersion = "0.1.0",
+    .configurationSchemaVersion = 1,
+    .stateSchemaVersion = 1,
+    .supportedOperations = &program_operations,
+    .configurationSchemaRef = "schemas/program-strategies/fixed-session-config-v1.schema.json",
+}};
+
 pub fn registry() RegistryDescriptor {
-    return .{ .methodologies = &descriptors, .supportedOperations = &canonical_operations };
+    return .{
+        .methodologies = &descriptors,
+        .progressionMethods = &descriptors,
+        .programStrategies = &program_strategy_descriptors,
+        .supportedOperations = &canonical_operations,
+    };
 }
 
 pub fn find(id: []const u8) ?*const MethodologyDescriptor {

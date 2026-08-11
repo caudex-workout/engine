@@ -22,17 +22,17 @@ fn addBundledSqlite(b: *std.Build, module: *std.Build.Module) void {
 fn repositoryTestAssets(b: *std.Build) *std.Build.Module {
     const files = b.addWriteFiles();
     const paths = [_][]const u8{
-        "src/root.zig",                                                  "src/canonical.zig",                                               "src/canonical_json.zig",                                         "src/diagnostics.zig",
-        "src/discovery.zig",                                             "src/double_progression.zig",                                      "src/duration.zig",                                               "src/engine.zig",
-        "src/filtering.zig",                                             "src/history.zig",                                                 "src/load_math.zig",                                              "src/methodology.zig",
-        "src/ordering.zig",                                              "src/primitives.zig",                                              "src/rpe_top_set_backoff.zig",                                    "src/training.zig",
-        "tracking/root.zig",                                             "workflows/root.zig",                                              "packages/npm/workout-engine/package.json",                       "adapters/sqlite/migrations/001_initial.sql",
-        "fixtures/requests/recommendation.json",                         "fixtures/requests/evaluation.json",                               "fixtures/results/diagnostics.json",                              "fixtures/results/recommendation-no-history.json",
-        "fixtures/methodologies/double-progression-config-v1.json",      "fixtures/methodologies/double-progression-state-v1.json",         "fixtures/methodologies/rpe-top-set-backoff-config-v1.json",      "fixtures/methodologies/rpe-top-set-backoff-state-v1.json",
-        "fixtures/methodologies/double-progression-conformance-v1.json", "fixtures/tracking/start-workout-v1.json",                         "fixtures/tracking/snapshot-v1.json",                             "fixtures/tracking/rejected-batch-v1.json",
-        "fixtures/templates/squat-day-v1.json",                          "fixtures/portable/export-v1.json",                                "schemas/v0/canonical.schema.json",                               "schemas/v0/recommendation-request.schema.json",
-        "schemas/v0/evaluation-request.schema.json",                     "schemas/v0/recommendation-result.schema.json",                    "schemas/v0/evaluation-result.schema.json",                       "schemas/methodologies/double-progression-config-v1.schema.json",
-        "schemas/methodologies/double-progression-state-v1.schema.json", "schemas/methodologies/rpe-top-set-backoff-config-v1.schema.json", "schemas/methodologies/rpe-top-set-backoff-state-v1.schema.json",
+        "src/root.zig",                                                   "src/canonical.zig",                                             "src/canonical_json.zig",                                          "src/diagnostics.zig",
+        "src/discovery.zig",                                              "src/double_progression.zig",                                    "src/duration.zig",                                                "src/engine.zig",
+        "src/filtering.zig",                                              "src/history.zig",                                               "src/load_math.zig",                                               "src/methodology.zig",
+        "src/ordering.zig",                                               "src/primitives.zig",                                            "src/programming.zig",                                             "src/rpe_top_set_backoff.zig",
+        "src/training.zig",                                               "tracking/root.zig",                                             "workflows/root.zig",                                              "packages/npm/workout-engine/package.json",
+        "adapters/sqlite/migrations/001_initial.sql",                     "fixtures/requests/recommendation.json",                         "fixtures/requests/evaluation.json",                               "fixtures/results/diagnostics.json",
+        "fixtures/results/recommendation-no-history.json",                "fixtures/methodologies/double-progression-config-v1.json",      "fixtures/methodologies/double-progression-state-v1.json",         "fixtures/methodologies/rpe-top-set-backoff-config-v1.json",
+        "fixtures/methodologies/rpe-top-set-backoff-state-v1.json",       "fixtures/methodologies/double-progression-conformance-v1.json", "fixtures/tracking/start-workout-v1.json",                         "fixtures/tracking/snapshot-v1.json",
+        "fixtures/tracking/rejected-batch-v1.json",                       "fixtures/templates/squat-day-v1.json",                          "fixtures/portable/export-v1.json",                                "schemas/v0/canonical.schema.json",
+        "schemas/v0/recommendation-request.schema.json",                  "schemas/v0/evaluation-request.schema.json",                     "schemas/v0/recommendation-result.schema.json",                    "schemas/v0/evaluation-result.schema.json",
+        "schemas/methodologies/double-progression-config-v1.schema.json", "schemas/methodologies/double-progression-state-v1.schema.json", "schemas/methodologies/rpe-top-set-backoff-config-v1.schema.json", "schemas/methodologies/rpe-top-set-backoff-state-v1.schema.json",
     };
     for (paths) |path| _ = files.addCopyFile(b.path(path), path);
     const source = files.add("root.zig",
@@ -50,6 +50,7 @@ fn repositoryTestAssets(b: *std.Build) *std.Build.Module {
         \\pub const src_methodology = @embedFile("src/methodology.zig");
         \\pub const src_ordering = @embedFile("src/ordering.zig");
         \\pub const src_primitives = @embedFile("src/primitives.zig");
+        \\pub const src_programming = @embedFile("src/programming.zig");
         \\pub const src_rpe_top_set_backoff = @embedFile("src/rpe_top_set_backoff.zig");
         \\pub const src_training = @embedFile("src/training.zig");
         \\pub const tracking_root = @embedFile("tracking/root.zig");
@@ -938,7 +939,7 @@ pub fn build(b: *std.Build) void {
     cli_version.addArg("version");
     cli_version.expectStdOutEqual(
         "caudex 0.1.0\nengine: 0.1.0 (schema 1)\npersistence contract: 3\n" ++
-            "tracking contract: 6\nsqlite adapter: 0.1.0 (schema 1-10)\n",
+            "tracking contract: 6\nsqlite adapter: 0.1.0 (schema 1-11)\n",
     );
 
     const cli_database_human = b.addRunArtifact(cli);
@@ -948,8 +949,8 @@ pub fn build(b: *std.Build) void {
         \\Database: :memory:
         \\Kind: memory
         \\Adapter version: 0.1.0
-        \\Schema version: 10
-        \\Supported schema: 1-10
+        \\Schema version: 11
+        \\Supported schema: 1-11
         \\Compatibility: current
         \\
     );
@@ -967,8 +968,8 @@ pub fn build(b: *std.Build) void {
     cli_database_json.expectStdOutEqual(
         "{\"schemaVersion\":1,\"kind\":\"caudex.database.info\",\"data\":{" ++
             "\"databasePath\":\":memory:\",\"databaseKind\":\"memory\"," ++
-            "\"adapterVersion\":\"0.1.0\",\"databaseSchemaVersion\":10," ++
-            "\"minimumSchemaVersion\":1,\"latestSchemaVersion\":10," ++
+            "\"adapterVersion\":\"0.1.0\",\"databaseSchemaVersion\":11," ++
+            "\"minimumSchemaVersion\":1,\"latestSchemaVersion\":11," ++
             "\"compatibility\":\"current\"}}\n",
     );
 
@@ -1016,8 +1017,8 @@ pub fn build(b: *std.Build) void {
         "{\"schemaVersion\":1,\"kind\":\"caudex.database.info\",\"data\":{" ++
             "\"databasePath\":\".zig-cache/cwe112-broken-pipe.sqlite\"," ++
             "\"databaseKind\":\"file\",\"adapterVersion\":\"0.1.0\"," ++
-            "\"databaseSchemaVersion\":10,\"minimumSchemaVersion\":1," ++
-            "\"latestSchemaVersion\":10,\"compatibility\":\"current\"}}\n",
+            "\"databaseSchemaVersion\":11,\"minimumSchemaVersion\":1," ++
+            "\"latestSchemaVersion\":11,\"compatibility\":\"current\"}}\n",
     );
 
     const cli_workout_start_test = namedSystemCommand(b, "CLI workout start", &.{

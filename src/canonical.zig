@@ -150,6 +150,50 @@ pub const MethodologyState = struct {
     data: std.json.Value,
 };
 
+/// A program strategy owns session-level intent and composition. Methodology
+/// references nested beneath exercise slots remain exercise progression
+/// implementations; this additive model leaves the v0.1 single-methodology
+/// request unchanged.
+pub const ProgramStrategyRef = struct {
+    id: []const u8,
+    versionRequirement: ?[]const u8 = null,
+    configVersion: u32,
+    config: std.json.Value,
+};
+
+pub const ProgramState = struct {
+    schemaVersion: u32,
+    data: std.json.Value,
+};
+
+pub const ProgressionAssignment = struct {
+    stateId: []const u8,
+    methodology: MethodologyRef,
+    state: ?MethodologyState = null,
+};
+
+pub const ProgramExerciseSlot = struct {
+    slotId: []const u8,
+    exerciseId: []const u8,
+    progression: ProgressionAssignment,
+};
+
+pub const ProgramPlan = struct {
+    strategy: ProgramStrategyRef,
+    state: ?ProgramState = null,
+    exercises: []const ProgramExerciseSlot,
+};
+
+pub const ProgramRecommendationRequest = struct {
+    schemaVersion: u32,
+    asOf: []const u8,
+    program: ProgramPlan,
+    catalog: []const Exercise,
+    athlete: Athlete = .{},
+    history: HistorySnapshot = .{},
+    session: SessionContext = .{},
+};
+
 pub const RecommendationRequest = struct {
     schemaVersion: u32,
     asOf: []const u8,
@@ -222,18 +266,42 @@ pub const ExerciseRecommendation = struct {
     sets: []const SetRecommendation,
     substitutionGroup: ?[]const u8 = null,
     explanationRefs: []const []const u8 = &.{},
+    programming: ?ExerciseProgrammingProvenance = null,
+};
+
+pub const ResolvedComponent = struct {
+    id: []const u8,
+    version: []const u8,
+    configVersion: u32,
+};
+
+pub const ExerciseProgrammingProvenance = struct {
+    slotId: []const u8,
+    stateId: []const u8,
+    progression: ResolvedComponent,
+    config: std.json.Value,
+    inputState: ?MethodologyState = null,
+};
+
+pub const SessionProgrammingProvenance = struct {
+    strategy: ResolvedComponent,
+    config: std.json.Value,
+    inputState: ?ProgramState = null,
 };
 
 pub const SessionRecommendation = struct {
     title: ?[]const u8 = null,
     estimatedDuration: ?Measurement = null,
     exercises: []const ExerciseRecommendation,
+    programming: ?SessionProgrammingProvenance = null,
 };
 
 pub const ExerciseEvaluation = struct {
     exerciseId: []const u8,
     outcome: []const u8,
     explanationRefs: []const []const u8 = &.{},
+    stateId: ?[]const u8 = null,
+    progression: ?ResolvedComponent = null,
 };
 
 pub const PerformanceEvaluation = struct {
@@ -274,4 +342,48 @@ pub const EvaluationResult = struct {
     warnings: []const ValidationIssue = &.{},
     issues: []const ValidationIssue = &.{},
     metadata: ResultMetadata,
+};
+
+pub const ProgramEvaluationRequest = struct {
+    schemaVersion: u32,
+    asOf: []const u8,
+    recommendation: SessionRecommendation,
+    catalog: []const Exercise,
+    athlete: Athlete = .{},
+    history: HistorySnapshot = .{},
+    completedWorkout: CompletedWorkout,
+};
+
+pub const ProgressionStateProposal = struct {
+    stateId: []const u8,
+    progression: ResolvedComponent,
+    state: MethodologyState,
+};
+
+pub const ProgramResultMetadata = struct {
+    engineVersion: []const u8,
+    schemaVersion: u32,
+    programStrategy: ResolvedComponent,
+    inputFingerprint: []const u8,
+    resultFingerprint: []const u8,
+};
+
+pub const ProgramRecommendationResult = struct {
+    ok: bool,
+    recommendation: ?SessionRecommendation = null,
+    explanations: []const Explanation = &.{},
+    warnings: []const ValidationIssue = &.{},
+    issues: []const ValidationIssue = &.{},
+    metadata: ProgramResultMetadata,
+};
+
+pub const ProgramEvaluationResult = struct {
+    ok: bool,
+    evaluation: ?PerformanceEvaluation = null,
+    nextProgramState: ?ProgramState = null,
+    progressionStateProposals: []const ProgressionStateProposal = &.{},
+    explanations: []const Explanation = &.{},
+    warnings: []const ValidationIssue = &.{},
+    issues: []const ValidationIssue = &.{},
+    metadata: ProgramResultMetadata,
 };

@@ -61,6 +61,32 @@ pub fn decodeEvaluationRequest(
     return parsed;
 }
 
+pub fn decodeProgramRecommendationRequest(
+    allocator: std.mem.Allocator,
+    input: []const u8,
+    limits: Limits,
+) DecodeError!std.json.Parsed(canonical.ProgramRecommendationRequest) {
+    const parsed = try decodeValue(canonical.ProgramRecommendationRequest, allocator, input, limits);
+    if (parsed.value.schemaVersion != 1) {
+        parsed.deinit();
+        return error.UnsupportedVersion;
+    }
+    return parsed;
+}
+
+pub fn decodeProgramEvaluationRequest(
+    allocator: std.mem.Allocator,
+    input: []const u8,
+    limits: Limits,
+) DecodeError!std.json.Parsed(canonical.ProgramEvaluationRequest) {
+    const parsed = try decodeValue(canonical.ProgramEvaluationRequest, allocator, input, limits);
+    if (parsed.value.schemaVersion != 1) {
+        parsed.deinit();
+        return error.UnsupportedVersion;
+    }
+    return parsed;
+}
+
 pub fn decodeRecommendationResult(
     allocator: std.mem.Allocator,
     input: []const u8,

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://caudex.dev/schemas/programming/v1/program-recommendation-result.schema.json",
+  "title": "ProgramRecommendationResultV1",
+  "type": "object",
+  "required": ["ok", "metadata"],
+  "properties": {
+    "ok": { "type": "boolean" },
+    "recommendation": { "type": "object", "required": ["exercises", "programming"], "properties": { "exercises": { "type": "array", "items": { "type": "object", "required": ["exerciseId", "sets", "programming"] } }, "programming": { "type": "object" } } },
+    "explanations": { "type": "array" }, "warnings": { "type": "array" }, "issues": { "type": "array" },
+    "metadata": { "$ref": "#/$defs/metadata" }
+  },
+  "additionalProperties": false,
+  "$defs": { "metadata": { "type": "object", "required": ["engineVersion", "schemaVersion", "programStrategy", "inputFingerprint", "resultFingerprint"], "properties": { "engineVersion": { "type": "string" }, "schemaVersion": { "const": 1 }, "programStrategy": { "type": "object", "required": ["id", "version", "configVersion"] }, "inputFingerprint": { "type": "string" }, "resultFingerprint": { "type": "string" } }, "additionalProperties": false } }
+}

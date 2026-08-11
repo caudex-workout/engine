@@ -46,11 +46,29 @@
     },
     "registry": {
       "type": "object",
-      "required": ["schemaVersion", "methodologies", "supportedOperations"],
+      "required": ["schemaVersion", "methodologies", "progressionMethods", "programStrategies", "supportedOperations"],
       "properties": {
         "schemaVersion": { "const": 1 },
         "methodologies": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/methodology" } },
+        "progressionMethods": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/methodology" } },
+        "programStrategies": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/programStrategy" } },
         "supportedOperations": { "type": "array", "maxItems": 64, "items": { "type": "string", "maxLength": 100 } }
+      },
+      "additionalProperties": false
+    },
+    "programStrategy": {
+      "type": "object",
+      "required": ["id", "displayName", "description", "strategyVersion", "configurationSchemaVersion", "stateSchemaVersion", "supportedOperations", "configurationSchemaRef"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "strategyVersion": { "type": "string", "maxLength": 100 },
+        "configurationSchemaVersion": { "type": "integer", "minimum": 1 },
+        "stateSchemaVersion": { "type": "integer", "minimum": 1 },
+        "supportedOperations": { "type": "array", "items": { "enum": ["recommend", "evaluate", "validateConfig", "validateState"] } },
+        "configurationSchemaRef": { "type": "string", "maxLength": 500 },
+        "stateSchemaRef": { "type": "string", "maxLength": 500 }
       },
       "additionalProperties": false
     },

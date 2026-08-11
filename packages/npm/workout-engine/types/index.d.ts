@@ -65,6 +65,15 @@ export interface MethodologyState {
   schemaVersion: number;
   data: JsonValue;
 }
+export interface ProgramState { schemaVersion: number; data: JsonValue }
+export interface ProgramStrategyRef<TConfig = JsonValue> { id: string; versionRequirement?: string; configVersion: number; config: TConfig }
+export interface ProgressionAssignment<TConfig = JsonValue> { stateId: string; methodology: MethodologyRef<TConfig>; state?: MethodologyState }
+export interface ProgramExerciseSlot<TConfig = JsonValue> { slotId: string; exerciseId: string; progression: ProgressionAssignment<TConfig> }
+export interface ProgramRecommendationRequest {
+  schemaVersion: 1; asOf: string;
+  program: { strategy: ProgramStrategyRef; state?: ProgramState; exercises: ProgramExerciseSlot[] };
+  catalog: Exercise[]; athlete?: Athlete; history?: { workouts?: CompletedWorkout[]; summaries?: JsonValue }; session?: RecommendationRequest["session"];
+}
 
 export interface AthletePreferences {
   preferredExerciseIds?: string[];
@@ -165,8 +174,12 @@ export interface SessionRecommendation {
     sets: SetRecommendation[];
     substitutionGroup?: string;
     explanationRefs?: string[];
+    programming?: ExerciseProgrammingProvenance;
   }>;
+  programming?: { strategy: ResolvedComponent; config: JsonValue; inputState?: ProgramState };
 }
+export interface ResolvedComponent { id: string; version: string; configVersion: number }
+export interface ExerciseProgrammingProvenance { slotId: string; stateId: string; progression: ResolvedComponent; config: JsonValue; inputState?: MethodologyState }
 
 export interface ResultMetadata {
   engineVersion: string;
@@ -201,6 +214,15 @@ export type EvaluationResult = ProgrammingResultCommon & (
   | { ok: true; evaluation: PerformanceEvaluation; nextMethodologyState?: MethodologyState; issues?: never }
   | { ok: false; evaluation?: never; nextMethodologyState?: never; issues: ValidationIssue[] }
 );
+export interface ProgramEvaluationRequest { schemaVersion: 1; asOf: string; recommendation: SessionRecommendation; catalog: Exercise[]; athlete?: Athlete; history?: { workouts?: CompletedWorkout[]; summaries?: JsonValue }; completedWorkout: CompletedWorkout }
+export interface ProgramResultMetadata { engineVersion: string; schemaVersion: number; programStrategy: ResolvedComponent; inputFingerprint: string; resultFingerprint: string }
+export type ProgramRecommendationResult =
+  | { ok: true; recommendation: SessionRecommendation; explanations?: Explanation[]; warnings?: ValidationIssue[]; metadata: ProgramResultMetadata; issues?: never }
+  | { ok: false; recommendation?: never; explanations?: Explanation[]; warnings?: ValidationIssue[]; issues: ValidationIssue[]; metadata: ProgramResultMetadata };
+export interface ProgressionStateProposal { stateId: string; progression: ResolvedComponent; state: MethodologyState }
+export type ProgramEvaluationResult =
+  | { ok: true; evaluation: PerformanceEvaluation; nextProgramState?: ProgramState; progressionStateProposals: ProgressionStateProposal[]; explanations?: Explanation[]; warnings?: ValidationIssue[]; metadata: ProgramResultMetadata; issues?: never }
+  | { ok: false; evaluation?: never; nextProgramState?: never; progressionStateProposals?: never; explanations?: Explanation[]; warnings?: ValidationIssue[]; issues: ValidationIssue[]; metadata: ProgramResultMetadata };
 
 export type TrackingWorkoutStatus = "active" | "completed" | "cancelled";
 export type TrackingSetStatus = "open" | "completed" | "partial" | "failed" | "skipped";
@@ -298,7 +320,8 @@ export interface MethodologyDescriptor {
   supportedOperations: MethodologyOperation[]; fields: MethodologyFieldDescriptor[];
   configurationSchemaRef: string; stateSchemaRef: string; deprecated?: boolean;
 }
-export interface DiscoveryRegistry { schemaVersion: 1; methodologies: MethodologyDescriptor[]; supportedOperations: string[] }
+export interface ProgramStrategyDescriptor { id: string; displayName: string; description: string; strategyVersion: string; configurationSchemaVersion: number; stateSchemaVersion: number; supportedOperations: MethodologyOperation[]; configurationSchemaRef: string; stateSchemaRef?: string }
+export interface DiscoveryRegistry { schemaVersion: 1; methodologies: MethodologyDescriptor[]; progressionMethods: MethodologyDescriptor[]; programStrategies: ProgramStrategyDescriptor[]; supportedOperations: string[] }
 export type MethodologyValidationResult = { schemaVersion: 1; valid: true; issues: [] } | { schemaVersion: 1; valid: false; issues: ValidationIssue[] };
 
 export type InitializationErrorCode =
@@ -336,7 +359,7 @@ export interface OrchestrationPersistence {
   loadCatalog(input: { hostScopeKey: string; asOf: string }): Promise<readonly Exercise[]>;
   loadHistory(input: { hostScopeKey: string; through: string }): Promise<{ workouts: readonly CompletedWorkout[]; summaries?: JsonValue }>;
   loadState(input: { hostScopeKey: string; methodologyId: string }): Promise<{ state: MethodologyState; revision: string } | null>;
-  appendAcceptedRecommendation(record: { id: string; hostScopeKey: string; acceptedAt: string; result: RecommendationResult }): Promise<void>;
+  appendAcceptedRecommendation(record: { id: string; hostScopeKey: string; acceptedAt: string; result: RecommendationResult | ProgramRecommendationResult }): Promise<void>;
   appendCompletedWorkout(hostScopeKey: string, workout: CompletedWorkout): Promise<void>;
   loadWorkflowRecovery(hostScopeKey: string, workflowId: string): Promise<WorkflowRecoveryRecord | null>;
   saveWorkflowRecovery(record: WorkflowRecoveryRecord): Promise<void>;
@@ -356,6 +379,9 @@ export interface PortableTemplateRecord { hostScopeKey: string; template: Workou
 export interface PortableCompletedWorkoutRecord { hostScopeKey: string; workout: CompletedWorkout }
 export interface PortableAcceptedRecommendationRecord { id: string; hostScopeKey: string; acceptedAt: string; result: RecommendationResult }
 export interface PortableMethodologyStateRecord { hostScopeKey: string; methodologyId: string; methodologyVersion: string; state: MethodologyState; revision: string; updatedAt: string }
+export interface PortableAcceptedProgramRecommendationRecord { id: string; hostScopeKey: string; acceptedAt: string; result: ProgramRecommendationResult }
+export interface PortableProgressionStateRecord { hostScopeKey: string; stateId: string; progressionId: string; progressionVersion: string; state: MethodologyState; revision: string; updatedAt: string }
+export interface PortableProgramStateRecord { hostScopeKey: string; programId: string; strategyId: string; strategyVersion: string; state: ProgramState; revision: string; updatedAt: string }
 export interface PortableDocument {
   schemaVersion: 1;
   exportedAt: string;
@@ -365,14 +391,17 @@ export interface PortableDocument {
   activeWorkouts?: ActiveWorkoutRecord[];
   completedWorkouts?: PortableCompletedWorkoutRecord[];
   acceptedRecommendations?: PortableAcceptedRecommendationRecord[];
+  acceptedProgramRecommendations?: PortableAcceptedProgramRecommendationRecord[];
   methodologyStates?: PortableMethodologyStateRecord[];
+  progressionStates?: PortableProgressionStateRecord[];
+  programStates?: PortableProgramStateRecord[];
   workflowRecovery?: WorkflowRecoveryRecord[];
 }
 export type PortableImportMode = "merge" | "replace";
 export type PortableConflictPolicy = "reject" | "keepExisting" | "overwrite";
 export interface PortableImportRequest { schemaVersion: 1; mode: PortableImportMode; conflictPolicy: PortableConflictPolicy; dryRun?: boolean; document: PortableDocument }
 export interface PortableIssue { code: string; path: string; message: string; severity: "warning" | "error" }
-export interface PortableCounts { catalogReferences: number; customExercises: number; templates: number; activeWorkouts: number; completedWorkouts: number; acceptedRecommendations: number; methodologyStates: number; workflowRecovery: number }
+export interface PortableCounts { catalogReferences: number; customExercises: number; templates: number; activeWorkouts: number; completedWorkouts: number; acceptedRecommendations: number; acceptedProgramRecommendations: number; methodologyStates: number; progressionStates: number; programStates: number; workflowRecovery: number }
 export interface PortableImportPlan { schemaVersion: 1; valid: boolean; dryRun: boolean; mode: PortableImportMode; conflictPolicy: PortableConflictPolicy; counts: PortableCounts; issues: PortableIssue[] }
 export type PortableExportResult = { schemaVersion: 1; outcome: { accepted: PortableDocument } | { rejected: PortableIssue[] } };
 
@@ -406,6 +435,8 @@ export interface Program {
 export interface RuntimeFacade {
   recommend(request: RecommendationRequest): RecommendationResult;
   evaluate(request: EvaluationRequest): EvaluationResult;
+  recommendProgram(request: ProgramRecommendationRequest): ProgramRecommendationResult;
+  evaluateProgram(request: ProgramEvaluationRequest): ProgramEvaluationResult;
   applyTrackingCommand(request: TrackingCommandRequest): TrackingCommandResult;
   applyTrackingBatch(request: TrackingBatchRequest): TrackingBatchResult;
   instantiateRecommendation(request: RecommendationInstantiationRequest): InstantiationResult;
@@ -428,6 +459,9 @@ export interface Caudex {
   createProgram(options: ProgramOptions): Program;
   recommendSession(request: RecommendationRequest): RecommendationResult;
   evaluatePerformance(request: EvaluationRequest): EvaluationResult;
+  recommendProgram(request: ProgramRecommendationRequest): ProgramRecommendationResult;
+  evaluateProgram(request: ProgramEvaluationRequest): ProgramEvaluationResult;
+  startProgramWorkout(result: ProgramRecommendationResult, input: { catalog: Exercise[]; scope: { hostScopeKey: string; athleteId?: string }; acceptedRecommendationId?: string }): Promise<ActiveWorkout>;
   applyTrackingCommand(request: TrackingCommandRequest): TrackingCommandResult;
   applyTrackingBatch(request: TrackingBatchRequest): TrackingBatchResult;
   instantiateRecommendation(request: RecommendationInstantiationRequest): InstantiationResult;

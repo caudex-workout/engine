@@ -160,7 +160,7 @@ test "newer schema is rejected distinctly" {
         database,
         "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY)",
     );
-    try execRaw(database, "INSERT INTO schema_migrations (version) VALUES (11)");
+    try execRaw(database, "INSERT INTO schema_migrations (version) VALUES (12)");
 
     try std.testing.expectError(
         error.UnsupportedSchema,
@@ -264,9 +264,52 @@ test "portable data dry-runs and round trips across independent SQLite databases
             },
         },
     });
+    const empty_data = std.json.Value{ .object = try .init(allocator, &.{}, &.{}) };
+    const programming_records: persistence.portable.Document = .{
+        .schemaVersion = 1,
+        .exportedAt = "2026-08-04T12:00:00Z",
+        .acceptedProgramRecommendations = &.{.{
+            .id = "accepted-program-1",
+            .hostScopeKey = "scope-1",
+            .acceptedAt = "2026-08-04T12:00:00Z",
+            .result = .{
+                .ok = false,
+                .metadata = .{
+                    .engineVersion = "0.1.0",
+                    .schemaVersion = 1,
+                    .programStrategy = .{ .id = "caudex.fixed-session", .version = "0.1.0", .configVersion = 1 },
+                    .inputFingerprint = "program-input",
+                    .resultFingerprint = "program-result",
+                },
+            },
+        }},
+        .progressionStates = &.{.{
+            .hostScopeKey = "scope-1",
+            .stateId = "block-1-accessory",
+            .progressionId = "caudex.double-progression",
+            .progressionVersion = "0.1.0",
+            .state = .{ .schemaVersion = 1, .data = empty_data },
+            .revision = "progression-revision-1",
+            .updatedAt = "2026-08-04T12:00:00Z",
+        }},
+        .programStates = &.{.{
+            .hostScopeKey = "scope-1",
+            .programId = "program-1",
+            .strategyId = "caudex.fixed-session",
+            .strategyVersion = "0.1.0",
+            .state = .{ .schemaVersion = 1, .data = empty_data },
+            .revision = "program-revision-1",
+            .updatedAt = "2026-08-04T12:00:00Z",
+        }},
+    };
+    const seeded_programming = try source.portableStore().importData(allocator, .{ .schemaVersion = 1, .mode = .merge, .conflictPolicy = .reject, .dryRun = false, .document = programming_records });
+    try std.testing.expect(seeded_programming.valid);
 
     const exported = try source.portableStore().exportData(allocator, .{ .host_scope_key = "scope-1", .exported_at = "2026-08-04T12:00:00Z" });
     try std.testing.expectEqualStrings("accepted-1", exported.acceptedRecommendations[0].id);
+    try std.testing.expectEqualStrings("accepted-program-1", exported.acceptedProgramRecommendations[0].id);
+    try std.testing.expectEqualStrings("progression-revision-1", exported.progressionStates[0].revision);
+    try std.testing.expectEqualStrings("program-revision-1", exported.programStates[0].revision);
     try std.testing.expectEqualStrings("185.00", exported.completedWorkouts[0].workout.exercises[0].sets[0].actualMetrics[0].value.amount);
     const dry_run = try destination.portableStore().importData(allocator, .{ .schemaVersion = 1, .mode = .merge, .conflictPolicy = .reject, .dryRun = true, .document = exported });
     try std.testing.expect(dry_run.valid);
@@ -277,9 +320,43 @@ test "portable data dry-runs and round trips across independent SQLite databases
     try std.testing.expectEqualStrings("Squat day", (try destination.templateStore().load(allocator, .{ .host_scope_key = "scope-1", .template_id = "template-1" })).?.template.displayName);
     const imported_history = try destination.historySource().load(allocator, .{ .host_scope_key = "scope-1", .through = "2026-08-04T12:00:00Z" });
     try std.testing.expectEqualStrings("185.00", imported_history.workouts[0].exercises[0].sets[0].actualMetrics[0].value.amount);
+    const reexported = try destination.portableStore().exportData(allocator, .{ .host_scope_key = "scope-1", .exported_at = "2026-08-04T12:00:00Z" });
+    try std.testing.expectEqualStrings("program-result", reexported.acceptedProgramRecommendations[0].result.metadata.resultFingerprint);
+    try std.testing.expectEqualStrings("block-1-accessory", reexported.progressionStates[0].stateId);
+    try std.testing.expectEqualStrings("program-1", reexported.programStates[0].programId);
     const conflict = try destination.portableStore().importData(allocator, .{ .schemaVersion = 1, .mode = .merge, .conflictPolicy = .reject, .dryRun = false, .document = exported });
     try std.testing.expect(!conflict.valid);
     try std.testing.expectEqualStrings("portable.conflict", conflict.issues[0].code);
+    const programming_only: persistence.portable.Document = .{
+        .schemaVersion = 1,
+        .exportedAt = exported.exportedAt,
+        .acceptedProgramRecommendations = exported.acceptedProgramRecommendations,
+        .progressionStates = exported.progressionStates,
+        .programStates = exported.programStates,
+    };
+    const programming_conflict = try destination.portableStore().importData(allocator, .{ .schemaVersion = 1, .mode = .merge, .conflictPolicy = .reject, .dryRun = false, .document = programming_only });
+    try std.testing.expect(!programming_conflict.valid);
+    try std.testing.expectEqualStrings("/document/acceptedProgramRecommendations", programming_conflict.issues[0].path);
+
+    const replacement_program_state = [_]persistence.portable.ProgramStateRecord{.{
+        .hostScopeKey = "scope-1",
+        .programId = "program-1",
+        .strategyId = "caudex.fixed-session",
+        .strategyVersion = "0.1.0",
+        .state = .{ .schemaVersion = 1, .data = empty_data },
+        .revision = "program-revision-2",
+        .updatedAt = "2026-08-04T13:00:00Z",
+    }};
+    const replaced = try destination.portableStore().importData(allocator, .{ .schemaVersion = 1, .mode = .replace, .conflictPolicy = .overwrite, .dryRun = false, .document = .{
+        .schemaVersion = 1,
+        .exportedAt = "2026-08-04T13:00:00Z",
+        .programStates = &replacement_program_state,
+    } });
+    try std.testing.expect(replaced.valid);
+    const replacement_export = try destination.portableStore().exportData(allocator, .{ .host_scope_key = "scope-1", .exported_at = "2026-08-04T13:00:00Z" });
+    try std.testing.expectEqual(@as(usize, 0), replacement_export.acceptedProgramRecommendations.len);
+    try std.testing.expectEqual(@as(usize, 0), replacement_export.progressionStates.len);
+    try std.testing.expectEqualStrings("program-revision-2", replacement_export.programStates[0].revision);
 }
 
 test "shared portable fixture preserves canonical meaning in SQLite" {

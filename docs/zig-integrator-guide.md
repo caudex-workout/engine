@@ -1,5 +1,10 @@
 # Zig integrator guide
 
+> For heterogeneous sessions, see [Programming hierarchy](programming-hierarchy.md).
+> The typed `caudex.programming` API composes ordered slots with independent
+> double-progression and RPE assignments while retaining explicit arena
+> ownership and proposal-only state transitions.
+
 This guide is for a third-party Zig application that wants to use Caudex
 without depending on repository-relative source files or copying the reference
 client's presentation logic. It is tested against Zig 0.16.0 and the staged

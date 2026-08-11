@@ -46,6 +46,33 @@ pub const AcceptedRecommendationRecord = struct {
     result: caudex.canonical.RecommendationResult,
 };
 
+pub const AcceptedProgramRecommendationRecord = struct {
+    id: []const u8,
+    hostScopeKey: []const u8,
+    acceptedAt: []const u8,
+    result: caudex.canonical.ProgramRecommendationResult,
+};
+
+pub const ProgressionStateRecord = struct {
+    hostScopeKey: []const u8,
+    stateId: []const u8,
+    progressionId: []const u8,
+    progressionVersion: []const u8,
+    state: caudex.canonical.MethodologyState,
+    revision: []const u8,
+    updatedAt: []const u8,
+};
+
+pub const ProgramStateRecord = struct {
+    hostScopeKey: []const u8,
+    programId: []const u8,
+    strategyId: []const u8,
+    strategyVersion: []const u8,
+    state: caudex.canonical.ProgramState,
+    revision: []const u8,
+    updatedAt: []const u8,
+};
+
 pub const MethodologyStateRecord = struct {
     hostScopeKey: []const u8,
     methodologyId: []const u8,
@@ -74,7 +101,10 @@ pub const Document = struct {
     activeWorkouts: []const ActiveWorkoutRecord = &.{},
     completedWorkouts: []const CompletedWorkoutRecord = &.{},
     acceptedRecommendations: []const AcceptedRecommendationRecord = &.{},
+    acceptedProgramRecommendations: []const AcceptedProgramRecommendationRecord = &.{},
     methodologyStates: []const MethodologyStateRecord = &.{},
+    progressionStates: []const ProgressionStateRecord = &.{},
+    programStates: []const ProgramStateRecord = &.{},
     workflowRecovery: []const WorkflowRecoveryRecord = &.{},
 };
 
@@ -104,7 +134,10 @@ pub const Counts = struct {
     activeWorkouts: usize,
     completedWorkouts: usize,
     acceptedRecommendations: usize,
+    acceptedProgramRecommendations: usize,
     methodologyStates: usize,
+    progressionStates: usize,
+    programStates: usize,
     workflowRecovery: usize,
 };
 
@@ -181,7 +214,10 @@ pub fn validateDocumentBounds(document: Document) error{RecordLimitExceeded}!voi
         document.activeWorkouts.len,
         document.completedWorkouts.len,
         document.acceptedRecommendations.len,
+        document.acceptedProgramRecommendations.len,
         document.methodologyStates.len,
+        document.progressionStates.len,
+        document.programStates.len,
         document.workflowRecovery.len,
     }) |count| if (count > max_records_per_kind) return error.RecordLimitExceeded;
     for (document.activeWorkouts) |record| tracking_protocol.validateSnapshot(record.snapshot) catch return error.RecordLimitExceeded;
@@ -197,7 +233,10 @@ fn validateDocument(document: Document, storage: []Issue, count: *usize) error{I
     try validateUniqueAndSorted(ActiveWorkoutRecord, document.activeWorkouts, storage, count, "/activeWorkouts", activeOrder);
     try validateUniqueAndSorted(CompletedWorkoutRecord, document.completedWorkouts, storage, count, "/completedWorkouts", completedOrder);
     try validateUniqueAndSorted(AcceptedRecommendationRecord, document.acceptedRecommendations, storage, count, "/acceptedRecommendations", acceptedOrder);
+    try validateUniqueAndSorted(AcceptedProgramRecommendationRecord, document.acceptedProgramRecommendations, storage, count, "/acceptedProgramRecommendations", acceptedProgramOrder);
     try validateUniqueAndSorted(MethodologyStateRecord, document.methodologyStates, storage, count, "/methodologyStates", stateOrder);
+    try validateUniqueAndSorted(ProgressionStateRecord, document.progressionStates, storage, count, "/progressionStates", progressionStateOrder);
+    try validateUniqueAndSorted(ProgramStateRecord, document.programStates, storage, count, "/programStates", programStateOrder);
     try validateUniqueAndSorted(WorkflowRecoveryRecord, document.workflowRecovery, storage, count, "/workflowRecovery", recoveryOrder);
     var reference_index: usize = 0;
     var custom_index: usize = 0;
@@ -249,7 +288,13 @@ fn validateDocument(document: Document, storage: []Issue, count: *usize) error{I
         if (record.result.recommendation) |recommendation| try validateSessionMetrics(recommendation, storage, count);
         for (record.result.alternatives) |alternative| try validateSessionMetrics(alternative, storage, count);
     }
+    for (document.acceptedProgramRecommendations) |record| {
+        if (tracking.Timestamp.parse(record.acceptedAt)) |_| {} else |_| try appendIssue(storage, count, "portable.timestamp_invalid", "/acceptedProgramRecommendations", "An accepted program recommendation timestamp is invalid.");
+        if (record.result.recommendation) |recommendation| try validateSessionMetrics(recommendation, storage, count);
+    }
     for (document.methodologyStates) |record| if (tracking.Timestamp.parse(record.updatedAt)) |_| {} else |_| try appendIssue(storage, count, "portable.timestamp_invalid", "/methodologyStates", "A methodology-state timestamp is invalid.");
+    for (document.progressionStates) |record| if (tracking.Timestamp.parse(record.updatedAt)) |_| {} else |_| try appendIssue(storage, count, "portable.timestamp_invalid", "/progressionStates", "A progression-state timestamp is invalid.");
+    for (document.programStates) |record| if (tracking.Timestamp.parse(record.updatedAt)) |_| {} else |_| try appendIssue(storage, count, "portable.timestamp_invalid", "/programStates", "A program-state timestamp is invalid.");
     for (document.workflowRecovery) |record| if (tracking.Timestamp.parse(record.updatedAt)) |_| {} else |_| try appendIssue(storage, count, "portable.timestamp_invalid", "/workflowRecovery", "A workflow-recovery timestamp is invalid.");
 }
 
@@ -299,8 +344,17 @@ fn completedOrder(left: CompletedWorkoutRecord, right: CompletedWorkoutRecord) s
 fn acceptedOrder(left: AcceptedRecommendationRecord, right: AcceptedRecommendationRecord) std.math.Order {
     return scopedOrder(left.hostScopeKey, left.id, right.hostScopeKey, right.id);
 }
+fn acceptedProgramOrder(left: AcceptedProgramRecommendationRecord, right: AcceptedProgramRecommendationRecord) std.math.Order {
+    return scopedOrder(left.hostScopeKey, left.id, right.hostScopeKey, right.id);
+}
 fn stateOrder(left: MethodologyStateRecord, right: MethodologyStateRecord) std.math.Order {
     return scopedOrder(left.hostScopeKey, left.methodologyId, right.hostScopeKey, right.methodologyId);
+}
+fn progressionStateOrder(left: ProgressionStateRecord, right: ProgressionStateRecord) std.math.Order {
+    return scopedOrder(left.hostScopeKey, left.stateId, right.hostScopeKey, right.stateId);
+}
+fn programStateOrder(left: ProgramStateRecord, right: ProgramStateRecord) std.math.Order {
+    return scopedOrder(left.hostScopeKey, left.programId, right.hostScopeKey, right.programId);
 }
 fn recoveryOrder(left: WorkflowRecoveryRecord, right: WorkflowRecoveryRecord) std.math.Order {
     return scopedOrder(left.hostScopeKey, left.workflowId, right.hostScopeKey, right.workflowId);
@@ -331,7 +385,10 @@ fn counts(document: Document) Counts {
         .activeWorkouts = document.activeWorkouts.len,
         .completedWorkouts = document.completedWorkouts.len,
         .acceptedRecommendations = document.acceptedRecommendations.len,
+        .acceptedProgramRecommendations = document.acceptedProgramRecommendations.len,
         .methodologyStates = document.methodologyStates.len,
+        .progressionStates = document.progressionStates.len,
+        .programStates = document.programStates.len,
         .workflowRecovery = document.workflowRecovery.len,
     };
 }

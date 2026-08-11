@@ -1,5 +1,10 @@
 # Methodology guides
 
+In the compositional programming model, first-party v0.1 methodologies are
+exercise progression methods. Program/session strategies decide which exercises
+appear in a workout. See [Programming hierarchy](../programming-hierarchy.md)
+and [ADR-0007](../adr/ADR-0007-program-strategies-and-exercise-progression.md).
+
 Caudex v0.1 contains two first-party methodologies. Neither is universally
 superior; they encode different progression rules and require different input
 evidence.
@@ -14,4 +19,3 @@ implicit unit conversion, return structured explanations, and propose state
 without persisting it. Selection should follow the host's programming model and
 available data, not a claim that one methodology is best for every athlete or
 application.
-

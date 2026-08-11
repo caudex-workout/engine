@@ -7,6 +7,7 @@ const discovery = caudex.discovery;
 const engine = caudex.engine;
 const methodology = caudex.methodology;
 const primitives = caudex.primitives;
+const programming = caudex.programming;
 const rpe_top_set_backoff = caudex.rpe_top_set_backoff;
 const training = caudex.training;
 const tracking = @import("caudex_tracking");
@@ -105,6 +106,8 @@ const ExecuteError = canonical_json.DecodeError || engine.RecommendError ||
 const Operation = enum {
     recommend,
     evaluate,
+    recommendProgram,
+    evaluateProgram,
     applyTrackingCommand,
     applyTrackingBatch,
     instantiateRecommendation,
@@ -136,6 +139,8 @@ fn executeDispatch(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) Exec
     return switch (document.value.operation) {
         .recommend => executeRecommendation(runtime, writer.buffered(), out),
         .evaluate => executeEvaluation(runtime, writer.buffered(), out),
+        .recommendProgram => executeProgramRecommendation(runtime, writer.buffered(), out),
+        .evaluateProgram => executeProgramEvaluation(runtime, writer.buffered(), out),
         .applyTrackingCommand => executeTrackingCommand(runtime, writer.buffered(), out),
         .applyTrackingBatch => executeTrackingBatch(runtime, writer.buffered(), out),
         .instantiateRecommendation => executeRecommendationInstantiation(runtime, writer.buffered(), out),
@@ -704,6 +709,143 @@ fn executeRpeRecommendation(
     const encoded = canonical_json.encode(wire, bytes) catch
         return error.OutputLimitReached;
     out.* = .{ .data = bytes.ptr, .len = encoded.len, .capacity = bytes.len };
+}
+
+fn executeProgramRecommendation(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) ExecuteError!void {
+    const document = try canonical_json.decodeProgramRecommendationRequest(runtime.allocator(), input, .{});
+    defer document.deinit();
+    const source = document.value;
+    if (!std.mem.eql(u8, source.program.strategy.id, programming.fixed_session_id)) return error.UnsupportedMethodology;
+    if (source.program.strategy.configVersion != programming.fixed_session_config_version) return error.UnsupportedVersion;
+    if (source.program.strategy.config != .object or source.program.strategy.config.object.count() != 0) return error.InvalidRequest;
+    _ = try resolvedVersion(source.program.strategy.versionRequirement);
+    if (source.program.exercises.len == 0 or source.program.exercises.len > programming.max_exercises) return error.InvalidRequest;
+
+    var arena = std.heap.ArenaAllocator.init(runtime.allocator());
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const slots = allocator.alloc(programming.ExerciseSlot, source.program.exercises.len) catch return error.OutOfMemory;
+    for (source.program.exercises, slots) |slot, *translated| {
+        translated.* = .{
+            .slot_id = primitives.Id.parse(slot.slotId) catch return error.InvalidRequest,
+            .exercise_id = primitives.Id.parse(slot.exerciseId) catch return error.InvalidRequest,
+            .state_id = primitives.Id.parse(slot.progression.stateId) catch return error.InvalidRequest,
+            .progression = try translateProgression(allocator, slot.progression),
+        };
+    }
+    var recommendation = programming.recommendFixedSession(runtime.allocator(), .{
+        .as_of = primitives.Timestamp.parse(source.asOf) catch return error.InvalidRequest,
+        .catalog = try translateCatalog(allocator, source.catalog),
+        .history = try translateHistory(allocator, source.history),
+        .available_equipment_ids = try translateIds(allocator, source.session.availableEquipmentIds),
+        .slots = slots,
+        .program_state = if (source.program.state) |state| .{ .schema_version = state.schemaVersion, .data = state.data } else null,
+    }) catch |err| return mapProgrammingError(err);
+    defer recommendation.deinit();
+
+    var input_fingerprint: [64]u8 = undefined;
+    var result_fingerprint: [64]u8 = undefined;
+    fingerprintBytes("caudex:program-recommendation-request:v1\x00", input, &input_fingerprint);
+    const recommendation_bytes = std.json.Stringify.valueAlloc(allocator, recommendation.recommendation, .{ .emit_null_optional_fields = false }) catch return error.OutOfMemory;
+    fingerprintBytes("caudex:program-recommendation-result:v1\x00", recommendation_bytes, &result_fingerprint);
+    const result = canonical.ProgramRecommendationResult{
+        .ok = true,
+        .recommendation = recommendation.recommendation,
+        .explanations = recommendation.explanations,
+        .metadata = .{
+            .engineVersion = engine.engine_version,
+            .schemaVersion = 1,
+            .programStrategy = .{ .id = programming.fixed_session_id, .version = programming.fixed_session_version, .configVersion = programming.fixed_session_config_version },
+            .inputFingerprint = &input_fingerprint,
+            .resultFingerprint = &result_fingerprint,
+        },
+    };
+    try encodeOwned(runtime, result, out);
+}
+
+fn executeProgramEvaluation(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) ExecuteError!void {
+    const document = try canonical_json.decodeProgramEvaluationRequest(runtime.allocator(), input, .{});
+    defer document.deinit();
+    var arena = std.heap.ArenaAllocator.init(runtime.allocator());
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const completed = training.CompletedWorkout{
+        .id = primitives.Id.parse(document.value.completedWorkout.id) catch return error.InvalidRequest,
+        .started_at = primitives.Timestamp.parse(document.value.completedWorkout.startedAt) catch return error.InvalidRequest,
+        .completed_at = primitives.Timestamp.parse(document.value.completedWorkout.completedAt) catch return error.InvalidRequest,
+        .exercises = try translateCompletedExercises(allocator, document.value.completedWorkout.exercises),
+    };
+    const as_of = primitives.Timestamp.parse(document.value.asOf) catch return error.InvalidRequest;
+    if (completed.completed_at.unixSeconds() > as_of.unixSeconds()) return error.InvalidRequest;
+    const catalog = try translateCatalog(allocator, document.value.catalog);
+    const completed_snapshot = [_]training.CompletedWorkout{completed};
+    var validation_storage: [64]training.ValidationIssue = undefined;
+    const validation_issues = training.validate(catalog, .{ .workouts = &completed_snapshot }, &validation_storage) catch return error.OutputLimitReached;
+    if (validation_issues.len != 0) return error.InvalidRequest;
+    var evaluated = programming.evaluateFixedSession(runtime.allocator(), document.value.recommendation, completed) catch |err| return mapProgrammingError(err);
+    defer evaluated.deinit();
+    const exercise_results = evaluated.evaluation.exercises;
+    const proposals = allocator.alloc(canonical.ProgressionStateProposal, evaluated.evaluation.state_proposals.len) catch return error.OutOfMemory;
+    for (evaluated.evaluation.state_proposals, proposals) |proposal, *wire| {
+        const state = switch (proposal.state) {
+            .double_progression => |value| canonical.MethodologyState{ .schemaVersion = value.schemaVersion, .data = try valueToJson(allocator, value.data) },
+            .rpe_top_set_backoff => |value| canonical.MethodologyState{ .schemaVersion = value.schemaVersion, .data = try valueToJson(allocator, value.data) },
+        };
+        wire.* = .{
+            .stateId = proposal.state_id.bytes,
+            .progression = .{ .id = proposal.method_id, .version = proposal.method_version, .configVersion = 1 },
+            .state = state,
+        };
+    }
+    const strategy = document.value.recommendation.programming orelse return error.InvalidRequest;
+    var input_fingerprint: [64]u8 = undefined;
+    var result_fingerprint: [64]u8 = undefined;
+    fingerprintBytes("caudex:program-evaluation-request:v1\x00", input, &input_fingerprint);
+    const proposal_bytes = std.json.Stringify.valueAlloc(allocator, proposals, .{ .emit_null_optional_fields = false }) catch return error.OutOfMemory;
+    fingerprintBytes("caudex:program-evaluation-result:v1\x00", proposal_bytes, &result_fingerprint);
+    const result = canonical.ProgramEvaluationResult{
+        .ok = true,
+        .evaluation = .{ .outcome = "evaluated", .exercises = exercise_results },
+        .nextProgramState = if (evaluated.evaluation.next_program_state) |state| .{ .schemaVersion = state.schema_version, .data = state.data } else null,
+        .progressionStateProposals = proposals,
+        .explanations = evaluated.evaluation.explanations,
+        .metadata = .{
+            .engineVersion = engine.engine_version,
+            .schemaVersion = 1,
+            .programStrategy = strategy.strategy,
+            .inputFingerprint = &input_fingerprint,
+            .resultFingerprint = &result_fingerprint,
+        },
+    };
+    try encodeOwned(runtime, result, out);
+}
+
+fn translateProgression(allocator: std.mem.Allocator, source: canonical.ProgressionAssignment) ExecuteError!programming.Method {
+    if (source.methodology.configVersion != 1) return error.UnsupportedVersion;
+    _ = try resolvedVersion(source.methodology.versionRequirement);
+    if (std.mem.eql(u8, source.methodology.id, double_progression.methodology_id)) {
+        const config = std.json.parseFromValueLeaky(double_progression.Config, allocator, source.methodology.config, .{ .ignore_unknown_fields = false }) catch return error.InvalidRequest;
+        return .{ .double_progression = .{ .config = config, .state = try translateState(allocator, source.state, config) } };
+    }
+    if (std.mem.eql(u8, source.methodology.id, rpe_top_set_backoff.methodology_id)) {
+        const config = std.json.parseFromValueLeaky(rpe_top_set_backoff.Config, allocator, source.methodology.config, .{ .ignore_unknown_fields = false }) catch return error.InvalidRequest;
+        return .{ .rpe_top_set_backoff = .{ .config = config, .state = try translateRpeState(allocator, source.state) } };
+    }
+    return error.UnsupportedMethodology;
+}
+
+fn mapProgrammingError(err: programming.Error) ExecuteError {
+    return switch (err) {
+        error.OutOfMemory => error.OutOfMemory,
+        error.OutputLimitReached => error.OutputLimitReached,
+        error.UnsupportedProgressionVersion => error.UnsupportedVersion,
+        else => error.InvalidRequest,
+    };
+}
+
+fn valueToJson(allocator: std.mem.Allocator, value: anytype) ExecuteError!std.json.Value {
+    const bytes = std.json.Stringify.valueAlloc(allocator, value, .{ .emit_null_optional_fields = false }) catch return error.OutOfMemory;
+    return std.json.parseFromSliceLeaky(std.json.Value, allocator, bytes, .{}) catch return error.InvalidRequest;
 }
 
 fn boundaryMeasurement(

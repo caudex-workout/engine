@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://caudex.dev/schemas/programming/v1/program-recommendation-request.schema.json",
+  "title": "ProgramRecommendationRequestV1",
+  "type": "object",
+  "required": ["schemaVersion", "asOf", "program", "catalog"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "asOf": { "type": "string" },
+    "program": {
+      "type": "object",
+      "required": ["strategy", "exercises"],
+      "properties": {
+        "strategy": { "$ref": "#/$defs/componentRef" },
+        "state": { "$ref": "#/$defs/state" },
+        "exercises": {
+          "type": "array", "minItems": 1, "maxItems": 16,
+          "items": {
+            "type": "object", "required": ["slotId", "exerciseId", "progression"],
+            "properties": {
+              "slotId": { "type": "string", "minLength": 1 },
+              "exerciseId": { "type": "string", "minLength": 1 },
+              "progression": {
+                "type": "object", "required": ["stateId", "methodology"],
+                "properties": {
+                  "stateId": { "type": "string", "minLength": 1 },
+                  "methodology": { "$ref": "#/$defs/componentRef" },
+                  "state": { "$ref": "#/$defs/state" }
+                }, "additionalProperties": false
+              }
+            }, "additionalProperties": false
+          }
+        }
+      }, "additionalProperties": false
+    },
+    "catalog": { "type": "array", "minItems": 1 },
+    "athlete": { "type": "object" },
+    "history": { "type": "object" },
+    "session": { "type": "object" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "componentRef": {
+      "type": "object", "required": ["id", "configVersion", "config"],
+      "properties": { "id": { "type": "string", "minLength": 1 }, "versionRequirement": { "type": "string" }, "configVersion": { "type": "integer", "minimum": 1 }, "config": { "type": "object" } },
+      "additionalProperties": false
+    },
+    "state": { "type": "object", "required": ["schemaVersion", "data"], "properties": { "schemaVersion": { "type": "integer", "minimum": 1 }, "data": { "type": "object" } }, "additionalProperties": false }
+  }
+}

@@ -15,7 +15,7 @@ const c = @cImport({
 });
 
 pub const adapter_version = "0.1.0";
-pub const schema_version: u32 = 10;
+pub const schema_version: u32 = 11;
 pub const minimum_schema_version: u32 = 1;
 
 pub const Options = struct {
@@ -576,6 +576,10 @@ pub const Adapter = opaque {
         if (current < 10) try self.applyMigration(
             10,
             @embedFile("sqlite/migrations/010_tracking_exercise_receipts.sql"),
+        );
+        if (current < 11) try self.applyMigration(
+            11,
+            @embedFile("sqlite/migrations/011_programming_hierarchy.sql"),
         );
     }
 
@@ -2149,6 +2153,19 @@ fn exportPortableCallback(context: *anyopaque, allocator: std.mem.Allocator, que
         });
     }
 
+    var accepted_programs: std.ArrayList(portable.AcceptedProgramRecommendationRecord) = .empty;
+    {
+        var statement = try self.prepare("SELECT accepted_recommendation_id, accepted_at, result_json FROM accepted_program_recommendations WHERE host_scope_key = ?1 ORDER BY accepted_recommendation_id");
+        defer statement.finalize();
+        try statement.bindText(1, query.host_scope_key);
+        while (try statement.row()) try accepted_programs.append(allocator, .{
+            .id = try dupeColumn(allocator, statement.raw, 0),
+            .hostScopeKey = try allocator.dupe(u8, query.host_scope_key),
+            .acceptedAt = try dupeColumn(allocator, statement.raw, 1),
+            .result = try parseColumn(persistence.canonical.ProgramRecommendationResult, allocator, statement.raw, 2),
+        });
+    }
+
     var states: std.ArrayList(portable.MethodologyStateRecord) = .empty;
     {
         var statement = try self.prepare("SELECT methodology_id, methodology_version, state_json, revision, updated_at FROM methodology_state WHERE host_scope_key = ?1 ORDER BY methodology_id");
@@ -2161,6 +2178,38 @@ fn exportPortableCallback(context: *anyopaque, allocator: std.mem.Allocator, que
             .state = try parseColumn(persistence.canonical.MethodologyState, allocator, statement.raw, 2),
             .revision = try std.fmt.allocPrint(allocator, "{d}", .{c.sqlite3_column_int64(statement.raw, 3)}),
             .updatedAt = try dupeColumn(allocator, statement.raw, 4),
+        });
+    }
+
+    var progression_states: std.ArrayList(portable.ProgressionStateRecord) = .empty;
+    {
+        var statement = try self.prepare("SELECT state_id, progression_id, progression_version, state_json, revision, updated_at FROM progression_state WHERE host_scope_key = ?1 ORDER BY state_id");
+        defer statement.finalize();
+        try statement.bindText(1, query.host_scope_key);
+        while (try statement.row()) try progression_states.append(allocator, .{
+            .hostScopeKey = try allocator.dupe(u8, query.host_scope_key),
+            .stateId = try dupeColumn(allocator, statement.raw, 0),
+            .progressionId = try dupeColumn(allocator, statement.raw, 1),
+            .progressionVersion = try dupeColumn(allocator, statement.raw, 2),
+            .state = try parseColumn(persistence.canonical.MethodologyState, allocator, statement.raw, 3),
+            .revision = try dupeColumn(allocator, statement.raw, 4),
+            .updatedAt = try dupeColumn(allocator, statement.raw, 5),
+        });
+    }
+
+    var program_states: std.ArrayList(portable.ProgramStateRecord) = .empty;
+    {
+        var statement = try self.prepare("SELECT program_id, strategy_id, strategy_version, state_json, revision, updated_at FROM program_state WHERE host_scope_key = ?1 ORDER BY program_id");
+        defer statement.finalize();
+        try statement.bindText(1, query.host_scope_key);
+        while (try statement.row()) try program_states.append(allocator, .{
+            .hostScopeKey = try allocator.dupe(u8, query.host_scope_key),
+            .programId = try dupeColumn(allocator, statement.raw, 0),
+            .strategyId = try dupeColumn(allocator, statement.raw, 1),
+            .strategyVersion = try dupeColumn(allocator, statement.raw, 2),
+            .state = try parseColumn(persistence.canonical.ProgramState, allocator, statement.raw, 3),
+            .revision = try dupeColumn(allocator, statement.raw, 4),
+            .updatedAt = try dupeColumn(allocator, statement.raw, 5),
         });
     }
 
@@ -2192,7 +2241,10 @@ fn exportPortableCallback(context: *anyopaque, allocator: std.mem.Allocator, que
         .activeWorkouts = try active.toOwnedSlice(allocator),
         .completedWorkouts = try completed.toOwnedSlice(allocator),
         .acceptedRecommendations = try accepted.toOwnedSlice(allocator),
+        .acceptedProgramRecommendations = try accepted_programs.toOwnedSlice(allocator),
         .methodologyStates = try states.toOwnedSlice(allocator),
+        .progressionStates = try progression_states.toOwnedSlice(allocator),
+        .programStates = try program_states.toOwnedSlice(allocator),
         .workflowRecovery = try recovery.toOwnedSlice(allocator),
     };
     portable.validateDocumentBounds(document) catch return error.InvalidData;
@@ -2264,7 +2316,10 @@ fn importPortableCallback(context: *anyopaque, allocator: std.mem.Allocator, req
             .activeWorkouts = request.document.activeWorkouts.len,
             .completedWorkouts = request.document.completedWorkouts.len,
             .acceptedRecommendations = request.document.acceptedRecommendations.len,
+            .acceptedProgramRecommendations = request.document.acceptedProgramRecommendations.len,
             .methodologyStates = request.document.methodologyStates.len,
+            .progressionStates = request.document.progressionStates.len,
+            .programStates = request.document.programStates.len,
             .workflowRecovery = request.document.workflowRecovery.len,
         }, .issues = issues[0..1] };
     };
@@ -2353,6 +2408,19 @@ fn importPortableCallback(context: *anyopaque, allocator: std.mem.Allocator, req
         if (exists and request.mode == .merge and request.conflictPolicy == .keepExisting) continue;
         try appendAcceptedRecommendationCallback(self, .{ .id = record.id, .host_scope_key = record.hostScopeKey, .accepted_at = record.acceptedAt, .result = record.result });
     }
+    for (request.document.acceptedProgramRecommendations) |record| {
+        const exists = try portableRecordExists(self, "SELECT 1 FROM accepted_program_recommendations WHERE host_scope_key = ?1 AND accepted_recommendation_id = ?2", record.hostScopeKey, record.id);
+        if (exists and request.mode == .merge and request.conflictPolicy == .keepExisting) continue;
+        const result_json = try encodeAlloc(allocator, record.result);
+        defer allocator.free(result_json);
+        var statement = try self.prepare("INSERT INTO accepted_program_recommendations (host_scope_key, accepted_recommendation_id, accepted_at, result_json) VALUES (?1, ?2, ?3, ?4) ON CONFLICT (host_scope_key, accepted_recommendation_id) DO UPDATE SET accepted_at=excluded.accepted_at, result_json=excluded.result_json");
+        defer statement.finalize();
+        try statement.bindText(1, record.hostScopeKey);
+        try statement.bindText(2, record.id);
+        try statement.bindText(3, record.acceptedAt);
+        try statement.bindText(4, result_json);
+        try statement.done();
+    }
     for (request.document.methodologyStates) |record| {
         const exists = try portableRecordExists(self, "SELECT 1 FROM methodology_state WHERE host_scope_key = ?1 AND methodology_id = ?2", record.hostScopeKey, record.methodologyId);
         if (exists and request.mode == .merge and request.conflictPolicy == .keepExisting) continue;
@@ -2367,6 +2435,38 @@ fn importPortableCallback(context: *anyopaque, allocator: std.mem.Allocator, req
         try statement.bindInt(4, record.state.schemaVersion);
         try statement.bindText(5, state_json);
         try statement.bindInt(6, revision);
+        try statement.bindText(7, record.updatedAt);
+        try statement.done();
+    }
+    for (request.document.progressionStates) |record| {
+        const exists = try portableRecordExists(self, "SELECT 1 FROM progression_state WHERE host_scope_key = ?1 AND state_id = ?2", record.hostScopeKey, record.stateId);
+        if (exists and request.mode == .merge and request.conflictPolicy == .keepExisting) continue;
+        const state_json = try encodeAlloc(allocator, record.state);
+        defer allocator.free(state_json);
+        var statement = try self.prepare("INSERT INTO progression_state (host_scope_key, state_id, progression_id, progression_version, state_json, revision, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT (host_scope_key, state_id) DO UPDATE SET progression_id=excluded.progression_id, progression_version=excluded.progression_version, state_json=excluded.state_json, revision=excluded.revision, updated_at=excluded.updated_at");
+        defer statement.finalize();
+        try statement.bindText(1, record.hostScopeKey);
+        try statement.bindText(2, record.stateId);
+        try statement.bindText(3, record.progressionId);
+        try statement.bindText(4, record.progressionVersion);
+        try statement.bindText(5, state_json);
+        try statement.bindText(6, record.revision);
+        try statement.bindText(7, record.updatedAt);
+        try statement.done();
+    }
+    for (request.document.programStates) |record| {
+        const exists = try portableRecordExists(self, "SELECT 1 FROM program_state WHERE host_scope_key = ?1 AND program_id = ?2", record.hostScopeKey, record.programId);
+        if (exists and request.mode == .merge and request.conflictPolicy == .keepExisting) continue;
+        const state_json = try encodeAlloc(allocator, record.state);
+        defer allocator.free(state_json);
+        var statement = try self.prepare("INSERT INTO program_state (host_scope_key, program_id, strategy_id, strategy_version, state_json, revision, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT (host_scope_key, program_id) DO UPDATE SET strategy_id=excluded.strategy_id, strategy_version=excluded.strategy_version, state_json=excluded.state_json, revision=excluded.revision, updated_at=excluded.updated_at");
+        defer statement.finalize();
+        try statement.bindText(1, record.hostScopeKey);
+        try statement.bindText(2, record.programId);
+        try statement.bindText(3, record.strategyId);
+        try statement.bindText(4, record.strategyVersion);
+        try statement.bindText(5, state_json);
+        try statement.bindText(6, record.revision);
         try statement.bindText(7, record.updatedAt);
         try statement.done();
     }
@@ -2446,7 +2546,10 @@ fn appendPortableConflicts(self: *Adapter, document: portable.Document, issues: 
     for (document.activeWorkouts) |record| if (try portableActiveExists(self, record.hostScopeKey, record.athleteId orelse "", record.workoutId)) appendPortableConflict(issues, &count, "/document/activeWorkouts");
     for (document.completedWorkouts) |record| if (try portableRecordExists(self, "SELECT 1 FROM history WHERE host_scope_key=?1 AND workout_id=?2", record.hostScopeKey, record.workout.id)) appendPortableConflict(issues, &count, "/document/completedWorkouts");
     for (document.acceptedRecommendations) |record| if (try portableRecordExists(self, "SELECT 1 FROM accepted_recommendations WHERE host_scope_key=?1 AND accepted_recommendation_id=?2", record.hostScopeKey, record.id)) appendPortableConflict(issues, &count, "/document/acceptedRecommendations");
+    for (document.acceptedProgramRecommendations) |record| if (try portableRecordExists(self, "SELECT 1 FROM accepted_program_recommendations WHERE host_scope_key=?1 AND accepted_recommendation_id=?2", record.hostScopeKey, record.id)) appendPortableConflict(issues, &count, "/document/acceptedProgramRecommendations");
     for (document.methodologyStates) |record| if (try portableRecordExists(self, "SELECT 1 FROM methodology_state WHERE host_scope_key=?1 AND methodology_id=?2", record.hostScopeKey, record.methodologyId)) appendPortableConflict(issues, &count, "/document/methodologyStates");
+    for (document.progressionStates) |record| if (try portableRecordExists(self, "SELECT 1 FROM progression_state WHERE host_scope_key=?1 AND state_id=?2", record.hostScopeKey, record.stateId)) appendPortableConflict(issues, &count, "/document/progressionStates");
+    for (document.programStates) |record| if (try portableRecordExists(self, "SELECT 1 FROM program_state WHERE host_scope_key=?1 AND program_id=?2", record.hostScopeKey, record.programId)) appendPortableConflict(issues, &count, "/document/programStates");
     for (document.workflowRecovery) |record| if (try portableRecordExists(self, "SELECT 1 FROM workflow_recovery WHERE host_scope_key=?1 AND workflow_id=?2", record.hostScopeKey, record.workflowId)) appendPortableConflict(issues, &count, "/document/workflowRecovery");
     return count;
 }
@@ -2488,7 +2591,10 @@ fn deletePortableScopes(self: *Adapter, allocator: std.mem.Allocator, document: 
     for (document.activeWorkouts) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
     for (document.completedWorkouts) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
     for (document.acceptedRecommendations) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
+    for (document.acceptedProgramRecommendations) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
     for (document.methodologyStates) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
+    for (document.progressionStates) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
+    for (document.programStates) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
     for (document.workflowRecovery) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
     const statements = [_][]const u8{
         "DELETE FROM tracking_set_command_receipts WHERE host_scope_key=?1",
@@ -2506,6 +2612,9 @@ fn deletePortableScopes(self: *Adapter, allocator: std.mem.Allocator, document: 
         "DELETE FROM methodology_state WHERE host_scope_key=?1",
         "DELETE FROM portable_catalog_references WHERE host_scope_key=?1",
         "DELETE FROM accepted_recommendations WHERE host_scope_key=?1",
+        "DELETE FROM accepted_program_recommendations WHERE host_scope_key=?1",
+        "DELETE FROM progression_state WHERE host_scope_key=?1",
+        "DELETE FROM program_state WHERE host_scope_key=?1",
         "DELETE FROM workout_templates WHERE host_scope_key=?1",
         "DELETE FROM workflow_recovery WHERE host_scope_key=?1",
     };

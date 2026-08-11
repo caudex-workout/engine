@@ -71,6 +71,12 @@ the workout.
 
 Workout completion and broader history queries remain later capabilities.
 
+Schema version 11 adds the compositional programming portable records. Accepted
+program recommendations retain their complete canonical provenance, while
+program state and per-lane progression state are stored in distinct tables and
+keep their opaque revisions. Portable merge conflict, keep-existing, overwrite,
+replace, export, and re-import behavior applies to all three record kinds.
+
 ## SQL and concurrency
 
 All production SQL is prepared with `sqlite3_prepare_v2`. Host values are bound

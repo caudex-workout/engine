@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://caudex.dev/schemas/programming/v1/program-evaluation-request.schema.json",
+  "title": "ProgramEvaluationRequestV1",
+  "type": "object",
+  "required": ["schemaVersion", "asOf", "recommendation", "catalog", "completedWorkout"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "asOf": { "type": "string" },
+    "recommendation": { "type": "object" },
+    "catalog": { "type": "array", "minItems": 1 },
+    "athlete": { "type": "object" },
+    "history": { "type": "object" },
+    "completedWorkout": { "type": "object" }
+  },
+  "additionalProperties": false
+}

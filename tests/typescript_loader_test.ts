@@ -15,6 +15,7 @@ import {
   type WorkflowRecoveryRecord,
   type PortableDocument,
   type JsonValue,
+  type ProgramRecommendationRequest,
 } from "../packages/npm/workout-engine/src/index.ts";
 
 const [wasmPath, fixturePath, portableFixturePath] = process.argv.slice(2);
@@ -296,6 +297,84 @@ const portablePlan = caudex.validatePortableImport({
 });
 if (!portablePlan.valid || !portablePlan.dryRun || portablePlan.counts.completedWorkouts !== 1) {
   throw new Error("portable dry-run validation did not cross the WASM boundary");
+}
+
+const doubleConfig = request.methodology.config as JsonValue;
+const rpeConfig = {
+  initialEstimatedOneRepMax: { amount: "225", unit: "lb" },
+  topSetRepetitions: 5,
+  targetRpe: "8.0",
+  backoff: { calculation: "percentage_of_top_set", percentage: "90", repetitions: 8, setCount: 1 },
+  rounding: { mode: "nearest", quantum: { amount: "2.5", unit: "lb" } },
+  exertionPolicy: { tolerance: "0.5", onOvershoot: "decrease_estimate", onUndershoot: "increase_estimate", estimateAdjustmentPercentage: "2.5" },
+  estimationFormula: "epley",
+} satisfies JsonValue;
+const mixedRequest: ProgramRecommendationRequest = {
+  schemaVersion: 1,
+  asOf: request.asOf,
+  program: {
+    strategy: { id: "caudex.fixed-session", versionRequirement: "0.1.0", configVersion: 1, config: {} },
+    exercises: [
+      { slotId: "accessory", exerciseId: "leg-extension", progression: { stateId: "block-1-accessory", methodology: { id: "caudex.double-progression", versionRequirement: "0.1.0", configVersion: 1, config: doubleConfig } } },
+      { slotId: "primary", exerciseId: "bench-press", progression: { stateId: "block-1-primary", methodology: { id: "caudex.rpe-top-set-backoff", versionRequirement: "0.1.0", configVersion: 1, config: rpeConfig } } },
+    ],
+  },
+  catalog: [{ id: "leg-extension" }, { id: "bench-press" }],
+};
+const mixed = caudex.recommendProgram(mixedRequest);
+if (!mixed.ok || mixed.recommendation.exercises.length !== 2 || mixed.recommendation.exercises[0]?.programming?.progression.id !== "caudex.double-progression" || mixed.recommendation.exercises[1]?.programming?.progression.id !== "caudex.rpe-top-set-backoff") {
+  throw new Error("mixed program recommendation did not retain per-exercise progression provenance");
+}
+const replayedMixed = caudex.runtime.recommendProgram(structuredClone(mixedRequest));
+if (!replayedMixed.ok || replayedMixed.metadata.resultFingerprint !== mixed.metadata.resultFingerprint) {
+  throw new Error("mixed program recommendation was not deterministic");
+}
+const mixedEvaluation = caudex.evaluateProgram({
+  schemaVersion: 1,
+  asOf: "2026-08-04T14:00:00Z",
+  recommendation: mixed.recommendation,
+  catalog: mixedRequest.catalog,
+  completedWorkout: {
+    id: "mixed-workout", startedAt: "2026-08-04T12:00:00Z", completedAt: "2026-08-04T13:00:00Z",
+    exercises: [
+      { exerciseId: "leg-extension", sets: [{ kind: "working", actualMetrics: [{ code: "load", value: { amount: "45", unit: "lb" } }, { code: "repetitions", value: { amount: "12", unit: "count" } }], status: "completed" }] },
+      { exerciseId: "bench-press", sets: [{ kind: "top", actualMetrics: [{ code: "load", value: { amount: "190", unit: "lb" } }, { code: "repetitions", value: { amount: "5", unit: "count" } }, { code: "rpe", value: { amount: "9", unit: "rpe" } }], status: "completed" }] },
+    ],
+  },
+});
+if (!mixedEvaluation.ok || mixedEvaluation.progressionStateProposals[0]?.stateId !== "block-1-accessory" || mixedEvaluation.progressionStateProposals[1]?.stateId !== "block-1-primary") {
+  throw new Error("mixed evaluation did not route independent progression-state proposals");
+}
+const activeMixed = await caudex.startProgramWorkout(mixed, { catalog: mixedRequest.catalog, scope: { hostScopeKey: "scope-mixed" }, acceptedRecommendationId: "accepted-mixed" });
+for (const exercise of activeMixed.workout.exercises ?? []) {
+  for (const set of exercise.sets ?? []) {
+    await activeMixed.completeSet({ membershipId: exercise.id, setId: set.id, actual: set.targetMetrics ?? [] });
+  }
+}
+const completedMixed = await activeMixed.complete();
+const activeMixedEvaluation = caudex.evaluateProgram({ schemaVersion: 1, asOf: "2026-08-04T14:00:00Z", recommendation: mixed.recommendation, catalog: mixedRequest.catalog, completedWorkout: completedMixed });
+if (!activeMixedEvaluation.ok || activeMixedEvaluation.progressionStateProposals.length !== 2) {
+  throw new Error("mixed recommendation did not survive active-workout completion and evaluation");
+}
+if (registry.progressionMethods.length !== 2 || registry.programStrategies[0]?.id !== "caudex.fixed-session") {
+  throw new Error("capability discovery did not distinguish strategies from progression methods");
+}
+const invalidMixed = caudex.recommendProgram({
+  ...mixedRequest,
+  program: { ...mixedRequest.program, exercises: [
+    mixedRequest.program.exercises[0]!,
+    { ...mixedRequest.program.exercises[1]!, progression: { ...mixedRequest.program.exercises[1]!.progression, stateId: "block-1-accessory" } },
+  ] },
+});
+if (invalidMixed.ok || invalidMixed.issues[0]?.code !== "progression.duplicate_state_id") {
+  throw new Error("duplicate progression state identity did not return a structured issue");
+}
+const wrongVersion = caudex.recommendProgram({
+  ...mixedRequest,
+  program: { ...mixedRequest.program, exercises: [{ ...mixedRequest.program.exercises[0]!, progression: { ...mixedRequest.program.exercises[0]!.progression, methodology: { ...mixedRequest.program.exercises[0]!.progression.methodology, versionRequirement: "2.0.0" } } }] },
+});
+if (wrongVersion.ok || wrongVersion.issues[0]?.code !== "progression.unsupported_version") {
+  throw new Error("progression version mismatch did not return a structured issue");
 }
 
 const invalid = caudex.recommendSession({
