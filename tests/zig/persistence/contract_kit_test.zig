@@ -81,6 +81,62 @@ test "reusable workflow suite covers templates and recovery records" {
     });
 }
 
+test "reusable program suite covers immutable definitions CAS state and occurrence history" {
+    var adapter: testing.InMemoryAdapter = .{ .fixture = fixture };
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const reference: persistence.canonical.ProgramDefinitionReference = .{
+        .id = "host.upper-lower",
+        .version = "1",
+        .configurationFingerprint = "definition-fingerprint",
+    };
+    const definition: persistence.ProgramDefinitionRecord = .{
+        .key = .{ .host_scope_key = "athlete-1", .definition_id = reference.id, .definition_version = reference.version },
+        .definition = .{
+            .id = reference.id,
+            .version = reference.version,
+            .displayName = "Upper/lower",
+            .strategy = .{ .id = "caudex.fixed-session", .configVersion = 1, .config = .null },
+            .configurationFingerprint = reference.configurationFingerprint,
+            .source = .{ .kind = .host_custom },
+            .blocks = &.{.{
+                .id = "block-1",
+                .microcycleCount = 4,
+                .schedule = .{ .rotation = .{ .roleIds = &.{"upper"} } },
+                .sessionRoles = &.{.{
+                    .id = "upper",
+                    .items = &.{.{ .fixed = .{
+                        .id = "bench",
+                        .exerciseId = "incline-dumbbell-press",
+                        .progression = .{ .stateId = "bench-lane", .methodology = .{ .id = "caudex.double-progression", .configVersion = 1, .config = .null } },
+                    } }},
+                }},
+            }},
+        },
+    };
+    const initial: persistence.ProgramInstanceRecord = .{
+        .key = .{ .host_scope_key = "athlete-1", .instance_id = "run-1" },
+        .instance = .{ .id = "run-1", .athleteId = "athlete-1", .definition = reference, .lifecycle = .active, .configuration = .null },
+        .planning_state = .{ .instanceId = "run-1", .definition = reference, .revision = 0, .blockIndex = 0, .microcycleIndex = 0, .sessionCursor = 0, .completedOccurrenceCount = 0 },
+    };
+    var next = initial;
+    next.planning_state = .{ .instanceId = "run-1", .definition = reference, .revision = 1, .blockIndex = 0, .microcycleIndex = 1, .sessionCursor = 0, .completedOccurrenceCount = 1 };
+    const occurrence: persistence.ProgramOccurrenceRecord = .{
+        .key = .{ .host_scope_key = "athlete-1", .instance_id = "run-1", .occurrence_id = "occurrence-1" },
+        .occurrence = .{ .instanceId = "run-1", .definition = reference, .blockId = "block-1", .roleId = "upper", .occurrenceId = "occurrence-1", .status = .completed, .beforeRevision = 0, .afterRevision = 1 },
+    };
+    try testing.verifyProgramStores(
+        arena.allocator(),
+        adapter.programDefinitionStore(),
+        adapter.programInstanceStore(),
+        adapter.programOccurrenceStore(),
+        definition,
+        initial,
+        next,
+        occurrence,
+    );
+}
+
 test "canonical adapter assembly equals direct snapshot mode" {
     var adapter: testing.InMemoryAdapter = .{ .fixture = fixture };
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);

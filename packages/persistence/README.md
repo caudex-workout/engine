@@ -26,6 +26,12 @@ revision; conflicts remain visible to the host. Recovery records use explicit
 workflow and idempotency IDs and do not imply a universal cross-adapter
 transaction.
 
+Contract version 4 adds immutable `ProgramDefinitionStore` and
+`ProgramOccurrenceStore` capabilities, plus `ProgramInstanceStore` for
+compare-and-set persistence of an instance and its accepted planning state.
+Definitions and occurrences never overwrite an existing scoped identity;
+instances compare the expected planning-state revision.
+
 `PortableDataStore` adds adapter-independent, scoped export plus validated
 dry-run/merge/replace import. Its documents never expose private table or
 object-store layouts. See the

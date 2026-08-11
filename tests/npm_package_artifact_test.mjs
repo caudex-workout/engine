@@ -42,6 +42,8 @@ try {
     "dist/methodologies.d.ts",
     "dist/methodologies/index.d.ts",
     "dist/methodologies/index.js",
+    "dist/programs.d.ts",
+    "dist/programs.js",
     "dist/testing.d.ts",
     "dist/testing.js",
     "dist/runtime.d.ts",

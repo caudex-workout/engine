@@ -9,6 +9,7 @@ const engine = caudex.engine;
 const methodology = caudex.methodology;
 const primitives = caudex.primitives;
 const programming = caudex.programming;
+const program_planning = caudex.program_planning;
 const rpe_top_set_backoff = caudex.rpe_top_set_backoff;
 const training = caudex.training;
 const tracking = @import("caudex_tracking");
@@ -121,6 +122,10 @@ const Operation = enum {
     listCapabilities,
     exportPortable,
     validatePortableImport,
+    validateProgramDefinition,
+    instantiateProgram,
+    resolvePlannedSession,
+    proposeProgramAdvancement,
 };
 
 const ExecutionRequest = struct {
@@ -154,7 +159,689 @@ fn executeDispatch(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) Exec
         .listCapabilities => executeListCapabilities(runtime, writer.buffered(), out),
         .exportPortable => executePortableExport(runtime, writer.buffered(), out),
         .validatePortableImport => executePortableImportValidation(runtime, writer.buffered(), out),
+        .validateProgramDefinition => executeProgramDefinitionValidation(runtime, writer.buffered(), out),
+        .instantiateProgram => executeProgramInstantiation(runtime, writer.buffered(), out),
+        .resolvePlannedSession => executePlannedSessionResolution(runtime, writer.buffered(), out),
+        .proposeProgramAdvancement => executeProgramAdvancement(runtime, writer.buffered(), out),
     };
+}
+
+fn executeProgramDefinitionValidation(
+    runtime: *Runtime,
+    input: []const u8,
+    out: *OwnedBuffer,
+) ExecuteError!void {
+    const request = try canonical_json.decodeValue(
+        canonical.ProgramDefinitionValidationRequest,
+        runtime.allocator(),
+        input,
+        .{},
+    );
+    defer request.deinit();
+    if (request.value.schemaVersion != program_planning.schema_version) {
+        return error.UnsupportedVersion;
+    }
+    var arena = std.heap.ArenaAllocator.init(runtime.allocator());
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const definition = try translateProgramDefinition(allocator, request.value.definition);
+    const domain_issues = allocator.alloc(program_planning.Issue, 128) catch
+        return error.OutOfMemory;
+    const issues = program_planning.validateDefinition(definition, domain_issues) catch
+        return error.OutputLimitReached;
+    const wire_issues = try programPlanningIssuesToCanonical(allocator, issues);
+    return encodeOwned(runtime, canonical.ProgramDefinitionValidationResult{
+        .valid = wire_issues.len == 0,
+        .issues = wire_issues,
+    }, out);
+}
+
+fn executeProgramInstantiation(
+    runtime: *Runtime,
+    input: []const u8,
+    out: *OwnedBuffer,
+) ExecuteError!void {
+    const request = try canonical_json.decodeValue(
+        canonical.ProgramInstantiationRequest,
+        runtime.allocator(),
+        input,
+        .{},
+    );
+    defer request.deinit();
+    if (request.value.schemaVersion != program_planning.schema_version) {
+        return error.UnsupportedVersion;
+    }
+    var arena = std.heap.ArenaAllocator.init(runtime.allocator());
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const definition = try translateProgramDefinition(allocator, request.value.definition);
+    var issue_storage: [128]program_planning.Issue = undefined;
+    const issues = program_planning.validateDefinition(definition, &issue_storage) catch
+        return error.OutputLimitReached;
+    if (issues.len != 0) return error.InvalidRequest;
+    _ = primitives.Id.parse(request.value.instanceId) catch return error.InvalidRequest;
+    _ = primitives.Id.parse(request.value.athleteId) catch return error.InvalidRequest;
+    if (request.value.startedOn) |date| try validateLocalDateText(date);
+
+    const reference = canonicalDefinitionReference(request.value.definition);
+    const instance = canonical.ProgramInstanceDocument{
+        .id = request.value.instanceId,
+        .athleteId = request.value.athleteId,
+        .definition = reference,
+        .startedOn = request.value.startedOn,
+        .lifecycle = request.value.lifecycle,
+        .configuration = request.value.configuration,
+    };
+    return encodeOwned(runtime, canonical.ProgramInstantiationResult{
+        .instance = instance,
+        .state = .{
+            .instanceId = instance.id,
+            .definition = reference,
+            .revision = 0,
+            .blockIndex = 0,
+            .microcycleIndex = 0,
+            .sessionCursor = 0,
+            .completedOccurrenceCount = 0,
+            .strategyState = request.value.strategyState,
+        },
+    }, out);
+}
+
+fn executePlannedSessionResolution(
+    runtime: *Runtime,
+    input: []const u8,
+    out: *OwnedBuffer,
+) ExecuteError!void {
+    const request = try canonical_json.decodeValue(
+        canonical.ProgramResolutionRequest,
+        runtime.allocator(),
+        input,
+        .{ .max_collection_items = 100_000 },
+    );
+    defer request.deinit();
+    if (request.value.schemaVersion != program_planning.schema_version) {
+        return error.UnsupportedVersion;
+    }
+    var arena = std.heap.ArenaAllocator.init(runtime.allocator());
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    try validateProgramSnapshotReferences(
+        request.value.definition,
+        request.value.instance,
+        request.value.state,
+    );
+    const definition = try translateProgramDefinition(allocator, request.value.definition);
+    const instance = try translateProgramInstance(request.value.instance);
+    const state = try translateProgramPlanningState(request.value.state);
+    const local_date: ?program_planning.LocalDate = if (request.value.localDate) |date| blk: {
+        try validateLocalDateText(date.isoDate);
+        break :blk .{
+            .iso_date = date.isoDate,
+            .weekday = @enumFromInt(@intFromEnum(date.weekday)),
+        };
+    } else null;
+    const occurrence_storage = allocator.alloc(u8, 1024) catch return error.OutOfMemory;
+    const planned = program_planning.resolvePlannedSession(
+        occurrence_storage,
+        definition,
+        instance,
+        state,
+        local_date,
+    ) catch return error.InvalidRequest;
+    const block_index: usize = request.value.state.blockIndex;
+    if (block_index >= request.value.definition.blocks.len) return error.InvalidRequest;
+    const source_block = request.value.definition.blocks[block_index];
+    const source_role = findCanonicalProgramRole(source_block, planned.role.id) orelse
+        return error.InvalidRequest;
+    const catalog = try translateCatalog(allocator, request.value.catalog);
+    const exercises = allocator.alloc(
+        canonical.ProgramExerciseSlot,
+        planned.role.items.len,
+    ) catch return error.OutOfMemory;
+    for (planned.role.items, source_role.items, exercises) |item, source_item, *exercise| {
+        const exercise_id = switch (item) {
+            .fixed => |fixed| fixed.exercise_id,
+            .slot => program_planning.resolveSlotBasic(item, catalog) orelse
+                return error.InvalidRequest,
+        };
+        if (catalog.find(primitives.Id.parse(exercise_id) catch return error.InvalidRequest) == null) {
+            return error.InvalidRequest;
+        }
+        exercise.* = .{
+            .slotId = item.id(),
+            .exerciseId = exercise_id,
+            .progression = resolveCanonicalProgression(
+                source_block,
+                source_role,
+                source_item,
+            ) orelse return error.InvalidRequest,
+        };
+    }
+    const training_context = try plannedTrainingContext(allocator, source_block, source_role);
+    return encodeOwned(runtime, canonical.PlannedSessionIntentDocument{
+        .instanceId = request.value.instance.id,
+        .definition = request.value.instance.definition,
+        .blockId = source_block.id,
+        .roleId = source_role.id,
+        .occurrenceId = planned.occurrence.id,
+        .scheduledDate = planned.occurrence.scheduled_date,
+        .scheduleStatus = @enumFromInt(@intFromEnum(planned.occurrence.status)),
+        .planningStateRevision = request.value.state.revision,
+        .program = .{
+            .strategy = request.value.definition.strategy,
+            .state = request.value.state.strategyState,
+            .exercises = exercises,
+            .trainingContext = training_context,
+        },
+    }, out);
+}
+
+fn executeProgramAdvancement(
+    runtime: *Runtime,
+    input: []const u8,
+    out: *OwnedBuffer,
+) ExecuteError!void {
+    const request = try canonical_json.decodeValue(
+        canonical.ProgramAdvancementRequest,
+        runtime.allocator(),
+        input,
+        .{ .max_collection_items = 100_000 },
+    );
+    defer request.deinit();
+    if (request.value.schemaVersion != program_planning.schema_version) {
+        return error.UnsupportedVersion;
+    }
+    var arena = std.heap.ArenaAllocator.init(runtime.allocator());
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    try validateProgramSnapshotReferences(
+        request.value.definition,
+        request.value.instance,
+        request.value.state,
+    );
+    if (request.value.intent.planningStateRevision != request.value.state.revision or
+        !std.mem.eql(u8, request.value.intent.instanceId, request.value.instance.id) or
+        !canonicalDefinitionReferencesEqual(
+            request.value.intent.definition,
+            request.value.state.definition,
+        )) return error.InvalidRequest;
+    const definition = try translateProgramDefinition(allocator, request.value.definition);
+    const state = try translateProgramPlanningState(request.value.state);
+    if (request.value.state.blockIndex >= request.value.definition.blocks.len) {
+        return error.InvalidRequest;
+    }
+    const block = definition.blocks[request.value.state.blockIndex];
+    if (!std.mem.eql(u8, request.value.intent.blockId, block.id)) return error.InvalidRequest;
+    const role = findProgramRole(block, request.value.intent.roleId) orelse
+        return error.InvalidRequest;
+    const planned = program_planning.PlannedSessionIntent{
+        .definition = state.definition,
+        .instance_id = request.value.instance.id,
+        .block_id = block.id,
+        .block_phase = block.phase,
+        .occurrence = .{
+            .id = request.value.intent.occurrenceId,
+            .instance_id = request.value.instance.id,
+            .block_id = block.id,
+            .microcycle_index = state.microcycle_index,
+            .role_id = role.id,
+            .sequence_index = state.session_cursor,
+            .scheduled_date = request.value.intent.scheduledDate,
+            .status = @enumFromInt(@intFromEnum(request.value.intent.scheduleStatus)),
+        },
+        .role = role,
+        .block_default_progression = block.default_progression,
+        .program_muscle_priorities = block.muscle_priorities,
+        .scheduling_provenance = .rotation_next,
+    };
+    const proposal = program_planning.proposeAdvancement(
+        definition,
+        state,
+        planned,
+        switch (request.value.status) {
+            .completed => .completed,
+            .skipped => .skipped,
+        },
+    ) catch return error.InvalidRequest;
+    const next = switch (proposal.outcome) {
+        .advance => |value| value,
+        .require_host_policy, .no_change => return error.InvalidRequest,
+    };
+    var next_state = programPlanningStateToCanonical(
+        next,
+        request.value.state.definition,
+        request.value.nextStrategyState orelse request.value.state.strategyState,
+    );
+    next_state.completedOccurrenceCount = if (request.value.status == .completed)
+        std.math.add(u64, request.value.state.completedOccurrenceCount, 1) catch
+            return error.InvalidRequest
+    else
+        request.value.state.completedOccurrenceCount;
+    return encodeOwned(runtime, canonical.ProgramStateProposalDocument{
+        .instanceId = request.value.instance.id,
+        .definition = request.value.state.definition,
+        .expectedRevision = request.value.state.revision,
+        .nextState = next_state,
+        .occurrence = .{
+            .instanceId = request.value.instance.id,
+            .definition = request.value.state.definition,
+            .blockId = request.value.intent.blockId,
+            .roleId = request.value.intent.roleId,
+            .occurrenceId = request.value.intent.occurrenceId,
+            .status = switch (request.value.status) {
+                .completed => .completed,
+                .skipped => .skipped,
+            },
+            .beforeRevision = request.value.state.revision,
+            .afterRevision = next.revision,
+        },
+    }, out);
+}
+
+fn translateProgramDefinition(
+    allocator: std.mem.Allocator,
+    source: canonical.ProgramDefinitionDocument,
+) ExecuteError!program_planning.ProgramDefinition {
+    if (source.schemaVersion != program_planning.schema_version) {
+        return error.UnsupportedVersion;
+    }
+    _ = primitives.Id.parse(source.id) catch return error.InvalidRequest;
+    if (source.displayName.len == 0 or source.configurationFingerprint.len == 0) {
+        return error.InvalidRequest;
+    }
+    if (!std.mem.eql(u8, source.strategy.id, programming.fixed_session_id)) {
+        return error.UnsupportedMethodology;
+    }
+    if (source.strategy.configVersion != programming.fixed_session_config_version) {
+        return error.UnsupportedVersion;
+    }
+    _ = try resolvedVersion(source.strategy.versionRequirement);
+    const blocks = allocator.alloc(program_planning.Block, source.blocks.len) catch
+        return error.OutOfMemory;
+    for (source.blocks, blocks) |block, *translated| {
+        translated.* = .{
+            .id = block.id,
+            .name = block.displayName orelse block.id,
+            .phase = @enumFromInt(@intFromEnum(block.phase)),
+            .phase_semantic = block.phaseSemantic,
+            .length = .{ .completed_microcycles = block.microcycleCount },
+            .schedule = try translateProgramSchedule(allocator, block.schedule),
+            .roles = try translateProgramRoles(allocator, block.sessionRoles),
+            .muscle_priorities = try translateProgramMusclePriorities(
+                allocator,
+                block.musclePriorities,
+            ),
+            .default_progression = try translateOptionalProgression(
+                allocator,
+                block.defaultProgression,
+            ),
+            .next_block_id = block.nextBlockId,
+        };
+    }
+    return .{
+        .id = source.id,
+        .version = try parseProgramDefinitionVersion(source.version),
+        .display_name = source.displayName,
+        .description = source.description,
+        .strategy_id = source.strategy.id,
+        .strategy_version = source.strategy.configVersion,
+        .configuration_fingerprint = source.configurationFingerprint,
+        .source = if (source.source) |value| value.id else null,
+        .blocks = blocks,
+    };
+}
+
+fn translateProgramSchedule(
+    allocator: std.mem.Allocator,
+    source: canonical.ProgramSchedule,
+) ExecuteError!program_planning.Schedule {
+    return switch (source) {
+        .rotation => |value| .{ .rotation = .{
+            .role_ids = value.roleIds,
+            .frequency = if (value.frequency) |frequency| .{
+                .sessions = frequency.sessions,
+                .days = frequency.days,
+            } else null,
+        } },
+        .frequencyTargeted => |value| .{ .frequency_targeted = .{
+            .role_ids = value.roleIds,
+            .target = .{ .sessions = value.target.sessions, .days = value.target.days },
+        } },
+        .hybrid => |value| blk: {
+            const weekdays = allocator.alloc(
+                program_planning.Weekday,
+                value.preferredWeekdays.len,
+            ) catch return error.OutOfMemory;
+            for (value.preferredWeekdays, weekdays) |weekday, *translated| {
+                translated.* = @enumFromInt(@intFromEnum(weekday));
+            }
+            break :blk .{ .hybrid = .{
+                .role_ids = value.roleIds,
+                .target = .{ .sessions = value.target.sessions, .days = value.target.days },
+                .preferred_weekdays = weekdays,
+            } };
+        },
+        .fixedWeekdays => |value| blk: {
+            const entries = allocator.alloc(
+                program_planning.WeekdayEntry,
+                value.entries.len,
+            ) catch return error.OutOfMemory;
+            for (value.entries, entries) |entry, *translated| translated.* = .{
+                .weekday = @enumFromInt(@intFromEnum(entry.weekday)),
+                .role_id = entry.roleId,
+            };
+            break :blk .{ .fixed_weekdays = .{ .entries = entries } };
+        },
+        .explicitDates => |value| blk: {
+            const entries = allocator.alloc(
+                program_planning.DatedEntry,
+                value.entries.len,
+            ) catch return error.OutOfMemory;
+            for (value.entries, entries) |entry, *translated| {
+                try validateLocalDateText(entry.localDate);
+                translated.* = .{ .local_date = entry.localDate, .role_id = entry.roleId };
+            }
+            break :blk .{ .explicit_dates = .{ .entries = entries } };
+        },
+    };
+}
+
+fn translateProgramRoles(
+    allocator: std.mem.Allocator,
+    source: []const canonical.ProgramSessionRoleDefinition,
+) ExecuteError![]const program_planning.SessionRole {
+    const roles = allocator.alloc(program_planning.SessionRole, source.len) catch
+        return error.OutOfMemory;
+    for (source, roles) |role, *translated| translated.* = .{
+        .id = role.id,
+        .name = role.displayName orelse role.id,
+        .purpose = role.description,
+        .muscle_priorities = try translateProgramMusclePriorities(
+            allocator,
+            role.musclePriorities,
+        ),
+        .items = try translateProgramItems(allocator, role.items),
+        .default_progression = try translateOptionalProgression(
+            allocator,
+            role.defaultProgression,
+        ),
+        .expected_duration_minutes = role.expectedDurationMinutes,
+    };
+    return roles;
+}
+
+fn translateProgramItems(
+    allocator: std.mem.Allocator,
+    source: []const canonical.ProgramSessionItem,
+) ExecuteError![]const program_planning.SessionItem {
+    const items = allocator.alloc(program_planning.SessionItem, source.len) catch
+        return error.OutOfMemory;
+    for (source, items) |item, *translated| translated.* = switch (item) {
+        .fixed => |value| .{ .fixed = .{
+            .id = value.id,
+            .exercise_id = value.exerciseId,
+            .anchor = @enumFromInt(@intFromEnum(value.anchor)),
+            .progression = try translateOptionalProgression(allocator, value.progression),
+            .ordering = .{
+                .priority_tier = value.ordering.priorityTier,
+                .before_item_ids = value.ordering.beforeItemIds,
+                .after_item_ids = value.ordering.afterItemIds,
+            },
+        } },
+        .dynamic => |value| .{ .slot = .{
+            .id = value.id,
+            .requirements = .{
+                .target_muscle_ids = value.requirements.targetMuscleIds,
+                .movement_pattern_ids = value.requirements.movementPatternIds,
+                .exercise_family_ids = value.requirements.exerciseFamilyIds,
+                .required_exercise_ids = value.requirements.requiredExerciseIds,
+                .excluded_exercise_ids = value.requirements.excludedExerciseIds,
+                .required_equipment_ids = value.requirements.requiredEquipmentIds,
+                .progression_requirement = if (value.requirements.progressionRequirement) |requirement|
+                    @enumFromInt(@intFromEnum(requirement))
+                else
+                    null,
+            },
+            .pool = .{
+                .exercise_ids = value.pool.exerciseIds,
+                .exercise_family_ids = value.pool.exerciseFamilyIds,
+            },
+            .progression = try translateOptionalProgression(allocator, value.progression),
+            .ordering = .{
+                .priority_tier = value.ordering.priorityTier,
+                .before_item_ids = value.ordering.beforeItemIds,
+                .after_item_ids = value.ordering.afterItemIds,
+            },
+        } },
+    };
+    return items;
+}
+
+fn translateOptionalProgression(
+    allocator: std.mem.Allocator,
+    source: ?canonical.ProgressionAssignment,
+) ExecuteError!?program_planning.ProgressionAssignment {
+    const value = source orelse return null;
+    _ = primitives.Id.parse(value.stateId) catch return error.InvalidRequest;
+    return .{ .state_id = value.stateId, .method = try translateProgression(allocator, value) };
+}
+
+fn translateProgramMusclePriorities(
+    allocator: std.mem.Allocator,
+    source: []const canonical.MusclePriority,
+) ExecuteError![]const program_planning.MusclePriority {
+    const priorities = allocator.alloc(program_planning.MusclePriority, source.len) catch
+        return error.OutOfMemory;
+    for (source, priorities) |priority, *translated| translated.* = .{
+        .muscle_id = priority.muscleId,
+        .priority = @enumFromInt(@intFromEnum(priority.priority)),
+        .weight = priority.weight,
+    };
+    return priorities;
+}
+
+fn translateProgramInstance(
+    source: canonical.ProgramInstanceDocument,
+) ExecuteError!program_planning.ProgramInstance {
+    if (source.schemaVersion != program_planning.schema_version) {
+        return error.UnsupportedVersion;
+    }
+    return .{
+        .id = source.id,
+        .athlete_id = source.athleteId,
+        .definition = try translateProgramDefinitionReference(source.definition),
+        .lifecycle = switch (source.lifecycle) {
+            .planned => .created,
+            .active => .active,
+            .paused => .paused,
+            .completed => .completed,
+            .abandoned => .ended,
+        },
+        .started_on = source.startedOn,
+    };
+}
+
+fn translateProgramPlanningState(
+    source: canonical.ProgramPlanningState,
+) ExecuteError!program_planning.ProgramState {
+    if (source.schemaVersion != program_planning.schema_version) {
+        return error.UnsupportedVersion;
+    }
+    return .{
+        .instance_id = source.instanceId,
+        .definition = try translateProgramDefinitionReference(source.definition),
+        .revision = source.revision,
+        .block_index = std.math.cast(u16, source.blockIndex) orelse
+            return error.InvalidRequest,
+        .microcycle_index = source.microcycleIndex,
+        .session_cursor = std.math.cast(u16, source.sessionCursor) orelse
+            return error.InvalidRequest,
+        .completed_occurrences = source.completedOccurrenceCount,
+        .complete = source.completed,
+    };
+}
+
+fn programPlanningStateToCanonical(
+    source: program_planning.ProgramState,
+    definition: canonical.ProgramDefinitionReference,
+    strategy_state: ?canonical.ProgramState,
+) canonical.ProgramPlanningState {
+    return .{
+        .instanceId = source.instance_id,
+        .definition = definition,
+        .revision = source.revision,
+        .blockIndex = source.block_index,
+        .microcycleIndex = source.microcycle_index,
+        .sessionCursor = source.session_cursor,
+        .completedOccurrenceCount = source.completed_occurrences,
+        .completed = source.complete,
+        .strategyState = strategy_state,
+    };
+}
+
+fn translateProgramDefinitionReference(
+    source: canonical.ProgramDefinitionReference,
+) ExecuteError!program_planning.DefinitionRef {
+    return .{
+        .id = source.id,
+        .version = try parseProgramDefinitionVersion(source.version),
+        .configuration_fingerprint = source.configurationFingerprint,
+    };
+}
+
+fn canonicalDefinitionReference(
+    definition: canonical.ProgramDefinitionDocument,
+) canonical.ProgramDefinitionReference {
+    return .{
+        .id = definition.id,
+        .version = definition.version,
+        .configurationFingerprint = definition.configurationFingerprint,
+    };
+}
+
+fn validateProgramSnapshotReferences(
+    definition: canonical.ProgramDefinitionDocument,
+    instance: canonical.ProgramInstanceDocument,
+    state: canonical.ProgramPlanningState,
+) ExecuteError!void {
+    const reference = canonicalDefinitionReference(definition);
+    if (!canonicalDefinitionReferencesEqual(reference, instance.definition) or
+        !canonicalDefinitionReferencesEqual(reference, state.definition) or
+        !std.mem.eql(u8, instance.id, state.instanceId)) return error.InvalidRequest;
+}
+
+fn canonicalDefinitionReferencesEqual(
+    left: canonical.ProgramDefinitionReference,
+    right: canonical.ProgramDefinitionReference,
+) bool {
+    return std.mem.eql(u8, left.id, right.id) and
+        std.mem.eql(u8, left.version, right.version) and
+        std.mem.eql(
+            u8,
+            left.configurationFingerprint,
+            right.configurationFingerprint,
+        );
+}
+
+fn parseProgramDefinitionVersion(value: []const u8) ExecuteError!u32 {
+    const end = std.mem.indexOfScalar(u8, value, '.') orelse value.len;
+    if (end == 0) return error.InvalidRequest;
+    const version = std.fmt.parseInt(u32, value[0..end], 10) catch
+        return error.InvalidRequest;
+    if (version == 0) return error.InvalidRequest;
+    return version;
+}
+
+fn programPlanningIssuesToCanonical(
+    allocator: std.mem.Allocator,
+    source: []const program_planning.Issue,
+) ExecuteError![]const canonical.ValidationIssue {
+    const issues = allocator.alloc(canonical.ValidationIssue, source.len) catch
+        return error.OutOfMemory;
+    for (source, issues) |issue, *translated| translated.* = .{
+        .code = issue.code,
+        .path = issue.path,
+        .message = issue.message,
+        .severity = .@"error",
+    };
+    return issues;
+}
+
+fn findCanonicalProgramRole(
+    block: canonical.ProgramBlockDefinition,
+    role_id: []const u8,
+) ?canonical.ProgramSessionRoleDefinition {
+    for (block.sessionRoles) |role| {
+        if (std.mem.eql(u8, role.id, role_id)) return role;
+    }
+    return null;
+}
+
+fn findProgramRole(
+    block: program_planning.Block,
+    role_id: []const u8,
+) ?program_planning.SessionRole {
+    for (block.roles) |role| {
+        if (std.mem.eql(u8, role.id, role_id)) return role;
+    }
+    return null;
+}
+
+fn resolveCanonicalProgression(
+    block: canonical.ProgramBlockDefinition,
+    role: canonical.ProgramSessionRoleDefinition,
+    item: canonical.ProgramSessionItem,
+) ?canonical.ProgressionAssignment {
+    return switch (item) {
+        inline else => |value| value.progression orelse
+            role.defaultProgression orelse
+            block.defaultProgression,
+    };
+}
+
+fn plannedTrainingContext(
+    allocator: std.mem.Allocator,
+    block: canonical.ProgramBlockDefinition,
+    role: canonical.ProgramSessionRoleDefinition,
+) ExecuteError!canonical.ProgramTrainingContext {
+    if (block.musclePriorities.len == 0) return role.trainingContext;
+    const count = std.math.add(
+        usize,
+        block.musclePriorities.len,
+        role.trainingContext.musclePriorities.len,
+    ) catch return error.InvalidRequest;
+    const priorities = allocator.alloc(canonical.MusclePriority, count) catch
+        return error.OutOfMemory;
+    @memcpy(priorities[0..block.musclePriorities.len], block.musclePriorities);
+    @memcpy(
+        priorities[block.musclePriorities.len..],
+        role.trainingContext.musclePriorities,
+    );
+    var result = role.trainingContext;
+    result.musclePriorities = priorities;
+    return result;
+}
+
+fn validateLocalDateText(value: []const u8) ExecuteError!void {
+    if (value.len != 10 or value[4] != '-' or value[7] != '-') {
+        return error.InvalidRequest;
+    }
+    for (value, 0..) |byte, index| {
+        if (index == 4 or index == 7) continue;
+        if (!std.ascii.isDigit(byte)) return error.InvalidRequest;
+    }
+    const year = std.fmt.parseInt(u16, value[0..4], 10) catch
+        return error.InvalidRequest;
+    const month = std.fmt.parseInt(u8, value[5..7], 10) catch
+        return error.InvalidRequest;
+    const day = std.fmt.parseInt(u8, value[8..10], 10) catch
+        return error.InvalidRequest;
+    if (year == 0 or month == 0 or month > 12 or day == 0) {
+        return error.InvalidRequest;
+    }
+    const leap = (year % 4 == 0 and year % 100 != 0) or year % 400 == 0;
+    const days = [_]u8{ 31, if (leap) 29 else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+    if (day > days[month - 1]) return error.InvalidRequest;
 }
 
 fn executePortableExport(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) ExecuteError!void {
@@ -1808,6 +2495,96 @@ test "versioned dispatcher discovers and validates methodologies" {
     defer validation.deinit();
     try std.testing.expect(!validation.value.valid);
     try std.testing.expectEqualStrings("methodology.config_invalid", validation.value.issues[0].code);
+}
+
+test "versioned dispatcher plans programs without accepting proposals" {
+    var runtime: Runtime = .{ .debug_allocator = .init };
+    defer _ = runtime.debug_allocator.deinit();
+
+    const definition =
+        \\{"schemaVersion":1,"id":"program","version":"1","displayName":"Program","strategy":{"id":"caudex.fixed-session","configVersion":1,"config":{}},"configurationFingerprint":"fixture-v1","blocks":[{"id":"block","microcycleCount":1,"schedule":{"rotation":{"roleIds":["day"]}},"sessionRoles":[{"id":"day","items":[]}]}]}
+    ;
+    const validate_request = try std.fmt.allocPrint(std.testing.allocator,
+        \\{{"schemaVersion":1,"operation":"validateProgramDefinition","payload":{{"schemaVersion":1,"definition":{s}}}}}
+    , .{definition});
+    defer std.testing.allocator.free(validate_request);
+    var validation_output: OwnedBuffer = .{};
+    defer if (validation_output.data) |data| runtime.allocator().free(
+        data[0..validation_output.capacity],
+    );
+    try executeDispatch(&runtime, validate_request, &validation_output);
+    const validation = try canonical_json.decodeValue(
+        canonical.ProgramDefinitionValidationResult,
+        std.testing.allocator,
+        validation_output.data.?[0..validation_output.len],
+        .{},
+    );
+    defer validation.deinit();
+    try std.testing.expect(validation.value.valid);
+
+    const instantiate_request = try std.fmt.allocPrint(std.testing.allocator,
+        \\{{"schemaVersion":1,"operation":"instantiateProgram","payload":{{"schemaVersion":1,"definition":{s},"instanceId":"run","athleteId":"athlete","lifecycle":"active","configuration":{{}}}}}}
+    , .{definition});
+    defer std.testing.allocator.free(instantiate_request);
+    var instantiate_output: OwnedBuffer = .{};
+    defer if (instantiate_output.data) |data| runtime.allocator().free(
+        data[0..instantiate_output.capacity],
+    );
+    try executeDispatch(&runtime, instantiate_request, &instantiate_output);
+    const instantiated = try canonical_json.decodeValue(
+        canonical.ProgramInstantiationResult,
+        std.testing.allocator,
+        instantiate_output.data.?[0..instantiate_output.len],
+        .{},
+    );
+    defer instantiated.deinit();
+    try std.testing.expectEqual(@as(u64, 0), instantiated.value.state.revision);
+
+    const instance =
+        \\{"schemaVersion":1,"id":"run","athleteId":"athlete","definition":{"id":"program","version":"1","configurationFingerprint":"fixture-v1"},"lifecycle":"active","configuration":{}}
+    ;
+    const state =
+        \\{"schemaVersion":1,"instanceId":"run","definition":{"id":"program","version":"1","configurationFingerprint":"fixture-v1"},"revision":0,"blockIndex":0,"microcycleIndex":0,"sessionCursor":0,"completedOccurrenceCount":0,"completed":false}
+    ;
+    const resolve_request = try std.fmt.allocPrint(std.testing.allocator,
+        \\{{"schemaVersion":1,"operation":"resolvePlannedSession","payload":{{"schemaVersion":1,"definition":{s},"instance":{s},"state":{s},"catalog":[]}}}}
+    , .{ definition, instance, state });
+    defer std.testing.allocator.free(resolve_request);
+    var resolve_output: OwnedBuffer = .{};
+    defer if (resolve_output.data) |data| runtime.allocator().free(
+        data[0..resolve_output.capacity],
+    );
+    try executeDispatch(&runtime, resolve_request, &resolve_output);
+    const intent = try canonical_json.decodeValue(
+        canonical.PlannedSessionIntentDocument,
+        std.testing.allocator,
+        resolve_output.data.?[0..resolve_output.len],
+        .{},
+    );
+    defer intent.deinit();
+    try std.testing.expectEqualStrings("day", intent.value.roleId);
+
+    const intent_json =
+        \\{"schemaVersion":1,"instanceId":"run","definition":{"id":"program","version":"1","configurationFingerprint":"fixture-v1"},"blockId":"block","roleId":"day","occurrenceId":"run:block:0:0:day","planningStateRevision":0,"program":{"strategy":{"id":"caudex.fixed-session","configVersion":1,"config":{}},"exercises":[]}}
+    ;
+    const advance_request = try std.fmt.allocPrint(std.testing.allocator,
+        \\{{"schemaVersion":1,"operation":"proposeProgramAdvancement","payload":{{"schemaVersion":1,"definition":{s},"instance":{s},"state":{s},"intent":{s},"status":"completed"}}}}
+    , .{ definition, instance, state, intent_json });
+    defer std.testing.allocator.free(advance_request);
+    var advance_output: OwnedBuffer = .{};
+    defer if (advance_output.data) |data| runtime.allocator().free(
+        data[0..advance_output.capacity],
+    );
+    try executeDispatch(&runtime, advance_request, &advance_output);
+    const proposal = try canonical_json.decodeValue(
+        canonical.ProgramStateProposalDocument,
+        std.testing.allocator,
+        advance_output.data.?[0..advance_output.len],
+        .{},
+    );
+    defer proposal.deinit();
+    try std.testing.expectEqual(@as(u64, 0), proposal.value.expectedRevision);
+    try std.testing.expectEqual(@as(u64, 1), proposal.value.nextState.revision);
 }
 
 test "C ABI rejects invalid arguments without exposing errors" {

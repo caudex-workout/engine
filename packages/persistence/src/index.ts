@@ -10,9 +10,13 @@ import type {
   PortableDocument,
   PortableImportPlan,
   PortableImportRequest,
+  ProgramDefinition,
+  ProgramInstance,
+  ProgramOccurrenceRecord as ProgramOccurrence,
+  ProgramState,
 } from "@caudex-workout/engine";
 
-export const PERSISTENCE_CONTRACT_VERSION = 3;
+export const PERSISTENCE_CONTRACT_VERSION = 5;
 
 export interface AthleteProfileKey { hostScopeKey: string; athleteProfileId: string }
 export interface AthleteProfileRecord { key: AthleteProfileKey; profile: AthleteProfile }
@@ -20,6 +24,64 @@ export interface CompareAndSetAthleteProfile { key: AthleteProfileKey; expectedR
 export interface AthleteProfileStore {
   loadAthleteProfile(key: AthleteProfileKey): Promise<AthleteProfileRecord | null>;
   compareAndSetAthleteProfile(change: CompareAndSetAthleteProfile): Promise<AthleteProfileRecord>;
+}
+
+/** Immutable identity of one versioned, host-scoped program definition. */
+export interface ProgramDefinitionKey {
+  hostScopeKey: string;
+  definitionId: string;
+  definitionVersion: string;
+}
+
+export interface ProgramDefinitionRecord {
+  key: ProgramDefinitionKey;
+  definition: ProgramDefinition;
+}
+
+export interface ProgramDefinitionStore {
+  loadProgramDefinition(key: ProgramDefinitionKey): Promise<ProgramDefinitionRecord | null>;
+  /** Creates a definition version. Reusing a scoped key is always a conflict. */
+  putProgramDefinition(record: ProgramDefinitionRecord): Promise<ProgramDefinitionRecord>;
+}
+
+export interface ProgramInstanceKey {
+  hostScopeKey: string;
+  instanceId: string;
+}
+
+/** The instance and accepted planning state are stored atomically. */
+export interface ProgramInstanceRecord {
+  key: ProgramInstanceKey;
+  instance: ProgramInstance;
+  planningState: ProgramState | null;
+}
+
+export interface CompareAndSetProgramInstance {
+  record: ProgramInstanceRecord;
+  /** Null creates only an absent instance; otherwise matches planningState.revision. */
+  expectedRevision: number | null;
+}
+
+export interface ProgramInstanceStore {
+  loadProgramInstance(key: ProgramInstanceKey): Promise<ProgramInstanceRecord | null>;
+  compareAndSetProgramInstance(change: CompareAndSetProgramInstance): Promise<ProgramInstanceRecord>;
+}
+
+export interface ProgramOccurrenceKey {
+  hostScopeKey: string;
+  instanceId: string;
+  occurrenceId: string;
+}
+
+export interface ProgramOccurrenceRecord {
+  key: ProgramOccurrenceKey;
+  occurrence: ProgramOccurrence;
+}
+
+export interface ProgramOccurrenceStore {
+  loadProgramOccurrence(key: ProgramOccurrenceKey): Promise<ProgramOccurrenceRecord | null>;
+  /** Appends immutable occurrence evidence; duplicate scoped keys conflict. */
+  appendProgramOccurrence(record: ProgramOccurrenceRecord): Promise<ProgramOccurrenceRecord>;
 }
 
 export interface CatalogScope {
@@ -185,12 +247,12 @@ export class PersistenceConflictError extends Error {
 }
 
 export class PersistenceRevisionConflictError extends Error {
-  readonly resource: "active_workout" | "workout_template" | "athlete_profile";
+  readonly resource: "active_workout" | "workout_template" | "athlete_profile" | "program_instance";
   readonly id: string;
   readonly expectedRevision: number | null;
   readonly actualRevision: number | null;
 
-  constructor(resource: "active_workout" | "workout_template" | "athlete_profile", id: string, expectedRevision: number | null, actualRevision: number | null) {
+  constructor(resource: "active_workout" | "workout_template" | "athlete_profile" | "program_instance", id: string, expectedRevision: number | null, actualRevision: number | null) {
     super(`The ${resource.replace("_", " ")} revision changed after it was loaded.`);
     this.name = "PersistenceRevisionConflictError";
     this.resource = resource;

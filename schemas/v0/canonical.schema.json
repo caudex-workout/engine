@@ -6,7 +6,12 @@
     { "$ref": "#/$defs/recommendationRequest" },
     { "$ref": "#/$defs/evaluationRequest" },
     { "$ref": "#/$defs/recommendationResult" },
-    { "$ref": "#/$defs/evaluationResult" }
+    { "$ref": "#/$defs/evaluationResult" },
+    { "$ref": "#/$defs/programDefinitionDocument" },
+    { "$ref": "#/$defs/programInstanceDocument" },
+    { "$ref": "#/$defs/programPlanningState" },
+    { "$ref": "#/$defs/programOccurrenceRecord" },
+    { "$ref": "#/$defs/plannedSessionIntentDocument" }
   ],
   "$defs": {
     "identifier": {
@@ -359,6 +364,368 @@
       "properties": {
         "schemaVersion": { "type": "integer", "minimum": 1 },
         "data": { "$ref": "#/$defs/openObject" }
+      },
+      "additionalProperties": false
+    },
+    "programStrategyRef": {
+      "type": "object",
+      "required": ["id", "configVersion", "config"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "versionRequirement": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "configVersion": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "config": true
+      },
+      "additionalProperties": false
+    },
+    "programState": {
+      "type": "object",
+      "required": ["schemaVersion", "data"],
+      "properties": {
+        "schemaVersion": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "data": true
+      },
+      "additionalProperties": false
+    },
+    "programTrainingContext": {
+      "type": "object",
+      "properties": {
+        "goals": { "$ref": "#/$defs/goalSet" },
+        "exercisePreferences": { "type": "array", "items": { "$ref": "#/$defs/preference" } },
+        "musclePriorities": { "type": "array", "items": { "$ref": "#/$defs/musclePriority" } },
+        "restrictions": { "type": "array", "items": { "$ref": "#/$defs/restriction" } },
+        "requiredExerciseIds": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+        "excludedExerciseIds": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true }
+      },
+      "additionalProperties": false
+    },
+    "progressionAssignment": {
+      "type": "object",
+      "required": ["stateId", "methodology"],
+      "properties": {
+        "stateId": { "$ref": "#/$defs/identifier" },
+        "methodology": { "$ref": "#/$defs/methodologyRef" },
+        "state": { "$ref": "#/$defs/methodologyState" }
+      },
+      "additionalProperties": false
+    },
+    "programExerciseSlot": {
+      "type": "object",
+      "required": ["slotId", "exerciseId", "progression"],
+      "properties": {
+        "slotId": { "$ref": "#/$defs/identifier" },
+        "exerciseId": { "$ref": "#/$defs/identifier" },
+        "progression": { "$ref": "#/$defs/progressionAssignment" }
+      },
+      "additionalProperties": false
+    },
+    "programPlan": {
+      "type": "object",
+      "required": ["strategy", "exercises"],
+      "properties": {
+        "strategy": { "$ref": "#/$defs/programStrategyRef" },
+        "state": { "$ref": "#/$defs/programState" },
+        "exercises": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/programExerciseSlot" } },
+        "trainingContext": { "$ref": "#/$defs/programTrainingContext" }
+      },
+      "additionalProperties": false
+    },
+    "programDefinitionSource": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["built_in_preset", "host_custom", "imported"] },
+        "id": { "$ref": "#/$defs/identifier" },
+        "version": { "type": "string", "minLength": 1, "maxLength": 100 }
+      },
+      "additionalProperties": false
+    },
+    "programFrequencyTarget": {
+      "type": "object",
+      "required": ["sessions", "days"],
+      "properties": {
+        "sessions": { "type": "integer", "minimum": 1, "maximum": 255 },
+        "days": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      },
+      "additionalProperties": false
+    },
+    "programWeekdayScheduleEntry": {
+      "type": "object",
+      "required": ["weekday", "roleId"],
+      "properties": {
+        "weekday": { "enum": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] },
+        "roleId": { "$ref": "#/$defs/identifier" }
+      },
+      "additionalProperties": false
+    },
+    "programDatedScheduleEntry": {
+      "type": "object",
+      "required": ["localDate", "roleId"],
+      "properties": {
+        "localDate": { "type": "string", "format": "date" },
+        "roleId": { "$ref": "#/$defs/identifier" }
+      },
+      "additionalProperties": false
+    },
+    "programSchedule": {
+      "oneOf": [
+        { "type": "object", "required": ["rotation"], "properties": { "rotation": { "type": "object", "required": ["roleIds"], "properties": { "roleIds": { "type": "array", "minItems": 1, "maxItems": 366, "items": { "$ref": "#/$defs/identifier" } }, "frequency": { "$ref": "#/$defs/programFrequencyTarget" } }, "additionalProperties": false } }, "additionalProperties": false },
+        { "type": "object", "required": ["fixedWeekdays"], "properties": { "fixedWeekdays": { "type": "object", "required": ["entries"], "properties": { "entries": { "type": "array", "minItems": 1, "maxItems": 7, "items": { "$ref": "#/$defs/programWeekdayScheduleEntry" } } }, "additionalProperties": false } }, "additionalProperties": false },
+        { "type": "object", "required": ["frequencyTargeted"], "properties": { "frequencyTargeted": { "type": "object", "required": ["roleIds", "target"], "properties": { "roleIds": { "type": "array", "minItems": 1, "maxItems": 366, "items": { "$ref": "#/$defs/identifier" } }, "target": { "$ref": "#/$defs/programFrequencyTarget" } }, "additionalProperties": false } }, "additionalProperties": false },
+        { "type": "object", "required": ["explicitDates"], "properties": { "explicitDates": { "type": "object", "required": ["entries"], "properties": { "entries": { "type": "array", "minItems": 1, "maxItems": 366, "items": { "$ref": "#/$defs/programDatedScheduleEntry" } } }, "additionalProperties": false } }, "additionalProperties": false },
+        { "type": "object", "required": ["hybrid"], "properties": { "hybrid": { "type": "object", "required": ["roleIds", "target"], "properties": { "roleIds": { "type": "array", "minItems": 1, "maxItems": 366, "items": { "$ref": "#/$defs/identifier" } }, "target": { "$ref": "#/$defs/programFrequencyTarget" }, "preferredWeekdays": { "type": "array", "maxItems": 7, "items": { "enum": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] }, "uniqueItems": true } }, "additionalProperties": false } }, "additionalProperties": false }
+      ]
+    },
+    "programItemOrdering": {
+      "type": "object",
+      "properties": {
+        "priorityTier": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "beforeItemIds": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+        "afterItemIds": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true }
+      },
+      "additionalProperties": false
+    },
+    "programSlotRequirements": {
+      "type": "object",
+      "properties": {
+        "targetMuscleIds": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+        "movementPatternIds": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+        "exerciseFamilyIds": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+        "requiredExerciseIds": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+        "excludedExerciseIds": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+        "requiredEquipmentIds": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+        "progressionRequirement": { "enum": ["externally_loadable_repetitions", "repetitions", "duration", "distance"] }
+      },
+      "additionalProperties": false
+    },
+    "programExercisePool": {
+      "type": "object",
+      "properties": {
+        "exerciseIds": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+        "exerciseFamilyIds": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true }
+      },
+      "additionalProperties": false
+    },
+    "programSessionItem": {
+      "oneOf": [
+        { "type": "object", "required": ["fixed"], "properties": { "fixed": { "type": "object", "required": ["id", "exerciseId"], "properties": { "id": { "$ref": "#/$defs/identifier" }, "exerciseId": { "$ref": "#/$defs/identifier" }, "anchor": { "enum": ["none", "preferred", "required", "block"] }, "progression": { "$ref": "#/$defs/progressionAssignment" }, "ordering": { "$ref": "#/$defs/programItemOrdering" } }, "additionalProperties": false } }, "additionalProperties": false },
+        { "type": "object", "required": ["dynamic"], "properties": { "dynamic": { "type": "object", "required": ["id"], "properties": { "id": { "$ref": "#/$defs/identifier" }, "requirements": { "$ref": "#/$defs/programSlotRequirements" }, "pool": { "$ref": "#/$defs/programExercisePool" }, "progression": { "$ref": "#/$defs/progressionAssignment" }, "ordering": { "$ref": "#/$defs/programItemOrdering" } }, "additionalProperties": false } }, "additionalProperties": false }
+      ]
+    },
+    "programSessionRoleDefinition": {
+      "type": "object",
+      "required": ["id", "items"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "items": { "type": "array", "minItems": 1, "maxItems": 128, "items": { "$ref": "#/$defs/programSessionItem" } },
+        "defaultProgression": { "$ref": "#/$defs/progressionAssignment" },
+        "musclePriorities": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/musclePriority" } },
+        "expectedDurationMinutes": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "trainingContext": { "$ref": "#/$defs/programTrainingContext" },
+        "configuration": true
+      },
+      "additionalProperties": false
+    },
+    "programBlockDefinition": {
+      "type": "object",
+      "required": ["id", "microcycleCount", "schedule", "sessionRoles"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "microcycleCount": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "phase": { "enum": ["base", "accumulation", "intensification", "realization", "deload", "custom"] },
+        "phaseSemantic": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "schedule": { "$ref": "#/$defs/programSchedule" },
+        "sessionRoles": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/programSessionRoleDefinition" } },
+        "musclePriorities": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/musclePriority" } },
+        "defaultProgression": { "$ref": "#/$defs/progressionAssignment" },
+        "nextBlockId": { "$ref": "#/$defs/identifier" },
+        "configuration": true
+      },
+      "additionalProperties": false
+    },
+    "programDefinitionReference": {
+      "type": "object",
+      "required": ["id", "version", "configurationFingerprint"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "version": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "configurationFingerprint": { "type": "string", "minLength": 1, "maxLength": 200 }
+      },
+      "additionalProperties": false
+    },
+    "programDefinitionDocument": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "version", "displayName", "strategy", "configurationFingerprint", "blocks"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/$defs/identifier" },
+        "version": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "strategy": { "$ref": "#/$defs/programStrategyRef" },
+        "configurationFingerprint": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "source": { "$ref": "#/$defs/programDefinitionSource" },
+        "blocks": { "type": "array", "minItems": 1, "maxItems": 128, "items": { "$ref": "#/$defs/programBlockDefinition" } }
+      },
+      "additionalProperties": false
+    },
+    "programInstanceDocument": {
+      "type": "object",
+      "required": ["schemaVersion", "id", "athleteId", "definition", "lifecycle", "configuration"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "id": { "$ref": "#/$defs/identifier" },
+        "athleteId": { "$ref": "#/$defs/identifier" },
+        "definition": { "$ref": "#/$defs/programDefinitionReference" },
+        "startedOn": { "type": "string", "format": "date" },
+        "lifecycle": { "enum": ["planned", "active", "paused", "completed", "abandoned"] },
+        "configuration": true
+      },
+      "additionalProperties": false
+    },
+    "programPlanningState": {
+      "type": "object",
+      "required": ["schemaVersion", "instanceId", "definition", "revision", "blockIndex", "microcycleIndex", "sessionCursor", "completedOccurrenceCount"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "instanceId": { "$ref": "#/$defs/identifier" },
+        "definition": { "$ref": "#/$defs/programDefinitionReference" },
+        "revision": { "type": "integer", "minimum": 0 },
+        "blockIndex": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "microcycleIndex": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "sessionCursor": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+        "completedOccurrenceCount": { "type": "integer", "minimum": 0 },
+        "completed": { "type": "boolean" },
+        "strategyState": { "$ref": "#/$defs/programState" }
+      },
+      "additionalProperties": false
+    },
+    "programOccurrenceRecord": {
+      "type": "object",
+      "required": ["schemaVersion", "instanceId", "definition", "blockId", "roleId", "occurrenceId", "status", "beforeRevision", "afterRevision"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "instanceId": { "$ref": "#/$defs/identifier" },
+        "definition": { "$ref": "#/$defs/programDefinitionReference" },
+        "blockId": { "$ref": "#/$defs/identifier" },
+        "roleId": { "$ref": "#/$defs/identifier" },
+        "occurrenceId": { "$ref": "#/$defs/identifier" },
+        "scheduledDate": { "type": "string", "format": "date" },
+        "scheduleStatus": { "enum": ["upcoming", "due", "overdue", "completed", "skipped", "partial", "abandoned"] },
+        "status": { "enum": ["upcoming", "due", "overdue", "completed", "skipped", "partial", "abandoned"] },
+        "beforeRevision": { "type": "integer", "minimum": 0 },
+        "afterRevision": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "plannedSessionIntentDocument": {
+      "type": "object",
+      "required": ["schemaVersion", "instanceId", "definition", "blockId", "roleId", "occurrenceId", "planningStateRevision", "program"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "instanceId": { "$ref": "#/$defs/identifier" },
+        "definition": { "$ref": "#/$defs/programDefinitionReference" },
+        "blockId": { "$ref": "#/$defs/identifier" },
+        "roleId": { "$ref": "#/$defs/identifier" },
+        "occurrenceId": { "$ref": "#/$defs/identifier" },
+        "planningStateRevision": { "type": "integer", "minimum": 0 },
+        "program": { "$ref": "#/$defs/programPlan" }
+      },
+      "additionalProperties": false
+    },
+    "programDefinitionValidationRequest": {
+      "type": "object",
+      "required": ["schemaVersion", "definition"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "definition": { "$ref": "#/$defs/programDefinitionDocument" }
+      },
+      "additionalProperties": false
+    },
+    "programDefinitionValidationResult": {
+      "type": "object",
+      "required": ["schemaVersion", "valid", "issues"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "valid": { "type": "boolean" },
+        "issues": { "type": "array", "items": { "$ref": "#/$defs/issue" } }
+      },
+      "additionalProperties": false
+    },
+    "programInstantiationRequest": {
+      "type": "object",
+      "required": ["schemaVersion", "definition", "instanceId", "athleteId", "configuration"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "definition": { "$ref": "#/$defs/programDefinitionDocument" },
+        "instanceId": { "$ref": "#/$defs/identifier" },
+        "athleteId": { "$ref": "#/$defs/identifier" },
+        "startedOn": { "type": "string", "format": "date" },
+        "lifecycle": { "enum": ["planned", "active", "paused", "completed", "abandoned"] },
+        "configuration": true,
+        "strategyState": { "$ref": "#/$defs/programState" }
+      },
+      "additionalProperties": false
+    },
+    "programInstantiationResult": {
+      "type": "object",
+      "required": ["schemaVersion", "instance", "state"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "instance": { "$ref": "#/$defs/programInstanceDocument" },
+        "state": { "$ref": "#/$defs/programPlanningState" }
+      },
+      "additionalProperties": false
+    },
+    "programResolutionRequest": {
+      "type": "object",
+      "required": ["schemaVersion", "definition", "instance", "state"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "definition": { "$ref": "#/$defs/programDefinitionDocument" },
+        "instance": { "$ref": "#/$defs/programInstanceDocument" },
+        "state": { "$ref": "#/$defs/programPlanningState" },
+        "localDate": {
+          "type": "object",
+          "required": ["isoDate", "weekday"],
+          "properties": {
+            "isoDate": { "type": "string", "format": "date" },
+            "weekday": { "enum": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] }
+          },
+          "additionalProperties": false
+        },
+        "catalog": { "type": "array", "items": { "$ref": "#/$defs/exercise" } }
+      },
+      "additionalProperties": false
+    },
+    "programAdvancementRequest": {
+      "type": "object",
+      "required": ["schemaVersion", "definition", "instance", "state", "intent", "status"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "definition": { "$ref": "#/$defs/programDefinitionDocument" },
+        "instance": { "$ref": "#/$defs/programInstanceDocument" },
+        "state": { "$ref": "#/$defs/programPlanningState" },
+        "intent": { "$ref": "#/$defs/plannedSessionIntentDocument" },
+        "status": { "enum": ["completed", "skipped"] },
+        "nextStrategyState": { "$ref": "#/$defs/programState" }
+      },
+      "additionalProperties": false
+    },
+    "programStateProposalDocument": {
+      "type": "object",
+      "required": ["schemaVersion", "instanceId", "definition", "expectedRevision", "nextState", "occurrence"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "instanceId": { "$ref": "#/$defs/identifier" },
+        "definition": { "$ref": "#/$defs/programDefinitionReference" },
+        "expectedRevision": { "type": "integer", "minimum": 0 },
+        "nextState": { "$ref": "#/$defs/programPlanningState" },
+        "occurrence": { "$ref": "#/$defs/programOccurrenceRecord" }
       },
       "additionalProperties": false
     },

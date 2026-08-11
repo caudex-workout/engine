@@ -1,9 +1,19 @@
-import { createCaudex, methodologies } from "@caudex-workout/engine";
+import {
+  acceptProgramAdvancement,
+  createCaudex,
+  instantiateProgram,
+  methodologies,
+  programs,
+  proposeProgramAdvancement,
+  resolveNextSession,
+} from "@caudex-workout/engine";
 
 const elements = Object.fromEntries([
   "request-editor", "methodology", "run-request", "copy-fixture",
   "download-fixture", "action-status", "result-status", "result-summary",
   "explanations", "explanation-count", "output",
+  "program-example", "program-start", "program-advance", "program-status",
+  "program-summary", "program-output",
 ].map((id) => [id, document.querySelector(`#${id}`)]));
 
 const methodologyReferences = {
@@ -90,8 +100,12 @@ const initialRequest = {
 
 elements["request-editor"].value = formatJson(initialRequest);
 let caudex;
+let planning;
 
 elements["run-request"].addEventListener("click", runRecommendation);
+elements["program-start"].addEventListener("click", startProgramDemo);
+elements["program-advance"].addEventListener("click", advanceProgramDemo);
+elements["program-example"].addEventListener("change", startProgramDemo);
 elements.methodology.addEventListener("change", () => {
   try {
     const request = JSON.parse(elements["request-editor"].value);
@@ -125,11 +139,91 @@ elements["download-fixture"].addEventListener("click", () => {
   setActionStatus(`Downloaded ${anchor.download}.`);
 });
 
+const planningStrategy = {
+  id: "caudex.fixed-session",
+  versionRequirement: "^0.1.0",
+  configVersion: 1,
+  config: {},
+};
+
+const programExamples = {
+  rotation: () => programs.presets.asynchronousUpperLower({
+    id: "browser:upper-lower",
+    version: "1",
+    strategy: planningStrategy,
+  }),
+  weekdays: () => programs.presets.fixedWeekdayUpperLower({
+    id: "browser:weekday-upper-lower",
+    version: "1",
+    strategy: planningStrategy,
+  }),
+  block: () => programs.presets.structuredHypertrophyBlock({
+    id: "browser:hypertrophy-block",
+    version: "1",
+    strategy: planningStrategy,
+  }),
+};
+
 try {
   caudex = await createCaudex();
   runRecommendation();
+  startProgramDemo();
 } catch (error) {
   renderFailure(error);
+}
+
+function startProgramDemo() {
+  const definition = programExamples[elements["program-example"].value]();
+  const instantiated = instantiateProgram(definition, {
+    instanceId: `browser:${elements["program-example"].value}:instance`,
+    athleteId: "athlete-1",
+    startedOn: "2026-08-10",
+    lifecycle: "active",
+  });
+  planning = { definition, ...instantiated };
+  renderProgramDemo("Program instance started. Previewing does not advance state.");
+}
+
+function advanceProgramDemo() {
+  if (!planning || planning.state.completed) return;
+  const intent = nextProgramIntent();
+  const proposal = proposeProgramAdvancement({
+    ...planning,
+    intent,
+    status: "completed",
+  });
+  planning.state = acceptProgramAdvancement(planning.state, proposal);
+  renderProgramDemo("Host explicitly accepted one completed occurrence.", proposal);
+}
+
+function nextProgramIntent() {
+  const block = planning.definition.blocks[planning.state.blockIndex];
+  const schedule = block.schedule;
+  const occurrence = { id: `browser:occurrence:${planning.state.revision + 1}` };
+  if (schedule.kind === "fixed_weekdays") {
+    occurrence.weekday = schedule.sessions[planning.state.sessionCursor].weekday;
+  }
+  return resolveNextSession({ ...planning, occurrence });
+}
+
+function renderProgramDemo(message, proposal) {
+  const intent = planning.state.completed ? null : nextProgramIntent();
+  const block = planning.definition.blocks[planning.state.blockIndex];
+  elements["program-status"].textContent = planning.state.completed ? "Completed" : "Active";
+  elements["program-status"].className = `result-status ${planning.state.completed ? "" : "success"}`;
+  elements["program-advance"].disabled = planning.state.completed;
+  elements["program-summary"].replaceChildren(
+    element("p", message),
+    element("div", intent ? displayName(intent.roleId) : "Program complete", "exercise-name"),
+    element("p", `Block: ${block.displayName ?? block.id} · Phase: ${intent?.phase ?? block.phase ?? "base"} · Accepted revision: ${planning.state.revision}`),
+  );
+  elements["program-output"].textContent = formatJson({
+    definition: planning.definition,
+    instance: planning.instance,
+    acceptedState: planning.state,
+    nextIntent: intent,
+    lastProposal: proposal,
+  });
 }
 
 function runRecommendation() {

@@ -28,6 +28,9 @@ h1 { margin: .5rem 0 1.5rem; font-size: clamp(3rem,7vw,7rem); font-weight: 580; 
 h1 em { color: var(--acid); font-family: Georgia, serif; font-weight: 400; }
 .lede { max-width: 690px; color: var(--muted); font-size: clamp(1rem,2vw,1.25rem); line-height: 1.65; }
 .workspace { display: grid; grid-template-columns: minmax(0,1.05fr) minmax(22rem,.95fr); border: 1px solid var(--line); border-radius: 1rem; overflow: hidden; background: var(--surface); box-shadow: 0 2rem 6rem rgba(0,0,0,.24); }
+.program-lab { margin-top: 1.5rem; padding: clamp(1.25rem,3vw,2rem); border: 1px solid var(--line); border-radius: 1rem; background: var(--surface); box-shadow: 0 2rem 6rem rgba(0,0,0,.18); }
+.program-intro { max-width: 60rem; color: var(--muted); line-height: 1.6; }
+.program-controls { display: flex; align-items: end; justify-content: space-between; gap: 1rem; margin: 1.5rem 0; }
 .panel { min-width: 0; padding: clamp(1.25rem,3vw,2rem); }
 .result-panel { border-left: 1px solid var(--line); background: var(--raised); }
 .panel-heading, .explanation-heading { display: flex; align-items: end; justify-content: space-between; gap: 1rem; margin-bottom: 1.25rem; }
@@ -41,6 +44,7 @@ textarea { width: 100%; min-height: 31rem; resize: vertical; padding: 1rem; font
 .editor-footer { margin-top: 1rem; color: var(--muted); font-size: .72rem; }
 button { border: 0; border-radius: .4rem; padding: .7rem .85rem; cursor: pointer; font-weight: 650; }
 button:hover { transform: translateY(-1px); }
+button:disabled { cursor: not-allowed; opacity: .45; transform: none; }
 .secondary { border: 1px solid var(--line); background: transparent; color: var(--ink); }
 .primary { background: var(--acid); color: #11130f; }
 .action-status { min-height: 1.2em; margin: .75rem 0 0; color: var(--muted); font-size: .75rem; }
@@ -66,6 +70,7 @@ footer { border-top: 1px solid var(--line); color: var(--muted); font-size: .72r
   .result-panel { border-top: 1px solid var(--line); border-left: 0; }
   .editor-footer { align-items: flex-start; flex-direction: column; }
   .actions { width: 100%; flex-wrap: wrap; }
+  .program-controls { align-items: stretch; flex-direction: column; }
   .primary { flex: 1; }
   .local-badge { display: none; }
 }

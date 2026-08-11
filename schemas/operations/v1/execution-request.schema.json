@@ -6,7 +6,7 @@
   "required": ["schemaVersion", "operation", "payload"],
   "properties": {
     "schemaVersion": { "const": 1 },
-    "operation": { "enum": ["recommend", "evaluate", "recommendProgram", "evaluateProgram", "applyTrackingCommand", "applyTrackingBatch", "instantiateRecommendation", "instantiateTemplate", "completeForEvaluation", "listMethodologies", "describeMethodology", "validateMethodologyConfig", "validateMethodologyState", "listCapabilities", "exportPortable", "validatePortableImport"] },
+    "operation": { "enum": ["recommend", "evaluate", "recommendProgram", "evaluateProgram", "validateProgramDefinition", "instantiateProgram", "resolvePlannedSession", "proposeProgramAdvancement", "applyTrackingCommand", "applyTrackingBatch", "instantiateRecommendation", "instantiateTemplate", "completeForEvaluation", "listMethodologies", "describeMethodology", "validateMethodologyConfig", "validateMethodologyState", "listCapabilities", "exportPortable", "validatePortableImport"] },
     "payload": { "type": "object" }
   },
   "additionalProperties": false

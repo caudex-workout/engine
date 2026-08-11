@@ -39,6 +39,91 @@ const athlete_profile_key: persistence.AthleteProfileKey = .{
 const athlete_profile: persistence.canonical.AthleteProfile = .{
     .id = "athlete-profile-1",
 };
+const program_reference: persistence.canonical.ProgramDefinitionReference = .{
+    .id = "host.upper-lower",
+    .version = "1",
+    .configurationFingerprint = "definition-fingerprint",
+};
+const program_definition_record: persistence.ProgramDefinitionRecord = .{
+    .key = .{
+        .host_scope_key = "scope-1",
+        .definition_id = program_reference.id,
+        .definition_version = program_reference.version,
+    },
+    .definition = .{
+        .id = program_reference.id,
+        .version = program_reference.version,
+        .displayName = "Upper/lower",
+        .strategy = .{ .id = "caudex.fixed-session", .configVersion = 1, .config = .null },
+        .configurationFingerprint = program_reference.configurationFingerprint,
+        .source = .{ .kind = .host_custom },
+        .blocks = &.{.{
+            .id = "block-1",
+            .microcycleCount = 4,
+            .schedule = .{ .rotation = .{ .roleIds = &.{"upper"} } },
+            .sessionRoles = &.{.{
+                .id = "upper",
+                .items = &.{.{ .fixed = .{
+                    .id = "bench",
+                    .exerciseId = "bench-press",
+                    .progression = .{
+                        .stateId = "bench-lane",
+                        .methodology = .{
+                            .id = "caudex.double-progression",
+                            .configVersion = 1,
+                            .config = .null,
+                        },
+                    },
+                } }},
+            }},
+        }},
+    },
+};
+const program_initial_instance: persistence.ProgramInstanceRecord = .{
+    .key = .{ .host_scope_key = "scope-1", .instance_id = "run-1" },
+    .instance = .{
+        .id = "run-1",
+        .athleteId = "athlete-1",
+        .definition = program_reference,
+        .lifecycle = .active,
+        .configuration = .null,
+    },
+    .planning_state = .{
+        .instanceId = "run-1",
+        .definition = program_reference,
+        .revision = 0,
+        .blockIndex = 0,
+        .microcycleIndex = 0,
+        .sessionCursor = 0,
+        .completedOccurrenceCount = 0,
+    },
+};
+const program_next_instance: persistence.ProgramInstanceRecord = .{
+    .key = program_initial_instance.key,
+    .instance = program_initial_instance.instance,
+    .planning_state = .{
+        .instanceId = "run-1",
+        .definition = program_reference,
+        .revision = 1,
+        .blockIndex = 0,
+        .microcycleIndex = 1,
+        .sessionCursor = 0,
+        .completedOccurrenceCount = 1,
+    },
+};
+const program_occurrence_record: persistence.ProgramOccurrenceRecord = .{
+    .key = .{ .host_scope_key = "scope-1", .instance_id = "run-1", .occurrence_id = "occurrence-1" },
+    .occurrence = .{
+        .instanceId = "run-1",
+        .definition = program_reference,
+        .blockId = "block-1",
+        .roleId = "upper",
+        .occurrenceId = "occurrence-1",
+        .status = .completed,
+        .beforeRevision = 0,
+        .afterRevision = 1,
+    },
+};
 
 test "athlete profiles compare-and-set independently from methodology state" {
     const adapter = try sqlite.openInMemory(.{});
@@ -262,6 +347,40 @@ test "templates and workflow recovery persist through public capabilities" {
     try std.testing.expectEqualStrings("completion-1", recovery.idempotency_key);
 }
 
+test "program definitions instances and occurrence history use public capabilities" {
+    const adapter = try sqlite.openInMemory(.{});
+    defer adapter.close();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    try std.testing.expect((try adapter.programDefinitionStore().load(allocator, program_definition_record.key)) == null);
+    _ = try adapter.programDefinitionStore().put(allocator, program_definition_record);
+    try std.testing.expectError(error.Conflict, adapter.programDefinitionStore().put(allocator, program_definition_record));
+    const definition = (try adapter.programDefinitionStore().load(allocator, program_definition_record.key)).?;
+    try std.testing.expectEqualStrings(program_reference.configurationFingerprint, definition.definition.configurationFingerprint);
+
+    _ = try adapter.programInstanceStore().compareAndSet(allocator, .{
+        .record = program_initial_instance,
+        .expected_revision = null,
+    });
+    _ = try adapter.programInstanceStore().compareAndSet(allocator, .{
+        .record = program_next_instance,
+        .expected_revision = 0,
+    });
+    try std.testing.expectError(error.Conflict, adapter.programInstanceStore().compareAndSet(allocator, .{
+        .record = program_next_instance,
+        .expected_revision = 0,
+    }));
+    const instance = (try adapter.programInstanceStore().load(allocator, program_initial_instance.key)).?;
+    try std.testing.expectEqual(@as(u64, 1), instance.planning_state.?.revision);
+
+    _ = try adapter.programOccurrenceStore().append(allocator, program_occurrence_record);
+    try std.testing.expectError(error.Conflict, adapter.programOccurrenceStore().append(allocator, program_occurrence_record));
+    const occurrence = (try adapter.programOccurrenceStore().load(allocator, program_occurrence_record.key)).?;
+    try std.testing.expectEqual(@as(u64, 1), occurrence.occurrence.afterRevision);
+}
+
 test "portable data dry-runs and round trips across independent SQLite databases" {
     const source = try sqlite.openInMemory(.{});
     defer source.close();
@@ -322,6 +441,12 @@ test "portable data dry-runs and round trips across independent SQLite databases
         .expected_revision = null,
         .next_profile = .{ .id = "profile-1" },
     });
+    _ = try source.programDefinitionStore().put(allocator, program_definition_record);
+    _ = try source.programInstanceStore().compareAndSet(allocator, .{
+        .record = program_next_instance,
+        .expected_revision = null,
+    });
+    _ = try source.programOccurrenceStore().append(allocator, program_occurrence_record);
     const empty_data = std.json.Value{ .object = try .init(allocator, &.{}, &.{}) };
     const programming_records: persistence.portable.Document = .{
         .schemaVersion = 1,
@@ -369,6 +494,9 @@ test "portable data dry-runs and round trips across independent SQLite databases
     try std.testing.expectEqualStrings("progression-revision-1", exported.progressionStates[0].revision);
     try std.testing.expectEqualStrings("program-revision-1", exported.programStates[0].revision);
     try std.testing.expectEqualStrings("profile-1", exported.athleteProfiles[0].profile.id);
+    try std.testing.expectEqualStrings("Upper/lower", exported.programDefinitions[0].definition.displayName);
+    try std.testing.expectEqual(@as(u64, 1), exported.programInstances[0].planningState.?.revision);
+    try std.testing.expectEqualStrings("occurrence-1", exported.programOccurrences[0].occurrence.occurrenceId);
     try std.testing.expectEqualStrings("185.00", exported.completedWorkouts[0].workout.exercises[0].sets[0].actualMetrics[0].value.amount);
     const dry_run = try destination.portableStore().importData(allocator, .{ .schemaVersion = 1, .mode = .merge, .conflictPolicy = .reject, .dryRun = true, .document = exported });
     try std.testing.expect(dry_run.valid);
@@ -384,6 +512,9 @@ test "portable data dry-runs and round trips across independent SQLite databases
     try std.testing.expectEqualStrings("block-1-accessory", reexported.progressionStates[0].stateId);
     try std.testing.expectEqualStrings("program-1", reexported.programStates[0].programId);
     try std.testing.expectEqualStrings("profile-1", reexported.athleteProfiles[0].profile.id);
+    try std.testing.expectEqualStrings("host.upper-lower", reexported.programDefinitions[0].definition.id);
+    try std.testing.expectEqualStrings("run-1", reexported.programInstances[0].instance.id);
+    try std.testing.expectEqual(@as(u64, 1), reexported.programOccurrences[0].occurrence.afterRevision);
     const conflict = try destination.portableStore().importData(allocator, .{ .schemaVersion = 1, .mode = .merge, .conflictPolicy = .reject, .dryRun = false, .document = exported });
     try std.testing.expect(!conflict.valid);
     try std.testing.expectEqualStrings("portable.conflict", conflict.issues[0].code);
@@ -416,6 +547,9 @@ test "portable data dry-runs and round trips across independent SQLite databases
     const replacement_export = try destination.portableStore().exportData(allocator, .{ .host_scope_key = "scope-1", .exported_at = "2026-08-04T13:00:00Z" });
     try std.testing.expectEqual(@as(usize, 0), replacement_export.acceptedProgramRecommendations.len);
     try std.testing.expectEqual(@as(usize, 0), replacement_export.progressionStates.len);
+    try std.testing.expectEqual(@as(usize, 0), replacement_export.programDefinitions.len);
+    try std.testing.expectEqual(@as(usize, 0), replacement_export.programInstances.len);
+    try std.testing.expectEqual(@as(usize, 0), replacement_export.programOccurrences.len);
     try std.testing.expectEqualStrings("program-revision-2", replacement_export.programStates[0].revision);
 }
 

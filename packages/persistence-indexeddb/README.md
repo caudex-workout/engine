@@ -4,7 +4,7 @@ Optional IndexedDB implementation of the Caudex persistence capabilities. It
 is packaged separately and is never imported or linked by
 `@caudex-workout/engine`.
 
-## Private schema v2
+## Private schema v6
 
 | Store | Compound key | Indexes |
 | --- | --- | --- |
@@ -16,8 +16,12 @@ is packaged separately and is never imported or linked by
 | `workout_templates` | `[hostScopeKey, template.id]` | none |
 | `workflow_recovery` | `[hostScopeKey, workflowId]` | none |
 | `portable_catalog_references` | `[hostScopeKey, exerciseId]` | none |
+| `athlete_profiles` | `[hostScopeKey, athleteProfileId]` | none |
+| `program_definitions` | `[key.hostScopeKey, key.definitionId, key.definitionVersion]` | none |
+| `program_instances` | `[key.hostScopeKey, key.instanceId]` | none |
+| `program_occurrences` | `[key.hostScopeKey, key.instanceId, key.occurrenceId]` | none |
 
-The database version is `4`. Version 2 added active tracking snapshots,
+The database version is `6`. Version 2 added active tracking snapshots,
 templates, and workflow recovery records without rewriting v1 stores. Version
 3 adds scoped portable catalog references. Future
 released schema changes must increment the
@@ -29,10 +33,17 @@ Version 4 adds a unique journal index so accepted-recommendation IDs are true
 idempotency keys. Reusing an ID with a different payload is rejected; an exact
 retry succeeds without another row.
 
+Version 5 adds scoped athlete profiles. Version 6 adds immutable program
+definition versions and occurrence entries, along with atomically persisted
+program instances and their accepted planning state.
+
 `compareAndSetState` reads the current record, validates the opaque revision,
 and writes the next revision in one IndexedDB readwrite transaction.
 `saveActiveWorkout` and `saveTemplate` likewise keep their read/compare/write
 sequence in one transaction and expose revision conflicts.
+`compareAndSetProgramInstance` keeps definition lookup, planning-revision
+comparison, and the instance/state write in one transaction. Definition and
+occurrence writes use insert-only semantics.
 
 ## Lifecycle and quota
 

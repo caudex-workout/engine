@@ -221,10 +221,78 @@ try {
     throw new Error("workflow recovery record did not round trip");
   }
 
+  const programDefinition = {
+    schemaVersion: 1 as const,
+    id: "linear-strength",
+    version: "1.0.0",
+    displayName: "Linear strength",
+    strategy: { id: "caudex.structural", versionRequirement: "^1", configVersion: 1, config: {} },
+    configurationFingerprint: "fnv1a64:definition",
+    blocks: [{ id: "block-1", microcycleCount: 1, schedule: { kind: "rolling" as const, roleIds: ["day-a"] }, sessionRoles: [{ id: "day-a", slots: [] }] }],
+  };
+  const definitionKey = { hostScopeKey: "athlete-1", definitionId: programDefinition.id, definitionVersion: programDefinition.version };
+  await adapter.putProgramDefinition({ key: definitionKey, definition: programDefinition });
+  if ((await adapter.loadProgramDefinition(definitionKey))?.definition.displayName !== "Linear strength") {
+    throw new Error("immutable program definition did not round trip");
+  }
+  let duplicateDefinition: unknown;
+  try { await adapter.putProgramDefinition({ key: definitionKey, definition: programDefinition }); } catch (error) { duplicateDefinition = error; }
+  if (!(duplicateDefinition instanceof Error) || !duplicateDefinition.message.includes("immutable")) {
+    throw new Error("duplicate program definition replaced immutable history");
+  }
+  const programInstance = {
+    schemaVersion: 1 as const,
+    id: "program-1",
+    athleteId: "athlete-1",
+    definition: { id: programDefinition.id, version: programDefinition.version, configurationFingerprint: programDefinition.configurationFingerprint },
+    lifecycle: "active" as const,
+    configuration: {},
+  };
+  const planningState = {
+    schemaVersion: 1 as const,
+    instanceId: programInstance.id,
+    definition: programInstance.definition,
+    revision: 1,
+    blockIndex: 0,
+    microcycleIndex: 0,
+    sessionCursor: 0,
+    completedOccurrenceCount: 0,
+    completed: false,
+  };
+  const programInstanceRecord = { key: { hostScopeKey: "athlete-1", instanceId: programInstance.id }, instance: programInstance, planningState };
+  await adapter.compareAndSetProgramInstance({ record: programInstanceRecord, expectedRevision: null });
+  let instanceConflict: unknown;
+  try { await adapter.compareAndSetProgramInstance({ record: programInstanceRecord, expectedRevision: null }); } catch (error) { instanceConflict = error; }
+  if (!(instanceConflict instanceof PersistenceRevisionConflictError)) {
+    throw new Error("program-instance CAS did not expose a stale create conflict");
+  }
+  const occurrence = {
+    schemaVersion: 1 as const,
+    instanceId: programInstance.id,
+    definition: programInstance.definition,
+    blockId: "block-1",
+    roleId: "day-a",
+    occurrenceId: "program-occurrence-1",
+    status: "completed" as const,
+    beforeRevision: 0,
+    afterRevision: 1,
+  };
+  const occurrenceRecord = { key: { hostScopeKey: "athlete-1", instanceId: programInstance.id, occurrenceId: occurrence.occurrenceId }, occurrence };
+  await adapter.appendProgramOccurrence(occurrenceRecord);
+  if ((await adapter.loadProgramOccurrence(occurrenceRecord.key))?.occurrence.afterRevision !== 1) {
+    throw new Error("program occurrence did not round trip");
+  }
+  let duplicateOccurrence: unknown;
+  try { await adapter.appendProgramOccurrence(occurrenceRecord); } catch (error) { duplicateOccurrence = error; }
+  if (!(duplicateOccurrence instanceof Error) || !duplicateOccurrence.message.includes("immutable")) {
+    throw new Error("duplicate program occurrence replaced immutable history");
+  }
+
   const exported = await adapter.exportPortable({ hostScopeKey: "athlete-1", exportedAt: "2026-08-04T12:00:00Z" });
   if (exported.schemaVersion !== 1 || exported.customExercises?.map((record) => record.exercise.id).join(",") !== "bench-press,squat" ||
       exported.activeWorkouts?.[0]?.snapshot.workouts?.[0]?.revision !== 2 ||
-      exported.activeWorkouts?.[0]?.snapshot.workouts?.[0]?.exercises?.[0]?.sets?.[0]?.targetMetrics?.[0]?.value.amount !== "185.00") {
+      exported.activeWorkouts?.[0]?.snapshot.workouts?.[0]?.exercises?.[0]?.sets?.[0]?.targetMetrics?.[0]?.value.amount !== "185.00" ||
+      exported.programOccurrences?.[0]?.occurrence.occurrenceId !== occurrence.occurrenceId) {
     throw new Error("portable export did not preserve deterministic scoped adapter data");
   }
   const importedAdapter = new IndexedDbPersistenceAdapter({ databaseName: `caudex-import-${crypto.randomUUID()}` });

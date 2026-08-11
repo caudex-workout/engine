@@ -139,6 +139,177 @@ test "portable athlete profiles are sorted, counted, and validated" {
     try std.testing.expect(hasIssue(plan.issues, "portable.profile_id_invalid"));
 }
 
+test "portable program records round-trip custom definitions and active planning state" {
+    const definitions = [_]portable.ProgramDefinitionRecord{.{
+        .hostScopeKey = "scope-1",
+        .definition = .{
+            .id = "host.custom.upper-lower",
+            .version = "7",
+            .displayName = "My upper/lower",
+            .strategy = .{ .id = "caudex.fixed-session", .configVersion = 1, .config = .null },
+            .configurationFingerprint = "definition-fingerprint",
+            .source = .{ .kind = .host_custom, .id = "host-program-7" },
+            .blocks = &.{.{
+                .id = "accumulation",
+                .microcycleCount = 4,
+                .phase = .accumulation,
+                .schedule = .{ .rotation = .{ .roleIds = &.{"upper-a"} } },
+                .sessionRoles = &.{.{
+                    .id = "upper-a",
+                    .items = &.{.{ .fixed = .{
+                        .id = "bench",
+                        .exerciseId = "bench-press",
+                        .progression = .{
+                            .stateId = "bench-lane",
+                            .methodology = .{ .id = "caudex.double-progression", .configVersion = 1, .config = .null },
+                        },
+                    } }},
+                }},
+            }},
+        },
+    }};
+    const instances = [_]portable.ProgramInstanceRecord{.{
+        .hostScopeKey = "scope-1",
+        .instance = .{
+            .id = "program-run-1",
+            .athleteId = "athlete-1",
+            .definition = .{ .id = "host.custom.upper-lower", .version = "7", .configurationFingerprint = "definition-fingerprint" },
+            .startedOn = "2026-08-10",
+            .lifecycle = .active,
+            .configuration = .null,
+        },
+        .planningState = .{
+            .instanceId = "program-run-1",
+            .definition = .{ .id = "host.custom.upper-lower", .version = "7", .configurationFingerprint = "definition-fingerprint" },
+            .revision = 9,
+            .blockIndex = 0,
+            .microcycleIndex = 1,
+            .sessionCursor = 0,
+            .completedOccurrenceCount = 8,
+        },
+    }};
+    const occurrences = [_]portable.ProgramOccurrenceRecord{.{
+        .hostScopeKey = "scope-1",
+        .occurrence = .{
+            .instanceId = "program-run-1",
+            .definition = .{ .id = "host.custom.upper-lower", .version = "7", .configurationFingerprint = "definition-fingerprint" },
+            .blockId = "accumulation",
+            .roleId = "upper-a",
+            .occurrenceId = "occurrence-9",
+            .status = .completed,
+            .beforeRevision = 8,
+            .afterRevision = 9,
+        },
+    }};
+    const document: portable.Document = .{
+        .schemaVersion = 1,
+        .exportedAt = "2026-08-10T14:00:00Z",
+        .programDefinitions = &definitions,
+        .programInstances = &instances,
+        .programOccurrences = &occurrences,
+    };
+    var issues: [16]portable.Issue = undefined;
+    const plan = try portable.planImport(.{ .schemaVersion = 1, .mode = .merge, .conflictPolicy = .reject, .document = document }, &issues);
+    try std.testing.expect(plan.valid);
+    try std.testing.expectEqual(@as(usize, 1), plan.counts.programDefinitions);
+    try std.testing.expectEqual(@as(usize, 1), plan.counts.programInstances);
+    try std.testing.expectEqual(@as(usize, 1), plan.counts.programOccurrences);
+
+    var output: [16 * 1024]u8 = undefined;
+    const encoded = try portable.encode(document, &output);
+    const parsed = try portable.decodeDocument(std.testing.allocator, encoded);
+    defer parsed.deinit();
+    try std.testing.expectEqual(.host_custom, parsed.value.programDefinitions[0].definition.source.?.kind);
+    try std.testing.expectEqual(@as(u64, 9), parsed.value.programInstances[0].planningState.?.revision);
+    try std.testing.expectEqualStrings("upper-a", parsed.value.programOccurrences[0].occurrence.roleId);
+}
+
+test "portable program validation covers ordering references revisions and nested bounds" {
+    const definitions = [_]portable.ProgramDefinitionRecord{
+        .{
+            .hostScopeKey = "scope-1",
+            .definition = .{
+                .id = "z-definition",
+                .version = "1",
+                .displayName = "Z",
+                .strategy = .{ .id = "caudex.fixed-session", .configVersion = 1, .config = .null },
+                .configurationFingerprint = "z-fingerprint",
+                .blocks = &.{.{ .id = "block", .microcycleCount = 1, .schedule = .{ .rotation = .{ .roleIds = &.{"role"} } }, .sessionRoles = &.{.{ .id = "role", .items = &.{.{ .fixed = .{
+                    .id = "slot",
+                    .exerciseId = "exercise",
+                    .progression = .{ .stateId = "state", .methodology = .{ .id = "method", .configVersion = 1, .config = .null } },
+                } }} }} }},
+            },
+        },
+        .{
+            .hostScopeKey = "scope-1",
+            .definition = .{
+                .id = "a-definition",
+                .version = "1",
+                .displayName = "A",
+                .strategy = .{ .id = "caudex.fixed-session", .configVersion = 1, .config = .null },
+                .configurationFingerprint = "a-fingerprint",
+                .blocks = &.{.{ .id = "block", .microcycleCount = 1, .schedule = .{ .rotation = .{ .roleIds = &.{"role"} } }, .sessionRoles = &.{.{ .id = "role", .items = &.{.{ .fixed = .{
+                    .id = "slot",
+                    .exerciseId = "exercise",
+                    .progression = .{ .stateId = "state", .methodology = .{ .id = "method", .configVersion = 1, .config = .null } },
+                } }} }} }},
+            },
+        },
+    };
+    const instances = [_]portable.ProgramInstanceRecord{.{
+        .hostScopeKey = "scope-1",
+        .instance = .{
+            .id = "instance-1",
+            .athleteId = "athlete-1",
+            .definition = .{ .id = "missing", .version = "1", .configurationFingerprint = "missing-fingerprint" },
+            .startedOn = "2026-02-30",
+            .lifecycle = .active,
+            .configuration = .null,
+        },
+    }};
+    const occurrences = [_]portable.ProgramOccurrenceRecord{.{
+        .hostScopeKey = "scope-1",
+        .occurrence = .{
+            .instanceId = "instance-1",
+            .definition = .{ .id = "missing", .version = "1", .configurationFingerprint = "missing-fingerprint" },
+            .blockId = "missing-block",
+            .roleId = "missing-role",
+            .occurrenceId = "occurrence-1",
+            .status = .upcoming,
+            .beforeRevision = 4,
+            .afterRevision = 9,
+        },
+    }};
+    const document: portable.Document = .{
+        .schemaVersion = 1,
+        .exportedAt = "2026-08-10T14:00:00Z",
+        .programDefinitions = &definitions,
+        .programInstances = &instances,
+        .programOccurrences = &occurrences,
+    };
+    var issues: [16]portable.Issue = undefined;
+    const plan = try portable.planImport(.{ .schemaVersion = 1, .mode = .merge, .conflictPolicy = .reject, .document = document }, &issues);
+    try std.testing.expect(!plan.valid);
+    try std.testing.expect(hasIssue(plan.issues, "portable.order_invalid"));
+    try std.testing.expect(hasIssue(plan.issues, "portable.program_started_on_invalid"));
+    try std.testing.expect(hasIssue(plan.issues, "portable.program_definition_missing"));
+    try std.testing.expect(hasIssue(plan.issues, "portable.program_active_state_missing"));
+    try std.testing.expect(hasIssue(plan.issues, "portable.program_occurrence_revision_invalid"));
+
+    const Block = @TypeOf(definitions[0].definition.blocks[0]);
+    const oversized_blocks = try std.testing.allocator.alloc(Block, portable.max_program_blocks + 1);
+    defer std.testing.allocator.free(oversized_blocks);
+    @memset(oversized_blocks, definitions[0].definition.blocks[0]);
+    var oversized_definition = definitions[0];
+    oversized_definition.definition.blocks = oversized_blocks;
+    try std.testing.expectError(error.RecordLimitExceeded, portable.validateDocumentBounds(.{
+        .schemaVersion = 1,
+        .exportedAt = "2026-08-10T14:00:00Z",
+        .programDefinitions = &.{oversized_definition},
+    }));
+}
+
 fn hasIssue(issues: []const portable.Issue, code: []const u8) bool {
     for (issues) |issue| if (std.mem.eql(u8, issue.code, code)) return true;
     return false;

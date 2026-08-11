@@ -139,5 +139,8 @@ test "optional write capabilities remain separate declarations" {
     try std.testing.expect(@hasDecl(persistence, "WorkoutTemplateStore"));
     try std.testing.expect(@hasDecl(persistence, "WorkflowRecoveryStore"));
     try std.testing.expect(@hasDecl(persistence, "PortableDataStore"));
-    try std.testing.expectEqual(@as(u32, 4), persistence.contract_version);
+    try std.testing.expect(@hasDecl(persistence, "ProgramDefinitionStore"));
+    try std.testing.expect(@hasDecl(persistence, "ProgramInstanceStore"));
+    try std.testing.expect(@hasDecl(persistence, "ProgramOccurrenceStore"));
+    try std.testing.expectEqual(@as(u32, 5), persistence.contract_version);
 }

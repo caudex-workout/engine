@@ -10,7 +10,7 @@ const caudex = @import("caudex");
 pub const portable = @import("caudex_portable");
 
 pub const canonical = caudex.canonical;
-pub const contract_version: u32 = 4;
+pub const contract_version: u32 = 5;
 
 pub const AdapterError = error{
     Unavailable,
@@ -87,6 +87,95 @@ pub const AthleteProfileStore = struct {
         change: CompareAndSetAthleteProfile,
     ) StateStoreError!AthleteProfileRecord {
         return self.compare_and_set_fn(self.context, allocator, change);
+    }
+};
+
+/// Immutable identity of one versioned, host-scoped program definition.
+pub const ProgramDefinitionKey = struct {
+    host_scope_key: []const u8,
+    definition_id: []const u8,
+    definition_version: []const u8,
+};
+
+pub const ProgramDefinitionRecord = struct {
+    key: ProgramDefinitionKey,
+    definition: canonical.ProgramDefinitionDocument,
+};
+
+pub const ProgramDefinitionStore = struct {
+    context: *anyopaque,
+    load_fn: *const fn (*anyopaque, std.mem.Allocator, ProgramDefinitionKey) CapabilityError!?ProgramDefinitionRecord,
+    put_fn: *const fn (*anyopaque, std.mem.Allocator, ProgramDefinitionRecord) StateStoreError!ProgramDefinitionRecord,
+
+    pub fn load(self: ProgramDefinitionStore, allocator: std.mem.Allocator, key: ProgramDefinitionKey) CapabilityError!?ProgramDefinitionRecord {
+        return self.load_fn(self.context, allocator, key);
+    }
+
+    /// Creates one immutable definition version. Reusing its scoped key is a
+    /// conflict even when the supplied payload is byte-identical.
+    pub fn put(self: ProgramDefinitionStore, allocator: std.mem.Allocator, record: ProgramDefinitionRecord) StateStoreError!ProgramDefinitionRecord {
+        return self.put_fn(self.context, allocator, record);
+    }
+};
+
+pub const ProgramInstanceKey = struct {
+    host_scope_key: []const u8,
+    instance_id: []const u8,
+};
+
+/// The instance and accepted planning state are persisted together so an
+/// active lifecycle cannot be observed with a torn or unrelated cursor.
+pub const ProgramInstanceRecord = struct {
+    key: ProgramInstanceKey,
+    instance: canonical.ProgramInstanceDocument,
+    planning_state: ?canonical.ProgramPlanningState = null,
+};
+
+pub const CompareAndSetProgramInstance = struct {
+    record: ProgramInstanceRecord,
+    /// Null creates only an absent instance. Otherwise this must equal the
+    /// currently persisted planning-state revision.
+    expected_revision: ?u64,
+};
+
+pub const ProgramInstanceStore = struct {
+    context: *anyopaque,
+    load_fn: *const fn (*anyopaque, std.mem.Allocator, ProgramInstanceKey) CapabilityError!?ProgramInstanceRecord,
+    compare_and_set_fn: *const fn (*anyopaque, std.mem.Allocator, CompareAndSetProgramInstance) StateStoreError!ProgramInstanceRecord,
+
+    pub fn load(self: ProgramInstanceStore, allocator: std.mem.Allocator, key: ProgramInstanceKey) CapabilityError!?ProgramInstanceRecord {
+        return self.load_fn(self.context, allocator, key);
+    }
+
+    pub fn compareAndSet(self: ProgramInstanceStore, allocator: std.mem.Allocator, change: CompareAndSetProgramInstance) StateStoreError!ProgramInstanceRecord {
+        return self.compare_and_set_fn(self.context, allocator, change);
+    }
+};
+
+pub const ProgramOccurrenceKey = struct {
+    host_scope_key: []const u8,
+    instance_id: []const u8,
+    occurrence_id: []const u8,
+};
+
+pub const ProgramOccurrenceRecord = struct {
+    key: ProgramOccurrenceKey,
+    occurrence: canonical.ProgramOccurrenceRecord,
+};
+
+pub const ProgramOccurrenceStore = struct {
+    context: *anyopaque,
+    load_fn: *const fn (*anyopaque, std.mem.Allocator, ProgramOccurrenceKey) CapabilityError!?ProgramOccurrenceRecord,
+    append_fn: *const fn (*anyopaque, std.mem.Allocator, ProgramOccurrenceRecord) StateStoreError!ProgramOccurrenceRecord,
+
+    pub fn load(self: ProgramOccurrenceStore, allocator: std.mem.Allocator, key: ProgramOccurrenceKey) CapabilityError!?ProgramOccurrenceRecord {
+        return self.load_fn(self.context, allocator, key);
+    }
+
+    /// Appends an immutable occurrence ledger entry. A duplicate scoped key
+    /// returns Conflict instead of replacing historical transition evidence.
+    pub fn append(self: ProgramOccurrenceStore, allocator: std.mem.Allocator, record: ProgramOccurrenceRecord) StateStoreError!ProgramOccurrenceRecord {
+        return self.append_fn(self.context, allocator, record);
     }
 };
 

@@ -48,6 +48,11 @@ registry rather than add methodology-specific C functions.
 `listMethodologies`, `describeMethodology`, `validateMethodologyConfig`,
 `validateMethodologyState`, and `listCapabilities` are now registry-backed
 discovery operations. Portable-data operations remain the next extension.
+`validateProgramDefinition`, `instantiateProgram`, `resolvePlannedSession`,
+and `proposeProgramAdvancement` expose deterministic program planning. The
+resolved intent contains the existing `ProgramPlan`, so it can be passed to
+`recommendProgram` without another planning-specific recommendation entry
+point.
 
 Call with null output and zero capacity. A valid request returns
 `CAUDEX_STATUS_INSUFFICIENT_OUTPUT` and the exact required byte count. Allocate

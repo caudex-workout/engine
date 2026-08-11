@@ -9,6 +9,10 @@ pub const schema_version: u32 = 1;
 pub const max_input_bytes: usize = 4 * 1024 * 1024;
 pub const max_records_per_kind: usize = 10_000;
 pub const max_issues: usize = 256;
+pub const max_program_blocks: usize = 128;
+pub const max_program_session_roles_per_block: usize = 64;
+pub const max_program_exercises_per_role: usize = 128;
+pub const max_program_schedule_entries_per_block: usize = 366;
 
 pub const CatalogReference = struct {
     hostScopeKey: []const u8,
@@ -32,6 +36,25 @@ pub const TemplateRecord = struct {
 pub const AthleteProfileRecord = struct {
     hostScopeKey: []const u8,
     profile: caudex.canonical.AthleteProfile,
+};
+
+/// A complete embedded definition, including host-custom definitions. A
+/// portable import never requires the originating preset builder to exist.
+pub const ProgramDefinitionRecord = struct {
+    hostScopeKey: []const u8,
+    definition: caudex.canonical.ProgramDefinitionDocument,
+};
+
+/// Athlete-specific program identity and its current explicit planning state.
+pub const ProgramInstanceRecord = struct {
+    hostScopeKey: []const u8,
+    instance: caudex.canonical.ProgramInstanceDocument,
+    planningState: ?caudex.canonical.ProgramPlanningState = null,
+};
+
+pub const ProgramOccurrenceRecord = struct {
+    hostScopeKey: []const u8,
+    occurrence: caudex.canonical.ProgramOccurrenceRecord,
 };
 
 pub const ActiveWorkoutRecord = struct {
@@ -106,6 +129,9 @@ pub const Document = struct {
     customExercises: []const CustomExerciseRecord = &.{},
     templates: []const TemplateRecord = &.{},
     athleteProfiles: []const AthleteProfileRecord = &.{},
+    programDefinitions: []const ProgramDefinitionRecord = &.{},
+    programInstances: []const ProgramInstanceRecord = &.{},
+    programOccurrences: []const ProgramOccurrenceRecord = &.{},
     activeWorkouts: []const ActiveWorkoutRecord = &.{},
     completedWorkouts: []const CompletedWorkoutRecord = &.{},
     acceptedRecommendations: []const AcceptedRecommendationRecord = &.{},
@@ -136,18 +162,21 @@ pub const Issue = struct {
 };
 
 pub const Counts = struct {
-    catalogReferences: usize,
-    customExercises: usize,
-    templates: usize,
-    athleteProfiles: usize,
-    activeWorkouts: usize,
-    completedWorkouts: usize,
-    acceptedRecommendations: usize,
-    acceptedProgramRecommendations: usize,
-    methodologyStates: usize,
-    progressionStates: usize,
-    programStates: usize,
-    workflowRecovery: usize,
+    catalogReferences: usize = 0,
+    customExercises: usize = 0,
+    templates: usize = 0,
+    athleteProfiles: usize = 0,
+    programDefinitions: usize = 0,
+    programInstances: usize = 0,
+    programOccurrences: usize = 0,
+    activeWorkouts: usize = 0,
+    completedWorkouts: usize = 0,
+    acceptedRecommendations: usize = 0,
+    acceptedProgramRecommendations: usize = 0,
+    methodologyStates: usize = 0,
+    progressionStates: usize = 0,
+    programStates: usize = 0,
+    workflowRecovery: usize = 0,
 };
 
 pub const ImportPlan = struct {
@@ -221,6 +250,9 @@ pub fn validateDocumentBounds(document: Document) error{RecordLimitExceeded}!voi
         document.customExercises.len,
         document.templates.len,
         document.athleteProfiles.len,
+        document.programDefinitions.len,
+        document.programInstances.len,
+        document.programOccurrences.len,
         document.activeWorkouts.len,
         document.completedWorkouts.len,
         document.acceptedRecommendations.len,
@@ -231,6 +263,14 @@ pub fn validateDocumentBounds(document: Document) error{RecordLimitExceeded}!voi
         document.workflowRecovery.len,
     }) |count| if (count > max_records_per_kind) return error.RecordLimitExceeded;
     for (document.activeWorkouts) |record| tracking_protocol.validateSnapshot(record.snapshot) catch return error.RecordLimitExceeded;
+    for (document.programDefinitions) |record| {
+        if (record.definition.blocks.len > max_program_blocks) return error.RecordLimitExceeded;
+        for (record.definition.blocks) |block| {
+            if (block.sessionRoles.len > max_program_session_roles_per_block) return error.RecordLimitExceeded;
+            if (programScheduleLength(block.schedule) > max_program_schedule_entries_per_block) return error.RecordLimitExceeded;
+            for (block.sessionRoles) |role| if (role.items.len > max_program_exercises_per_role) return error.RecordLimitExceeded;
+        }
+    }
 }
 
 fn validateDocument(document: Document, storage: []Issue, count: *usize) error{IssueBufferTooSmall}!void {
@@ -241,6 +281,9 @@ fn validateDocument(document: Document, storage: []Issue, count: *usize) error{I
     try validateUniqueAndSorted(CustomExerciseRecord, document.customExercises, storage, count, "/customExercises", exerciseOrder);
     try validateUniqueAndSorted(TemplateRecord, document.templates, storage, count, "/templates", templateOrder);
     try validateUniqueAndSorted(AthleteProfileRecord, document.athleteProfiles, storage, count, "/athleteProfiles", athleteProfileOrder);
+    try validateUniqueAndSorted(ProgramDefinitionRecord, document.programDefinitions, storage, count, "/programDefinitions", programDefinitionOrder);
+    try validateUniqueAndSorted(ProgramInstanceRecord, document.programInstances, storage, count, "/programInstances", programInstanceOrder);
+    try validateUniqueAndSorted(ProgramOccurrenceRecord, document.programOccurrences, storage, count, "/programOccurrences", programOccurrenceOrder);
     try validateUniqueAndSorted(ActiveWorkoutRecord, document.activeWorkouts, storage, count, "/activeWorkouts", activeOrder);
     try validateUniqueAndSorted(CompletedWorkoutRecord, document.completedWorkouts, storage, count, "/completedWorkouts", completedOrder);
     try validateUniqueAndSorted(AcceptedRecommendationRecord, document.acceptedRecommendations, storage, count, "/acceptedRecommendations", acceptedOrder);
@@ -313,6 +356,206 @@ fn validateDocument(document: Document, storage: []Issue, count: *usize) error{I
         if (record.profile.id.len == 0)
             try appendIssue(storage, count, "portable.profile_id_invalid", "/athleteProfiles", "An athlete profile must have a stable non-empty ID.");
     }
+    try validatePrograms(document, storage, count);
+}
+
+fn validatePrograms(document: Document, storage: []Issue, count: *usize) error{IssueBufferTooSmall}!void {
+    for (document.programDefinitions) |record| {
+        const definition = record.definition;
+        if (definition.schemaVersion != 1)
+            try appendIssue(storage, count, "portable.program_definition_version_unsupported", "/programDefinitions", "A program definition uses an unsupported schema version.");
+        if (record.hostScopeKey.len == 0 or definition.id.len == 0 or definition.version.len == 0 or definition.displayName.len == 0 or definition.configurationFingerprint.len == 0)
+            try appendIssue(storage, count, "portable.program_definition_identity_invalid", "/programDefinitions", "A program definition must have a scope, ID, version, display name, and configuration fingerprint.");
+        if (definition.blocks.len == 0)
+            try appendIssue(storage, count, "portable.program_definition_empty", "/programDefinitions", "A program definition must contain at least one block.");
+        if (definition.source) |source| switch (source.kind) {
+            .built_in_preset => if (source.id == null or source.id.?.len == 0 or source.version == null or source.version.?.len == 0)
+                try appendIssue(storage, count, "portable.program_definition_source_invalid", "/programDefinitions", "A built-in preset source must identify its preset and version."),
+            .host_custom, .imported => {},
+        };
+        for (definition.blocks, 0..) |block, block_index| {
+            if (block.id.len == 0 or block.microcycleCount == 0 or block.sessionRoles.len == 0)
+                try appendIssue(storage, count, "portable.program_block_invalid", "/programDefinitions", "Every program block needs an ID, at least one microcycle, and at least one session role.");
+            for (definition.blocks[0..block_index]) |previous| if (std.mem.eql(u8, previous.id, block.id))
+                try appendIssue(storage, count, "portable.program_block_duplicate", "/programDefinitions", "Program block IDs must be unique within a definition.");
+            try validateProgramSchedule(block, storage, count);
+            for (block.sessionRoles, 0..) |role, role_index| {
+                if (role.id.len == 0 or role.items.len == 0)
+                    try appendIssue(storage, count, "portable.program_role_invalid", "/programDefinitions", "Every program session role needs an ID and at least one session item.");
+                for (block.sessionRoles[0..role_index]) |previous| if (std.mem.eql(u8, previous.id, role.id))
+                    try appendIssue(storage, count, "portable.program_role_duplicate", "/programDefinitions", "Session-role IDs must be unique within a program block.");
+                for (role.items, 0..) |item, item_index| {
+                    const item_id = programItemId(item);
+                    if (item_id.len == 0)
+                        try appendIssue(storage, count, "portable.program_item_identity_invalid", "/programDefinitions", "Every program session item needs a stable item ID.");
+                    for (role.items[0..item_index]) |previous| if (std.mem.eql(u8, programItemId(previous), item_id))
+                        try appendIssue(storage, count, "portable.program_item_duplicate", "/programDefinitions", "Session item IDs must be unique within a session role.");
+                    const progression = programItemProgression(item) orelse role.defaultProgression orelse block.defaultProgression;
+                    if (progression == null or progression.?.stateId.len == 0)
+                        try appendIssue(storage, count, "portable.program_progression_assignment_missing", "/programDefinitions", "Every program session item must resolve a stable progression-state assignment.");
+                    switch (item) {
+                        .fixed => |fixed| if (fixed.exerciseId.len == 0)
+                            try appendIssue(storage, count, "portable.program_fixed_exercise_missing", "/programDefinitions", "A fixed program item must reference an exercise."),
+                        .dynamic => {},
+                    }
+                }
+            }
+        }
+    }
+
+    for (document.programInstances) |record| {
+        const instance = record.instance;
+        if (instance.schemaVersion != 1)
+            try appendIssue(storage, count, "portable.program_instance_version_unsupported", "/programInstances", "A program instance uses an unsupported schema version.");
+        if (record.hostScopeKey.len == 0 or instance.id.len == 0 or instance.athleteId.len == 0 or !validDefinitionReference(instance.definition))
+            try appendIssue(storage, count, "portable.program_instance_identity_invalid", "/programInstances", "A program instance must have a scope, instance ID, athlete ID, and complete definition reference.");
+        if (instance.startedOn) |started_on| if (!isValidDate(started_on))
+            try appendIssue(storage, count, "portable.program_started_on_invalid", "/programInstances", "A program start date must use a valid YYYY-MM-DD calendar date.");
+        const definition_record = findProgramDefinition(document, record.hostScopeKey, instance.definition);
+        if (definition_record == null)
+            try appendIssue(storage, count, "portable.program_definition_missing", "/programInstances", "A program instance must reference an embedded definition in the same scope.")
+        else if (!std.mem.eql(u8, definition_record.?.definition.configurationFingerprint, instance.definition.configurationFingerprint))
+            try appendIssue(storage, count, "portable.program_definition_fingerprint_mismatch", "/programInstances", "A program instance definition fingerprint does not match the embedded definition.");
+        if (instance.lifecycle == .active and record.planningState == null)
+            try appendIssue(storage, count, "portable.program_active_state_missing", "/programInstances", "An active program instance must carry its current planning state.");
+        if (record.planningState) |state| try validatePlanningState(record, state, definition_record, storage, count);
+    }
+
+    for (document.programOccurrences) |record| {
+        const occurrence = record.occurrence;
+        if (occurrence.schemaVersion != 1)
+            try appendIssue(storage, count, "portable.program_occurrence_version_unsupported", "/programOccurrences", "A program occurrence uses an unsupported schema version.");
+        if (record.hostScopeKey.len == 0 or occurrence.instanceId.len == 0 or occurrence.blockId.len == 0 or occurrence.roleId.len == 0 or occurrence.occurrenceId.len == 0 or !validDefinitionReference(occurrence.definition))
+            try appendIssue(storage, count, "portable.program_occurrence_identity_invalid", "/programOccurrences", "A program occurrence must carry complete scope, instance, definition, block, role, and occurrence identities.");
+        const expected_after = switch (occurrence.status) {
+            .completed, .skipped => std.math.add(u64, occurrence.beforeRevision, 1) catch null,
+            .upcoming, .due, .overdue, .partial, .abandoned => occurrence.beforeRevision,
+        };
+        if (expected_after == null or occurrence.afterRevision != expected_after.?)
+            try appendIssue(storage, count, "portable.program_occurrence_revision_invalid", "/programOccurrences", "A program occurrence revision must match its accepted status transition.");
+        const instance_record = findProgramInstance(document, record.hostScopeKey, occurrence.instanceId);
+        if (instance_record == null) {
+            try appendIssue(storage, count, "portable.program_instance_missing", "/programOccurrences", "A program occurrence must reference an embedded instance in the same scope.");
+            continue;
+        }
+        if (!definitionReferencesEqual(instance_record.?.instance.definition, occurrence.definition))
+            try appendIssue(storage, count, "portable.program_occurrence_definition_mismatch", "/programOccurrences", "A program occurrence must reference the same definition as its instance.");
+        if (instance_record.?.planningState) |state| if (occurrence.afterRevision > state.revision)
+            try appendIssue(storage, count, "portable.program_occurrence_revision_ahead", "/programOccurrences", "A program occurrence cannot be ahead of the persisted planning-state revision.");
+        const definition_record = findProgramDefinition(document, record.hostScopeKey, occurrence.definition);
+        if (definition_record) |definition| {
+            if (!definitionContainsRole(definition.definition, occurrence.blockId, occurrence.roleId))
+                try appendIssue(storage, count, "portable.program_occurrence_role_missing", "/programOccurrences", "A program occurrence block and role must exist in its embedded definition.");
+        }
+    }
+}
+
+fn validatePlanningState(
+    record: ProgramInstanceRecord,
+    state: caudex.canonical.ProgramPlanningState,
+    definition_record: ?ProgramDefinitionRecord,
+    storage: []Issue,
+    count: *usize,
+) error{IssueBufferTooSmall}!void {
+    if (state.schemaVersion != 1)
+        try appendIssue(storage, count, "portable.program_state_version_unsupported", "/programInstances", "A program planning state uses an unsupported schema version.");
+    if (!std.mem.eql(u8, state.instanceId, record.instance.id) or !definitionReferencesEqual(state.definition, record.instance.definition))
+        try appendIssue(storage, count, "portable.program_state_inconsistent", "/programInstances", "A planning state must reference its containing instance and exact definition.");
+    if (definition_record) |definition| {
+        if (state.completed) {
+            if (definition.definition.blocks.len == 0 or
+                state.blockIndex != definition.definition.blocks.len - 1 or
+                state.microcycleIndex != definition.definition.blocks[state.blockIndex].microcycleCount or
+                state.sessionCursor != 0)
+                try appendIssue(storage, count, "portable.program_state_cursor_invalid", "/programInstances", "A completed planning state must identify the exhausted final block with a reset session cursor.");
+            return;
+        }
+        if (state.blockIndex >= definition.definition.blocks.len) {
+            try appendIssue(storage, count, "portable.program_state_cursor_invalid", "/programInstances", "A planning-state block index is outside its definition.");
+            return;
+        }
+        const block = definition.definition.blocks[state.blockIndex];
+        if (state.microcycleIndex >= block.microcycleCount or state.sessionCursor >= block.sessionRoles.len)
+            try appendIssue(storage, count, "portable.program_state_cursor_invalid", "/programInstances", "A planning-state microcycle or session cursor is outside its current block.");
+    }
+}
+
+fn validateProgramSchedule(
+    block: caudex.canonical.ProgramBlockDefinition,
+    storage: []Issue,
+    count: *usize,
+) error{IssueBufferTooSmall}!void {
+    if (programScheduleLength(block.schedule) == 0) {
+        try appendIssue(storage, count, "portable.program_schedule_empty", "/programDefinitions", "Every program block needs a non-empty schedule.");
+        return;
+    }
+    switch (block.schedule) {
+        .rotation => |schedule| {
+            for (schedule.roleIds) |role_id| try validateScheduledRole(block, role_id, storage, count);
+            if (schedule.frequency) |frequency| try validateProgramFrequency(frequency, storage, count);
+        },
+        .fixedWeekdays => |schedule| for (schedule.entries, 0..) |entry, index| {
+            try validateScheduledRole(block, entry.roleId, storage, count);
+            for (schedule.entries[0..index]) |previous| if (previous.weekday == entry.weekday)
+                try appendIssue(storage, count, "portable.program_schedule_weekday_duplicate", "/programDefinitions", "A fixed-weekday schedule cannot assign one weekday more than once.");
+        },
+        .frequencyTargeted => |schedule| {
+            for (schedule.roleIds) |role_id| try validateScheduledRole(block, role_id, storage, count);
+            try validateProgramFrequency(schedule.target, storage, count);
+        },
+        .explicitDates => |schedule| for (schedule.entries, 0..) |entry, index| {
+            try validateScheduledRole(block, entry.roleId, storage, count);
+            if (!isValidDate(entry.localDate))
+                try appendIssue(storage, count, "portable.program_schedule_date_invalid", "/programDefinitions", "An explicit program schedule date must use a valid YYYY-MM-DD calendar date.");
+            for (schedule.entries[0..index]) |previous| if (std.mem.eql(u8, previous.localDate, entry.localDate))
+                try appendIssue(storage, count, "portable.program_schedule_date_duplicate", "/programDefinitions", "An explicit-date schedule cannot assign one date more than once.");
+        },
+        .hybrid => |schedule| {
+            for (schedule.roleIds) |role_id| try validateScheduledRole(block, role_id, storage, count);
+            try validateProgramFrequency(schedule.target, storage, count);
+        },
+    }
+}
+
+fn validateScheduledRole(
+    block: caudex.canonical.ProgramBlockDefinition,
+    role_id: []const u8,
+    storage: []Issue,
+    count: *usize,
+) error{IssueBufferTooSmall}!void {
+    for (block.sessionRoles) |role| if (std.mem.eql(u8, role.id, role_id)) return;
+    try appendIssue(storage, count, "portable.program_schedule_role_missing", "/programDefinitions", "A program schedule references a role outside its block.");
+}
+
+fn validateProgramFrequency(
+    frequency: caudex.canonical.ProgramFrequencyTarget,
+    storage: []Issue,
+    count: *usize,
+) error{IssueBufferTooSmall}!void {
+    if (frequency.sessions == 0 or frequency.days == 0)
+        try appendIssue(storage, count, "portable.program_schedule_frequency_invalid", "/programDefinitions", "Program frequency sessions and days must both be positive.");
+}
+
+fn programScheduleLength(schedule: caudex.canonical.ProgramSchedule) usize {
+    return switch (schedule) {
+        .rotation => |value| value.roleIds.len,
+        .fixedWeekdays => |value| value.entries.len,
+        .frequencyTargeted => |value| value.roleIds.len,
+        .explicitDates => |value| value.entries.len,
+        .hybrid => |value| value.roleIds.len,
+    };
+}
+
+fn programItemId(item: caudex.canonical.ProgramSessionItem) []const u8 {
+    return switch (item) {
+        inline else => |value| value.id,
+    };
+}
+
+fn programItemProgression(item: caudex.canonical.ProgramSessionItem) ?caudex.canonical.ProgressionAssignment {
+    return switch (item) {
+        inline else => |value| value.progression,
+    };
 }
 
 fn validateSessionMetrics(session: caudex.canonical.SessionRecommendation, storage: []Issue, count: *usize) error{IssueBufferTooSmall}!void {
@@ -351,6 +594,21 @@ fn templateOrder(left: TemplateRecord, right: TemplateRecord) std.math.Order {
 }
 fn athleteProfileOrder(left: AthleteProfileRecord, right: AthleteProfileRecord) std.math.Order {
     return scopedOrder(left.hostScopeKey, left.profile.id, right.hostScopeKey, right.profile.id);
+}
+fn programDefinitionOrder(left: ProgramDefinitionRecord, right: ProgramDefinitionRecord) std.math.Order {
+    const scope_order = std.mem.order(u8, left.hostScopeKey, right.hostScopeKey);
+    if (scope_order != .eq) return scope_order;
+    const id_order = std.mem.order(u8, left.definition.id, right.definition.id);
+    return if (id_order == .eq) std.mem.order(u8, left.definition.version, right.definition.version) else id_order;
+}
+fn programInstanceOrder(left: ProgramInstanceRecord, right: ProgramInstanceRecord) std.math.Order {
+    return scopedOrder(left.hostScopeKey, left.instance.id, right.hostScopeKey, right.instance.id);
+}
+fn programOccurrenceOrder(left: ProgramOccurrenceRecord, right: ProgramOccurrenceRecord) std.math.Order {
+    const scope_order = std.mem.order(u8, left.hostScopeKey, right.hostScopeKey);
+    if (scope_order != .eq) return scope_order;
+    const instance_order = std.mem.order(u8, left.occurrence.instanceId, right.occurrence.instanceId);
+    return if (instance_order == .eq) std.mem.order(u8, left.occurrence.occurrenceId, right.occurrence.occurrenceId) else instance_order;
 }
 fn activeOrder(left: ActiveWorkoutRecord, right: ActiveWorkoutRecord) std.math.Order {
     const scope_order = std.mem.order(u8, left.hostScopeKey, right.hostScopeKey);
@@ -391,6 +649,75 @@ fn hasExercise(document: Document, scope: []const u8, id: []const u8) bool {
     return false;
 }
 
+fn findProgramDefinition(document: Document, scope: []const u8, reference: caudex.canonical.ProgramDefinitionReference) ?ProgramDefinitionRecord {
+    var lower: usize = 0;
+    var upper = document.programDefinitions.len;
+    while (lower < upper) {
+        const middle = lower + (upper - lower) / 2;
+        const record = document.programDefinitions[middle];
+        const scope_order = std.mem.order(u8, record.hostScopeKey, scope);
+        const id_order = if (scope_order == .eq) std.mem.order(u8, record.definition.id, reference.id) else scope_order;
+        const order = if (id_order == .eq) std.mem.order(u8, record.definition.version, reference.version) else id_order;
+        switch (order) {
+            .lt => lower = middle + 1,
+            .gt => upper = middle,
+            .eq => return record,
+        }
+    }
+    return null;
+}
+
+fn findProgramInstance(document: Document, scope: []const u8, instance_id: []const u8) ?ProgramInstanceRecord {
+    var lower: usize = 0;
+    var upper = document.programInstances.len;
+    while (lower < upper) {
+        const middle = lower + (upper - lower) / 2;
+        const record = document.programInstances[middle];
+        const order = scopedOrder(record.hostScopeKey, record.instance.id, scope, instance_id);
+        switch (order) {
+            .lt => lower = middle + 1,
+            .gt => upper = middle,
+            .eq => return record,
+        }
+    }
+    return null;
+}
+
+fn validDefinitionReference(reference: caudex.canonical.ProgramDefinitionReference) bool {
+    return reference.id.len != 0 and reference.version.len != 0 and reference.configurationFingerprint.len != 0;
+}
+
+fn definitionReferencesEqual(left: caudex.canonical.ProgramDefinitionReference, right: caudex.canonical.ProgramDefinitionReference) bool {
+    return std.mem.eql(u8, left.id, right.id) and
+        std.mem.eql(u8, left.version, right.version) and
+        std.mem.eql(u8, left.configurationFingerprint, right.configurationFingerprint);
+}
+
+fn definitionContainsRole(definition: caudex.canonical.ProgramDefinitionDocument, block_id: []const u8, role_id: []const u8) bool {
+    for (definition.blocks) |block| {
+        if (!std.mem.eql(u8, block.id, block_id)) continue;
+        for (block.sessionRoles) |role| if (std.mem.eql(u8, role.id, role_id)) return true;
+        return false;
+    }
+    return false;
+}
+
+fn isValidDate(value: []const u8) bool {
+    if (value.len != 10 or value[4] != '-' or value[7] != '-') return false;
+    inline for (.{ 0, 1, 2, 3, 5, 6, 8, 9 }) |index| if (!std.ascii.isDigit(value[index])) return false;
+    const year = std.fmt.parseUnsigned(u16, value[0..4], 10) catch return false;
+    const month = std.fmt.parseUnsigned(u8, value[5..7], 10) catch return false;
+    const day = std.fmt.parseUnsigned(u8, value[8..10], 10) catch return false;
+    if (year == 0 or month == 0 or month > 12 or day == 0) return false;
+    const leap_year = (year % 4 == 0 and year % 100 != 0) or year % 400 == 0;
+    const maximum_day: u8 = switch (month) {
+        2 => if (leap_year) 29 else 28,
+        4, 6, 9, 11 => 30,
+        else => 31,
+    };
+    return day <= maximum_day;
+}
+
 fn appendIssue(storage: []Issue, count: *usize, code: []const u8, path: []const u8, message: []const u8) error{IssueBufferTooSmall}!void {
     if (count.* >= storage.len or count.* >= max_issues) return error.IssueBufferTooSmall;
     storage[count.*] = .{ .code = code, .path = path, .message = message, .severity = .@"error" };
@@ -403,6 +730,9 @@ fn counts(document: Document) Counts {
         .customExercises = document.customExercises.len,
         .templates = document.templates.len,
         .athleteProfiles = document.athleteProfiles.len,
+        .programDefinitions = document.programDefinitions.len,
+        .programInstances = document.programInstances.len,
+        .programOccurrences = document.programOccurrences.len,
         .activeWorkouts = document.activeWorkouts.len,
         .completedWorkouts = document.completedWorkouts.len,
         .acceptedRecommendations = document.acceptedRecommendations.len,

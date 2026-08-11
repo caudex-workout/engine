@@ -8,6 +8,7 @@ export interface Measurement {
 }
 export { CaudexMeasurementError, kg, lb, load, metrics, minutes, reps, rir, rpe, seconds, type DecimalInput, type MassMeasurement } from "./measurements.js";
 import type { DecimalInput, MassMeasurement } from "./measurements.js";
+import type { ProgramDefinition, ProgramInstance, ProgramOccurrenceRecord, ProgramState } from "./programs.js";
 
 export interface Metric {
   code: string;
@@ -88,13 +89,14 @@ export interface MethodologyState {
   schemaVersion: number;
   data: JsonValue;
 }
-export interface ProgramState { schemaVersion: number; data: JsonValue }
+/** Opaque state owned by the selected program-composition strategy. */
+export interface ProgramStrategyState { schemaVersion: number; data: JsonValue }
 export interface ProgramStrategyRef<TConfig = JsonValue> { id: string; versionRequirement?: string; configVersion: number; config: TConfig }
 export interface ProgressionAssignment<TConfig = JsonValue> { stateId: string; methodology: MethodologyRef<TConfig>; state?: MethodologyState }
 export interface ProgramExerciseSlot<TConfig = JsonValue> { slotId: string; exerciseId: string; progression: ProgressionAssignment<TConfig> }
 export interface ProgramRecommendationRequest {
   schemaVersion: 1; asOf: string;
-  program: { strategy: ProgramStrategyRef; state?: ProgramState; exercises: ProgramExerciseSlot[]; trainingContext?: ProgramTrainingContext };
+  program: { strategy: ProgramStrategyRef; state?: ProgramStrategyState; exercises: ProgramExerciseSlot[]; trainingContext?: ProgramTrainingContext };
   catalog: Exercise[]; athleteProfile?: AthleteProfile; history?: { workouts?: CompletedWorkout[]; summaries?: JsonValue }; trainingContext?: TrainingContext;
 }
 
@@ -190,7 +192,7 @@ export interface SessionRecommendation {
     explanationRefs?: string[];
     programming?: ExerciseProgrammingProvenance;
   }>;
-  programming?: { strategy: ResolvedComponent; config: JsonValue; inputState?: ProgramState; resolvedTrainingContext?: ResolvedTrainingContext };
+  programming?: { strategy: ResolvedComponent; config: JsonValue; inputState?: ProgramStrategyState; resolvedTrainingContext?: ResolvedTrainingContext };
   resolvedTrainingContext?: ResolvedTrainingContext;
 }
 export interface ResolvedComponent { id: string; version: string; configVersion: number }
@@ -236,7 +238,7 @@ export type ProgramRecommendationResult =
   | { ok: false; recommendation?: never; explanations?: Explanation[]; warnings?: ValidationIssue[]; issues: ValidationIssue[]; metadata: ProgramResultMetadata };
 export interface ProgressionStateProposal { stateId: string; progression: ResolvedComponent; state: MethodologyState }
 export type ProgramEvaluationResult =
-  | { ok: true; evaluation: PerformanceEvaluation; nextProgramState?: ProgramState; progressionStateProposals: ProgressionStateProposal[]; explanations?: Explanation[]; warnings?: ValidationIssue[]; metadata: ProgramResultMetadata; issues?: never }
+  | { ok: true; evaluation: PerformanceEvaluation; nextProgramState?: ProgramStrategyState; progressionStateProposals: ProgressionStateProposal[]; explanations?: Explanation[]; warnings?: ValidationIssue[]; metadata: ProgramResultMetadata; issues?: never }
   | { ok: false; evaluation?: never; nextProgramState?: never; progressionStateProposals?: never; explanations?: Explanation[]; warnings?: ValidationIssue[]; issues: ValidationIssue[]; metadata: ProgramResultMetadata };
 
 export type TrackingWorkoutStatus = "active" | "completed" | "cancelled";
@@ -393,12 +395,15 @@ export interface PortableCatalogReference { hostScopeKey: string; exerciseId: st
 export interface PortableCustomExerciseRecord { hostScopeKey: string; exercise: Exercise }
 export interface PortableTemplateRecord { hostScopeKey: string; template: WorkoutTemplateDocument }
 export interface PortableAthleteProfileRecord { hostScopeKey: string; profile: AthleteProfile }
+export interface PortableProgramDefinitionRecord { hostScopeKey: string; definition: ProgramDefinition }
+export interface PortableProgramInstanceRecord { hostScopeKey: string; instance: ProgramInstance; planningState?: ProgramState }
+export interface PortableProgramOccurrenceRecord { hostScopeKey: string; occurrence: ProgramOccurrenceRecord }
 export interface PortableCompletedWorkoutRecord { hostScopeKey: string; workout: CompletedWorkout }
 export interface PortableAcceptedRecommendationRecord { id: string; hostScopeKey: string; acceptedAt: string; result: RecommendationResult }
 export interface PortableMethodologyStateRecord { hostScopeKey: string; methodologyId: string; methodologyVersion: string; state: MethodologyState; revision: string; updatedAt: string }
 export interface PortableAcceptedProgramRecommendationRecord { id: string; hostScopeKey: string; acceptedAt: string; result: ProgramRecommendationResult }
 export interface PortableProgressionStateRecord { hostScopeKey: string; stateId: string; progressionId: string; progressionVersion: string; state: MethodologyState; revision: string; updatedAt: string }
-export interface PortableProgramStateRecord { hostScopeKey: string; programId: string; strategyId: string; strategyVersion: string; state: ProgramState; revision: string; updatedAt: string }
+export interface PortableProgramStateRecord { hostScopeKey: string; programId: string; strategyId: string; strategyVersion: string; state: ProgramStrategyState; revision: string; updatedAt: string }
 export interface PortableDocument {
   schemaVersion: 1;
   exportedAt: string;
@@ -406,6 +411,9 @@ export interface PortableDocument {
   customExercises?: PortableCustomExerciseRecord[];
   templates?: PortableTemplateRecord[];
   athleteProfiles?: PortableAthleteProfileRecord[];
+  programDefinitions?: PortableProgramDefinitionRecord[];
+  programInstances?: PortableProgramInstanceRecord[];
+  programOccurrences?: PortableProgramOccurrenceRecord[];
   activeWorkouts?: ActiveWorkoutRecord[];
   completedWorkouts?: PortableCompletedWorkoutRecord[];
   acceptedRecommendations?: PortableAcceptedRecommendationRecord[];
@@ -419,7 +427,7 @@ export type PortableImportMode = "merge" | "replace";
 export type PortableConflictPolicy = "reject" | "keepExisting" | "overwrite";
 export interface PortableImportRequest { schemaVersion: 1; mode: PortableImportMode; conflictPolicy: PortableConflictPolicy; dryRun?: boolean; document: PortableDocument }
 export interface PortableIssue { code: string; path: string; message: string; severity: "warning" | "error" }
-export interface PortableCounts { catalogReferences: number; customExercises: number; templates: number; athleteProfiles: number; activeWorkouts: number; completedWorkouts: number; acceptedRecommendations: number; acceptedProgramRecommendations: number; methodologyStates: number; progressionStates: number; programStates: number; workflowRecovery: number }
+export interface PortableCounts { catalogReferences: number; customExercises: number; templates: number; athleteProfiles: number; programDefinitions: number; programInstances: number; programOccurrences: number; activeWorkouts: number; completedWorkouts: number; acceptedRecommendations: number; acceptedProgramRecommendations: number; methodologyStates: number; progressionStates: number; programStates: number; workflowRecovery: number }
 export interface PortableImportPlan { schemaVersion: 1; valid: boolean; dryRun: boolean; mode: PortableImportMode; conflictPolicy: PortableConflictPolicy; counts: PortableCounts; issues: PortableIssue[] }
 export type PortableExportResult = { schemaVersion: 1; outcome: { accepted: PortableDocument } | { rejected: PortableIssue[] } };
 
@@ -515,3 +523,39 @@ export {
   type RpeTopSetBackoffMethodology,
   type RoundingMode,
 } from "./methodologies.js";
+
+export {
+  ProgramDefinitionError,
+  acceptProgramAdvancement,
+  defineProgram,
+  instantiateProgram,
+  programs,
+  proposeProgramAdvancement,
+  resolveNextSession,
+  validateProgram,
+  type DynamicProgramSlot,
+  type FixedProgramSlot,
+  type FixedWeekdayProgramSchedule,
+  type FrequencyTargetedProgramSchedule,
+  type ExplicitDatesProgramSchedule,
+  type HybridProgramSchedule,
+  type PlannedSessionIntent,
+  type ProgramBlock,
+  type ProgramDefinition,
+  type ProgramDefinitionInput,
+  type ProgramDefinitionReference,
+  type ProgramDefinitionSource,
+  type ProgramInstance,
+  type ProgramInstanceLifecycle,
+  type ProgramOccurrence,
+  type ProgramOccurrenceRecord,
+  type ProgramSchedule,
+  type ProgramSessionRole,
+  type ProgramSlot,
+  type ProgramState,
+  type ProgramStateProposal,
+  type ProgramValidationResult,
+  type ProgramWeekday,
+  type RollingProgramSchedule,
+  type StructuralPresetOptions,
+} from "./programs.js";

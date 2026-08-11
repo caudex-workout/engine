@@ -22,16 +22,16 @@ fn addBundledSqlite(b: *std.Build, module: *std.Build.Module) void {
 fn repositoryTestAssets(b: *std.Build) *std.Build.Module {
     const files = b.addWriteFiles();
     const paths = [_][]const u8{
-        "src/root.zig",                                                   "src/athlete_profile.zig",                                       "src/canonical.zig",                                              "src/canonical_json.zig",                                        "src/diagnostics.zig",
-        "src/discovery.zig",                                              "src/double_progression.zig",                                    "src/duration.zig",                                               "src/engine.zig",                                                "src/exercise_knowledge.zig",
-        "src/filtering.zig",                                              "src/history.zig",                                               "src/load_math.zig",                                              "src/methodology.zig",                                           "src/ordering.zig",
-        "src/primitives.zig",                                             "src/programming.zig",                                           "src/rpe_top_set_backoff.zig",                                    "src/training.zig",                                              "tracking/root.zig",
-        "workflows/root.zig",                                             "packages/npm/workout-engine/package.json",                      "adapters/sqlite/migrations/001_initial.sql",                     "fixtures/requests/recommendation.json",                         "fixtures/requests/evaluation.json",
-        "fixtures/results/diagnostics.json",                              "fixtures/results/recommendation-no-history.json",               "fixtures/methodologies/double-progression-config-v1.json",       "fixtures/methodologies/double-progression-state-v1.json",       "fixtures/methodologies/rpe-top-set-backoff-config-v1.json",
-        "fixtures/methodologies/rpe-top-set-backoff-state-v1.json",       "fixtures/methodologies/double-progression-conformance-v1.json", "fixtures/tracking/start-workout-v1.json",                        "fixtures/tracking/snapshot-v1.json",                            "fixtures/tracking/rejected-batch-v1.json",
-        "fixtures/templates/squat-day-v1.json",                           "fixtures/portable/export-v1.json",                              "schemas/v0/canonical.schema.json",                               "schemas/v0/recommendation-request.schema.json",                 "schemas/v0/evaluation-request.schema.json",
-        "schemas/v0/recommendation-result.schema.json",                   "schemas/v0/evaluation-result.schema.json",                      "schemas/methodologies/double-progression-config-v1.schema.json", "schemas/methodologies/double-progression-state-v1.schema.json", "schemas/methodologies/rpe-top-set-backoff-config-v1.schema.json",
-        "schemas/methodologies/rpe-top-set-backoff-state-v1.schema.json",
+        "src/root.zig",                                                    "src/athlete_profile.zig",                                        "src/canonical.zig",                                             "src/canonical_json.zig",                                         "src/diagnostics.zig",
+        "src/discovery.zig",                                               "src/double_progression.zig",                                     "src/duration.zig",                                              "src/engine.zig",                                                 "src/exercise_knowledge.zig",
+        "src/filtering.zig",                                               "src/history.zig",                                                "src/load_math.zig",                                             "src/methodology.zig",                                            "src/ordering.zig",
+        "src/primitives.zig",                                              "src/programming.zig",                                            "src/program_planning.zig",                                      "src/rpe_top_set_backoff.zig",                                    "src/training.zig",
+        "tracking/root.zig",                                               "workflows/root.zig",                                             "packages/npm/workout-engine/package.json",                      "adapters/sqlite/migrations/001_initial.sql",                     "fixtures/requests/recommendation.json",
+        "fixtures/requests/evaluation.json",                               "fixtures/results/diagnostics.json",                              "fixtures/results/recommendation-no-history.json",               "fixtures/methodologies/double-progression-config-v1.json",       "fixtures/methodologies/double-progression-state-v1.json",
+        "fixtures/methodologies/rpe-top-set-backoff-config-v1.json",       "fixtures/methodologies/rpe-top-set-backoff-state-v1.json",       "fixtures/methodologies/double-progression-conformance-v1.json", "fixtures/tracking/start-workout-v1.json",                        "fixtures/tracking/snapshot-v1.json",
+        "fixtures/tracking/rejected-batch-v1.json",                        "fixtures/templates/squat-day-v1.json",                           "fixtures/portable/export-v1.json",                              "schemas/v0/canonical.schema.json",                               "schemas/v0/recommendation-request.schema.json",
+        "schemas/v0/evaluation-request.schema.json",                       "schemas/v0/recommendation-result.schema.json",                   "schemas/v0/evaluation-result.schema.json",                      "schemas/methodologies/double-progression-config-v1.schema.json", "schemas/methodologies/double-progression-state-v1.schema.json",
+        "schemas/methodologies/rpe-top-set-backoff-config-v1.schema.json", "schemas/methodologies/rpe-top-set-backoff-state-v1.schema.json",
     };
     for (paths) |path| _ = files.addCopyFile(b.path(path), path);
     const source = files.add("root.zig",
@@ -52,6 +52,7 @@ fn repositoryTestAssets(b: *std.Build) *std.Build.Module {
         \\pub const src_ordering = @embedFile("src/ordering.zig");
         \\pub const src_primitives = @embedFile("src/primitives.zig");
         \\pub const src_programming = @embedFile("src/programming.zig");
+        \\pub const src_program_planning = @embedFile("src/program_planning.zig");
         \\pub const src_rpe_top_set_backoff = @embedFile("src/rpe_top_set_backoff.zig");
         \\pub const src_training = @embedFile("src/training.zig");
         \\pub const tracking_root = @embedFile("tracking/root.zig");
@@ -606,6 +607,20 @@ pub fn build(b: *std.Build) void {
     );
     typescript_step.dependOn(&typescript_loader_test.step);
 
+    const program_planning_test = namedSystemCommand(b, "npm program planning consumer", &.{
+        "node",
+        "--experimental-strip-types",
+        "--disable-warning=ExperimentalWarning",
+        "tests/program_planning_test.ts",
+    });
+    program_planning_test.step.dependOn(&npm_source_typecheck.step);
+    const program_planning_step = b.step(
+        "test-program-planning",
+        "Run the first-class TypeScript program planning tests",
+    );
+    program_planning_step.dependOn(&program_planning_test.step);
+    typescript_step.dependOn(&program_planning_test.step);
+
     const methodology_factory_test = namedSystemCommand(b, "npm methodology factory consumer", &.{
         "node",
         "--experimental-strip-types",
@@ -838,6 +853,11 @@ pub fn build(b: *std.Build) void {
     run_tui_dashboard_tests.setName("TUI dashboard behavior");
     const tui_dashboard_step = b.step("test-tui-dashboard", "Test safe current-workout dashboard states");
     tui_dashboard_step.dependOn(&run_tui_dashboard_tests.step);
+    const tui_program_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("apps/caudex-cli/src/tui/program_screen.zig"), .target = target, .optimize = optimize }) });
+    const run_tui_program_tests = b.addRunArtifact(tui_program_tests);
+    run_tui_program_tests.setName("TUI program lifecycle behavior");
+    const tui_program_step = b.step("test-tui-programs", "Test explicit program lifecycle TUI actions");
+    tui_program_step.dependOn(&run_tui_program_tests.step);
     const tui_workout_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("apps/caudex-cli/src/tui/workout_screen.zig"), .target = target, .optimize = optimize }) });
     const run_tui_workout_tests = b.addRunArtifact(tui_workout_tests);
     run_tui_workout_tests.setName("TUI workout behavior");
@@ -908,6 +928,7 @@ pub fn build(b: *std.Build) void {
         \\  caudex [global options] history exercise EXERCISE [--limit N]
         \\  caudex [global options] history last EXERCISE
         \\  caudex [global options] history correct-set --workout ID --exercise ID --set ID METRICS... [--yes]
+        \\  caudex [global options] program list|inspect|start|status|next|advance|pause|end [options]
         \\  caudex [global options] config path|show|set (color|table) VALUE
         \\  caudex batch FILE
         \\  caudex completion bash|zsh|fish
@@ -939,8 +960,8 @@ pub fn build(b: *std.Build) void {
     cli_version.setName("CLI version contract");
     cli_version.addArg("version");
     cli_version.expectStdOutEqual(
-        "caudex 0.1.0\nengine: 0.1.0 (schema 1)\npersistence contract: 4\n" ++
-            "tracking contract: 6\nsqlite adapter: 0.1.0 (schema 1-12)\n",
+        "caudex 0.1.0\nengine: 0.1.0 (schema 1)\npersistence contract: 5\n" ++
+            "tracking contract: 6\nsqlite adapter: 0.1.0 (schema 1-13)\n",
     );
 
     const cli_database_human = b.addRunArtifact(cli);
@@ -950,8 +971,8 @@ pub fn build(b: *std.Build) void {
         \\Database: :memory:
         \\Kind: memory
         \\Adapter version: 0.1.0
-        \\Schema version: 12
-        \\Supported schema: 1-12
+        \\Schema version: 13
+        \\Supported schema: 1-13
         \\Compatibility: current
         \\
     );
@@ -969,8 +990,8 @@ pub fn build(b: *std.Build) void {
     cli_database_json.expectStdOutEqual(
         "{\"schemaVersion\":1,\"kind\":\"caudex.database.info\",\"data\":{" ++
             "\"databasePath\":\":memory:\",\"databaseKind\":\"memory\"," ++
-            "\"adapterVersion\":\"0.1.0\",\"databaseSchemaVersion\":12," ++
-            "\"minimumSchemaVersion\":1,\"latestSchemaVersion\":12," ++
+            "\"adapterVersion\":\"0.1.0\",\"databaseSchemaVersion\":13," ++
+            "\"minimumSchemaVersion\":1,\"latestSchemaVersion\":13," ++
             "\"compatibility\":\"current\"}}\n",
     );
 
@@ -1018,8 +1039,8 @@ pub fn build(b: *std.Build) void {
         "{\"schemaVersion\":1,\"kind\":\"caudex.database.info\",\"data\":{" ++
             "\"databasePath\":\".zig-cache/cwe112-broken-pipe.sqlite\"," ++
             "\"databaseKind\":\"file\",\"adapterVersion\":\"0.1.0\"," ++
-            "\"databaseSchemaVersion\":12,\"minimumSchemaVersion\":1," ++
-            "\"latestSchemaVersion\":12,\"compatibility\":\"current\"}}\n",
+            "\"databaseSchemaVersion\":13,\"minimumSchemaVersion\":1," ++
+            "\"latestSchemaVersion\":13,\"compatibility\":\"current\"}}\n",
     );
 
     const cli_workout_start_test = namedSystemCommand(b, "CLI workout start", &.{
@@ -1088,6 +1109,12 @@ pub fn build(b: *std.Build) void {
     });
     cli_ergonomics_test.addArtifactArg(cli);
 
+    const cli_program_commands_test = namedSystemCommand(b, "CLI program planning", &.{
+        "bash",
+        "tests/cli_program_commands_test.sh",
+    });
+    cli_program_commands_test.addArtifactArg(cli);
+
     const cli_batch_test = namedSystemCommand(b, "CLI batch", &.{
         "bash",
         "tests/cli_batch_test.sh",
@@ -1149,9 +1176,16 @@ pub fn build(b: *std.Build) void {
     );
     cli_ergonomics_step.dependOn(&cli_ergonomics_test.step);
 
+    const cli_programs_step = b.step(
+        "test-cli-programs",
+        "Run the CLI deterministic program-planning contract",
+    );
+    cli_programs_step.dependOn(&cli_program_commands_test.step);
+
     const cli_test_step = b.step("test-caudex-cli", "Test the caudex reference client");
     cli_test_step.dependOn(&run_cli_tests.step);
     cli_test_step.dependOn(&run_tui_lifecycle_tests.step);
+    cli_test_step.dependOn(&run_tui_program_tests.step);
     cli_test_step.dependOn(&cli_help.step);
     cli_test_step.dependOn(&cli_version.step);
     cli_test_step.dependOn(&cli_database_human.step);
@@ -1167,6 +1201,7 @@ pub fn build(b: *std.Build) void {
     cli_test_step.dependOn(&cli_catalog_commands_test.step);
     cli_test_step.dependOn(&cli_history_commands_test.step);
     cli_test_step.dependOn(&cli_ergonomics_test.step);
+    cli_test_step.dependOn(&cli_program_commands_test.step);
     cli_test_step.dependOn(&cli_batch_test.step);
     cli_test_step.dependOn(&cli_completion_test.step);
     cli_test_step.dependOn(&cli_shell_smoke_test.step);
@@ -1362,6 +1397,7 @@ pub fn build(b: *std.Build) void {
     canonical_step.dependOn(&run_sqlite_adapter_tests.step);
     canonical_step.dependOn(&run_sqlite_tracking_tests.step);
     canonical_step.dependOn(&run_cli_tests.step);
+    canonical_step.dependOn(&run_tui_program_tests.step);
     canonical_step.dependOn(&run_tui_lifecycle_tests.step);
     canonical_step.dependOn(&run_tui_model_tests.step);
     canonical_step.dependOn(&run_tui_dashboard_tests.step);
@@ -1388,6 +1424,7 @@ pub fn build(b: *std.Build) void {
     canonical_step.dependOn(&cli_catalog_commands_test.step);
     canonical_step.dependOn(&cli_history_commands_test.step);
     canonical_step.dependOn(&cli_ergonomics_test.step);
+    canonical_step.dependOn(&cli_program_commands_test.step);
     canonical_step.dependOn(&cli_batch_test.step);
     canonical_step.dependOn(&cli_completion_test.step);
     canonical_step.dependOn(&cli_shell_smoke_test.step);

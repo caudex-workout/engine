@@ -15,7 +15,7 @@ const c = @cImport({
 });
 
 pub const adapter_version = "0.1.0";
-pub const schema_version: u32 = 12;
+pub const schema_version: u32 = 13;
 pub const minimum_schema_version: u32 = 1;
 
 pub const Options = struct {
@@ -159,6 +159,18 @@ pub const Adapter = opaque {
             .load_fn = loadAthleteProfileCallback,
             .compare_and_set_fn = compareAndSetAthleteProfileCallback,
         };
+    }
+
+    pub fn programDefinitionStore(self: *Adapter) persistence.ProgramDefinitionStore {
+        return .{ .context = self, .load_fn = loadProgramDefinitionCallback, .put_fn = putProgramDefinitionCallback };
+    }
+
+    pub fn programInstanceStore(self: *Adapter) persistence.ProgramInstanceStore {
+        return .{ .context = self, .load_fn = loadProgramInstanceCallback, .compare_and_set_fn = compareAndSetProgramInstanceCallback };
+    }
+
+    pub fn programOccurrenceStore(self: *Adapter) persistence.ProgramOccurrenceStore {
+        return .{ .context = self, .load_fn = loadProgramOccurrenceCallback, .append_fn = appendProgramOccurrenceCallback };
     }
 
     pub fn templateStore(self: *Adapter) persistence.WorkoutTemplateStore {
@@ -595,6 +607,10 @@ pub const Adapter = opaque {
         if (current < 12) try self.applyMigration(
             12,
             @embedFile("sqlite/migrations/012_athlete_profiles.sql"),
+        );
+        if (current < 13) try self.applyMigration(
+            13,
+            @embedFile("sqlite/migrations/013_program_planning.sql"),
         );
     }
 
@@ -1965,6 +1981,314 @@ const Statement = struct {
     }
 };
 
+fn loadProgramDefinitionCallback(context: *anyopaque, allocator: std.mem.Allocator, key: persistence.ProgramDefinitionKey) persistence.CapabilityError!?persistence.ProgramDefinitionRecord {
+    const self: *Adapter = @ptrCast(@alignCast(context));
+    var statement = try self.prepare(
+        \\SELECT configuration_fingerprint, definition_json
+        \\FROM program_definitions
+        \\WHERE host_scope_key = ?1 AND definition_id = ?2 AND definition_version = ?3
+    );
+    defer statement.finalize();
+    try statement.bindText(1, key.host_scope_key);
+    try statement.bindText(2, key.definition_id);
+    try statement.bindText(3, key.definition_version);
+    if (!try statement.row()) return null;
+    const fingerprint = column(statement.raw, 0) orelse return error.InvalidData;
+    const definition = try parseColumn(persistence.canonical.ProgramDefinitionDocument, allocator, statement.raw, 1);
+    if (!validProgramDefinitionKey(key, definition) or
+        !std.mem.eql(u8, fingerprint, definition.configurationFingerprint)) return error.InvalidData;
+    return .{
+        .key = .{
+            .host_scope_key = try allocator.dupe(u8, key.host_scope_key),
+            .definition_id = try allocator.dupe(u8, key.definition_id),
+            .definition_version = try allocator.dupe(u8, key.definition_version),
+        },
+        .definition = definition,
+    };
+}
+
+fn putProgramDefinitionCallback(context: *anyopaque, allocator: std.mem.Allocator, record: persistence.ProgramDefinitionRecord) persistence.StateStoreError!persistence.ProgramDefinitionRecord {
+    const self: *Adapter = @ptrCast(@alignCast(context));
+    if (!validProgramDefinitionKey(record.key, record.definition)) return error.InvalidData;
+    const payload = try encodeAlloc(allocator, record.definition);
+    defer allocator.free(payload);
+    try self.execute("BEGIN IMMEDIATE");
+    errdefer self.execute("ROLLBACK") catch {};
+    var existing = try self.prepare(
+        \\SELECT 1 FROM program_definitions
+        \\WHERE host_scope_key = ?1 AND definition_id = ?2 AND definition_version = ?3
+    );
+    defer existing.finalize();
+    try existing.bindText(1, record.key.host_scope_key);
+    try existing.bindText(2, record.key.definition_id);
+    try existing.bindText(3, record.key.definition_version);
+    if (try existing.row()) {
+        try self.execute("ROLLBACK");
+        return error.Conflict;
+    }
+    var statement = try self.prepare(
+        \\INSERT INTO program_definitions
+        \\ (host_scope_key, definition_id, definition_version, configuration_fingerprint, definition_json)
+        \\VALUES (?1, ?2, ?3, ?4, ?5)
+    );
+    defer statement.finalize();
+    try statement.bindText(1, record.key.host_scope_key);
+    try statement.bindText(2, record.key.definition_id);
+    try statement.bindText(3, record.key.definition_version);
+    try statement.bindText(4, record.definition.configurationFingerprint);
+    try statement.bindText(5, payload);
+    try statement.done();
+    try self.execute("COMMIT");
+    return (try loadProgramDefinitionCallback(context, allocator, record.key)) orelse error.InvalidData;
+}
+
+fn loadProgramInstanceCallback(context: *anyopaque, allocator: std.mem.Allocator, key: persistence.ProgramInstanceKey) persistence.CapabilityError!?persistence.ProgramInstanceRecord {
+    const self: *Adapter = @ptrCast(@alignCast(context));
+    var statement = try self.prepare(
+        \\SELECT definition_id, definition_version, configuration_fingerprint,
+        \\ planning_revision, instance_json, planning_state_json
+        \\FROM program_instances
+        \\WHERE host_scope_key = ?1 AND instance_id = ?2
+    );
+    defer statement.finalize();
+    try statement.bindText(1, key.host_scope_key);
+    try statement.bindText(2, key.instance_id);
+    if (!try statement.row()) return null;
+    const instance = try parseColumn(persistence.canonical.ProgramInstanceDocument, allocator, statement.raw, 4);
+    const state: ?persistence.canonical.ProgramPlanningState = if (c.sqlite3_column_type(statement.raw, 5) == c.SQLITE_NULL)
+        null
+    else
+        try parseColumn(persistence.canonical.ProgramPlanningState, allocator, statement.raw, 5);
+    const persisted_reference: persistence.canonical.ProgramDefinitionReference = .{
+        .id = column(statement.raw, 0) orelse return error.InvalidData,
+        .version = column(statement.raw, 1) orelse return error.InvalidData,
+        .configurationFingerprint = column(statement.raw, 2) orelse return error.InvalidData,
+    };
+    if (!validProgramInstanceRecord(.{ .key = key, .instance = instance, .planning_state = state }) or
+        !programDefinitionReferencesEqual(persisted_reference, instance.definition)) return error.InvalidData;
+    if (state) |planning_state| {
+        if (c.sqlite3_column_type(statement.raw, 3) == c.SQLITE_NULL or
+            c.sqlite3_column_int64(statement.raw, 3) < 0 or
+            planning_state.revision != @as(u64, @intCast(c.sqlite3_column_int64(statement.raw, 3)))) return error.InvalidData;
+    } else if (c.sqlite3_column_type(statement.raw, 3) != c.SQLITE_NULL) return error.InvalidData;
+    return .{
+        .key = .{
+            .host_scope_key = try allocator.dupe(u8, key.host_scope_key),
+            .instance_id = try allocator.dupe(u8, key.instance_id),
+        },
+        .instance = instance,
+        .planning_state = state,
+    };
+}
+
+fn compareAndSetProgramInstanceCallback(context: *anyopaque, allocator: std.mem.Allocator, change: persistence.CompareAndSetProgramInstance) persistence.StateStoreError!persistence.ProgramInstanceRecord {
+    const self: *Adapter = @ptrCast(@alignCast(context));
+    if (!validProgramInstanceRecord(change.record)) return error.InvalidData;
+    if (change.record.planning_state) |state| if (state.revision > std.math.maxInt(i64)) return error.InvalidData;
+    if (change.expected_revision) |revision| if (revision > std.math.maxInt(i64)) return error.InvalidData;
+
+    try self.execute("BEGIN IMMEDIATE");
+    errdefer self.execute("ROLLBACK") catch {};
+
+    var definition_query = try self.prepare(
+        \\SELECT configuration_fingerprint FROM program_definitions
+        \\WHERE host_scope_key = ?1 AND definition_id = ?2 AND definition_version = ?3
+    );
+    defer definition_query.finalize();
+    try definition_query.bindText(1, change.record.key.host_scope_key);
+    try definition_query.bindText(2, change.record.instance.definition.id);
+    try definition_query.bindText(3, change.record.instance.definition.version);
+    if (!try definition_query.row() or
+        !std.mem.eql(u8, column(definition_query.raw, 0) orelse return error.InvalidData, change.record.instance.definition.configurationFingerprint)) return error.InvalidData;
+
+    var current_query = try self.prepare(
+        \\SELECT planning_revision, definition_id, definition_version, configuration_fingerprint FROM program_instances
+        \\WHERE host_scope_key = ?1 AND instance_id = ?2
+    );
+    defer current_query.finalize();
+    try current_query.bindText(1, change.record.key.host_scope_key);
+    try current_query.bindText(2, change.record.key.instance_id);
+    const exists = try current_query.row();
+    if (!exists) {
+        if (change.expected_revision != null) {
+            try self.execute("ROLLBACK");
+            return error.Conflict;
+        }
+    } else {
+        if (!std.mem.eql(u8, column(current_query.raw, 1) orelse return error.InvalidData, change.record.instance.definition.id) or
+            !std.mem.eql(u8, column(current_query.raw, 2) orelse return error.InvalidData, change.record.instance.definition.version) or
+            !std.mem.eql(u8, column(current_query.raw, 3) orelse return error.InvalidData, change.record.instance.definition.configurationFingerprint))
+            return error.Conflict;
+        const actual: u64 = if (c.sqlite3_column_type(current_query.raw, 0) == c.SQLITE_NULL)
+            0
+        else if (c.sqlite3_column_int64(current_query.raw, 0) < 0)
+            return error.InvalidData
+        else
+            @intCast(c.sqlite3_column_int64(current_query.raw, 0));
+        if (change.expected_revision == null or change.expected_revision.? != actual) {
+            try self.execute("ROLLBACK");
+            return error.Conflict;
+        }
+    }
+
+    const instance_json = try encodeAlloc(allocator, change.record.instance);
+    defer allocator.free(instance_json);
+    const state_json: ?[]u8 = if (change.record.planning_state) |state| try encodeAlloc(allocator, state) else null;
+    defer if (state_json) |payload| allocator.free(payload);
+    var statement = try self.prepare(
+        \\INSERT INTO program_instances
+        \\ (host_scope_key, instance_id, definition_id, definition_version, configuration_fingerprint,
+        \\  planning_revision, instance_json, planning_state_json)
+        \\VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        \\ON CONFLICT (host_scope_key, instance_id) DO UPDATE SET
+        \\ definition_id=excluded.definition_id, definition_version=excluded.definition_version,
+        \\ configuration_fingerprint=excluded.configuration_fingerprint,
+        \\ planning_revision=excluded.planning_revision, instance_json=excluded.instance_json,
+        \\ planning_state_json=excluded.planning_state_json
+    );
+    defer statement.finalize();
+    try statement.bindText(1, change.record.key.host_scope_key);
+    try statement.bindText(2, change.record.key.instance_id);
+    try statement.bindText(3, change.record.instance.definition.id);
+    try statement.bindText(4, change.record.instance.definition.version);
+    try statement.bindText(5, change.record.instance.definition.configurationFingerprint);
+    if (change.record.planning_state) |state| try statement.bindInt(6, state.revision) else try statement.bindNull(6);
+    try statement.bindText(7, instance_json);
+    if (state_json) |payload| try statement.bindText(8, payload) else try statement.bindNull(8);
+    try statement.done();
+    try self.execute("COMMIT");
+    return (try loadProgramInstanceCallback(context, allocator, change.record.key)) orelse error.InvalidData;
+}
+
+fn loadProgramOccurrenceCallback(context: *anyopaque, allocator: std.mem.Allocator, key: persistence.ProgramOccurrenceKey) persistence.CapabilityError!?persistence.ProgramOccurrenceRecord {
+    const self: *Adapter = @ptrCast(@alignCast(context));
+    var statement = try self.prepare(
+        \\SELECT before_revision, after_revision, occurrence_json
+        \\FROM program_occurrences
+        \\WHERE host_scope_key = ?1 AND instance_id = ?2 AND occurrence_id = ?3
+    );
+    defer statement.finalize();
+    try statement.bindText(1, key.host_scope_key);
+    try statement.bindText(2, key.instance_id);
+    try statement.bindText(3, key.occurrence_id);
+    if (!try statement.row()) return null;
+    const before = c.sqlite3_column_int64(statement.raw, 0);
+    const after = c.sqlite3_column_int64(statement.raw, 1);
+    if (before < 0 or after < 0) return error.InvalidData;
+    const occurrence = try parseColumn(persistence.canonical.ProgramOccurrenceRecord, allocator, statement.raw, 2);
+    if (!validProgramOccurrenceRecord(.{ .key = key, .occurrence = occurrence }) or
+        occurrence.beforeRevision != @as(u64, @intCast(before)) or
+        occurrence.afterRevision != @as(u64, @intCast(after))) return error.InvalidData;
+    return .{
+        .key = .{
+            .host_scope_key = try allocator.dupe(u8, key.host_scope_key),
+            .instance_id = try allocator.dupe(u8, key.instance_id),
+            .occurrence_id = try allocator.dupe(u8, key.occurrence_id),
+        },
+        .occurrence = occurrence,
+    };
+}
+
+fn appendProgramOccurrenceCallback(context: *anyopaque, allocator: std.mem.Allocator, record: persistence.ProgramOccurrenceRecord) persistence.StateStoreError!persistence.ProgramOccurrenceRecord {
+    const self: *Adapter = @ptrCast(@alignCast(context));
+    if (!validProgramOccurrenceRecord(record) or
+        record.occurrence.beforeRevision > std.math.maxInt(i64) or
+        record.occurrence.afterRevision > std.math.maxInt(i64)) return error.InvalidData;
+    const payload = try encodeAlloc(allocator, record.occurrence);
+    defer allocator.free(payload);
+    try self.execute("BEGIN IMMEDIATE");
+    errdefer self.execute("ROLLBACK") catch {};
+
+    var instance_query = try self.prepare(
+        \\SELECT definition_id, definition_version, configuration_fingerprint
+        \\FROM program_instances WHERE host_scope_key = ?1 AND instance_id = ?2
+    );
+    defer instance_query.finalize();
+    try instance_query.bindText(1, record.key.host_scope_key);
+    try instance_query.bindText(2, record.key.instance_id);
+    if (!try instance_query.row()) return error.InvalidData;
+    const instance_reference: persistence.canonical.ProgramDefinitionReference = .{
+        .id = column(instance_query.raw, 0) orelse return error.InvalidData,
+        .version = column(instance_query.raw, 1) orelse return error.InvalidData,
+        .configurationFingerprint = column(instance_query.raw, 2) orelse return error.InvalidData,
+    };
+    if (!programDefinitionReferencesEqual(instance_reference, record.occurrence.definition)) return error.InvalidData;
+
+    var existing = try self.prepare(
+        \\SELECT 1 FROM program_occurrences
+        \\WHERE host_scope_key = ?1 AND instance_id = ?2 AND occurrence_id = ?3
+    );
+    defer existing.finalize();
+    try existing.bindText(1, record.key.host_scope_key);
+    try existing.bindText(2, record.key.instance_id);
+    try existing.bindText(3, record.key.occurrence_id);
+    if (try existing.row()) {
+        try self.execute("ROLLBACK");
+        return error.Conflict;
+    }
+
+    var statement = try self.prepare(
+        \\INSERT INTO program_occurrences
+        \\ (host_scope_key, instance_id, occurrence_id, before_revision, after_revision, occurrence_json)
+        \\VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+    );
+    defer statement.finalize();
+    try statement.bindText(1, record.key.host_scope_key);
+    try statement.bindText(2, record.key.instance_id);
+    try statement.bindText(3, record.key.occurrence_id);
+    try statement.bindInt(4, record.occurrence.beforeRevision);
+    try statement.bindInt(5, record.occurrence.afterRevision);
+    try statement.bindText(6, payload);
+    try statement.done();
+    try self.execute("COMMIT");
+    return (try loadProgramOccurrenceCallback(context, allocator, record.key)) orelse error.InvalidData;
+}
+
+fn validProgramDefinitionKey(key: persistence.ProgramDefinitionKey, definition: persistence.canonical.ProgramDefinitionDocument) bool {
+    return key.host_scope_key.len != 0 and definition.schemaVersion == 1 and
+        definition.id.len != 0 and definition.version.len != 0 and
+        definition.configurationFingerprint.len != 0 and
+        std.mem.eql(u8, key.definition_id, definition.id) and
+        std.mem.eql(u8, key.definition_version, definition.version);
+}
+
+fn validProgramInstanceRecord(record: persistence.ProgramInstanceRecord) bool {
+    if (record.key.host_scope_key.len == 0 or record.instance.schemaVersion != 1 or
+        record.instance.id.len == 0 or record.instance.athleteId.len == 0 or
+        !std.mem.eql(u8, record.key.instance_id, record.instance.id) or
+        !validProgramDefinitionReference(record.instance.definition)) return false;
+    if (record.instance.lifecycle == .active and record.planning_state == null) return false;
+    if (record.planning_state) |state| return state.schemaVersion == 1 and
+        std.mem.eql(u8, state.instanceId, record.instance.id) and
+        programDefinitionReferencesEqual(state.definition, record.instance.definition);
+    return true;
+}
+
+fn validProgramOccurrenceRecord(record: persistence.ProgramOccurrenceRecord) bool {
+    const occurrence = record.occurrence;
+    if (record.key.host_scope_key.len == 0 or occurrence.schemaVersion != 1 or
+        occurrence.instanceId.len == 0 or occurrence.occurrenceId.len == 0 or
+        occurrence.blockId.len == 0 or occurrence.roleId.len == 0 or
+        !std.mem.eql(u8, record.key.instance_id, occurrence.instanceId) or
+        !std.mem.eql(u8, record.key.occurrence_id, occurrence.occurrenceId) or
+        !validProgramDefinitionReference(occurrence.definition)) return false;
+    const expected_after = switch (occurrence.status) {
+        .completed, .skipped => std.math.add(u64, occurrence.beforeRevision, 1) catch return false,
+        .upcoming, .due, .overdue, .partial, .abandoned => occurrence.beforeRevision,
+    };
+    return occurrence.afterRevision == expected_after;
+}
+
+fn validProgramDefinitionReference(reference: persistence.canonical.ProgramDefinitionReference) bool {
+    return reference.id.len != 0 and reference.version.len != 0 and reference.configurationFingerprint.len != 0;
+}
+
+fn programDefinitionReferencesEqual(left: persistence.canonical.ProgramDefinitionReference, right: persistence.canonical.ProgramDefinitionReference) bool {
+    return std.mem.eql(u8, left.id, right.id) and
+        std.mem.eql(u8, left.version, right.version) and
+        std.mem.eql(u8, left.configurationFingerprint, right.configurationFingerprint);
+}
+
 fn loadTemplateCallback(context: *anyopaque, allocator: std.mem.Allocator, key: persistence.TemplateKey) persistence.CapabilityError!?persistence.TemplateRecord {
     const self: *Adapter = @ptrCast(@alignCast(context));
     var statement = try self.prepare("SELECT payload_json FROM workout_templates WHERE host_scope_key = ?1 AND template_id = ?2");
@@ -2138,6 +2462,103 @@ fn exportPortableCallback(context: *anyopaque, allocator: std.mem.Allocator, que
         }
     }
 
+    var program_definitions: std.ArrayList(portable.ProgramDefinitionRecord) = .empty;
+    {
+        var statement = try self.prepare(
+            \\SELECT definition_id, definition_version, configuration_fingerprint, definition_json
+            \\FROM program_definitions WHERE host_scope_key = ?1
+            \\ORDER BY definition_id, definition_version
+        );
+        defer statement.finalize();
+        try statement.bindText(1, query.host_scope_key);
+        while (try statement.row()) {
+            const definition = try parseColumn(persistence.canonical.ProgramDefinitionDocument, allocator, statement.raw, 3);
+            const key: persistence.ProgramDefinitionKey = .{
+                .host_scope_key = query.host_scope_key,
+                .definition_id = column(statement.raw, 0) orelse return error.InvalidData,
+                .definition_version = column(statement.raw, 1) orelse return error.InvalidData,
+            };
+            if (!validProgramDefinitionKey(key, definition) or
+                !std.mem.eql(u8, column(statement.raw, 2) orelse return error.InvalidData, definition.configurationFingerprint)) return error.InvalidData;
+            try program_definitions.append(allocator, .{
+                .hostScopeKey = try allocator.dupe(u8, query.host_scope_key),
+                .definition = definition,
+            });
+        }
+    }
+
+    var program_instances: std.ArrayList(portable.ProgramInstanceRecord) = .empty;
+    {
+        var statement = try self.prepare(
+            \\SELECT instance_id, definition_id, definition_version, configuration_fingerprint,
+            \\ planning_revision, instance_json, planning_state_json
+            \\FROM program_instances WHERE host_scope_key = ?1
+            \\ORDER BY instance_id
+        );
+        defer statement.finalize();
+        try statement.bindText(1, query.host_scope_key);
+        while (try statement.row()) {
+            const instance = try parseColumn(persistence.canonical.ProgramInstanceDocument, allocator, statement.raw, 5);
+            const planning_state: ?persistence.canonical.ProgramPlanningState = if (c.sqlite3_column_type(statement.raw, 6) == c.SQLITE_NULL)
+                null
+            else
+                try parseColumn(persistence.canonical.ProgramPlanningState, allocator, statement.raw, 6);
+            const record: persistence.ProgramInstanceRecord = .{
+                .key = .{
+                    .host_scope_key = query.host_scope_key,
+                    .instance_id = column(statement.raw, 0) orelse return error.InvalidData,
+                },
+                .instance = instance,
+                .planning_state = planning_state,
+            };
+            const persisted_reference: persistence.canonical.ProgramDefinitionReference = .{
+                .id = column(statement.raw, 1) orelse return error.InvalidData,
+                .version = column(statement.raw, 2) orelse return error.InvalidData,
+                .configurationFingerprint = column(statement.raw, 3) orelse return error.InvalidData,
+            };
+            if (!validProgramInstanceRecord(record) or !programDefinitionReferencesEqual(persisted_reference, instance.definition)) return error.InvalidData;
+            if (planning_state) |state| {
+                if (c.sqlite3_column_type(statement.raw, 4) == c.SQLITE_NULL or c.sqlite3_column_int64(statement.raw, 4) < 0 or
+                    state.revision != @as(u64, @intCast(c.sqlite3_column_int64(statement.raw, 4)))) return error.InvalidData;
+            } else if (c.sqlite3_column_type(statement.raw, 4) != c.SQLITE_NULL) return error.InvalidData;
+            try program_instances.append(allocator, .{
+                .hostScopeKey = try allocator.dupe(u8, query.host_scope_key),
+                .instance = instance,
+                .planningState = planning_state,
+            });
+        }
+    }
+
+    var program_occurrences: std.ArrayList(portable.ProgramOccurrenceRecord) = .empty;
+    {
+        var statement = try self.prepare(
+            \\SELECT instance_id, occurrence_id, before_revision, after_revision, occurrence_json
+            \\FROM program_occurrences WHERE host_scope_key = ?1
+            \\ORDER BY instance_id, occurrence_id
+        );
+        defer statement.finalize();
+        try statement.bindText(1, query.host_scope_key);
+        while (try statement.row()) {
+            const occurrence = try parseColumn(persistence.canonical.ProgramOccurrenceRecord, allocator, statement.raw, 4);
+            const record: persistence.ProgramOccurrenceRecord = .{
+                .key = .{
+                    .host_scope_key = query.host_scope_key,
+                    .instance_id = column(statement.raw, 0) orelse return error.InvalidData,
+                    .occurrence_id = column(statement.raw, 1) orelse return error.InvalidData,
+                },
+                .occurrence = occurrence,
+            };
+            if (c.sqlite3_column_int64(statement.raw, 2) < 0 or c.sqlite3_column_int64(statement.raw, 3) < 0 or
+                !validProgramOccurrenceRecord(record) or
+                occurrence.beforeRevision != @as(u64, @intCast(c.sqlite3_column_int64(statement.raw, 2))) or
+                occurrence.afterRevision != @as(u64, @intCast(c.sqlite3_column_int64(statement.raw, 3)))) return error.InvalidData;
+            try program_occurrences.append(allocator, .{
+                .hostScopeKey = try allocator.dupe(u8, query.host_scope_key),
+                .occurrence = occurrence,
+            });
+        }
+    }
+
     var active: std.ArrayList(portable.ActiveWorkoutRecord) = .empty;
     {
         var statement = try self.prepare(
@@ -2275,6 +2696,9 @@ fn exportPortableCallback(context: *anyopaque, allocator: std.mem.Allocator, que
         .customExercises = try custom_exercises.toOwnedSlice(allocator),
         .templates = try templates.toOwnedSlice(allocator),
         .athleteProfiles = try athlete_profiles.toOwnedSlice(allocator),
+        .programDefinitions = try program_definitions.toOwnedSlice(allocator),
+        .programInstances = try program_instances.toOwnedSlice(allocator),
+        .programOccurrences = try program_occurrences.toOwnedSlice(allocator),
         .activeWorkouts = try active.toOwnedSlice(allocator),
         .completedWorkouts = try completed.toOwnedSlice(allocator),
         .acceptedRecommendations = try accepted.toOwnedSlice(allocator),
@@ -2351,6 +2775,9 @@ fn importPortableCallback(context: *anyopaque, allocator: std.mem.Allocator, req
             .customExercises = request.document.customExercises.len,
             .templates = request.document.templates.len,
             .athleteProfiles = request.document.athleteProfiles.len,
+            .programDefinitions = request.document.programDefinitions.len,
+            .programInstances = request.document.programInstances.len,
+            .programOccurrences = request.document.programOccurrences.len,
             .activeWorkouts = request.document.activeWorkouts.len,
             .completedWorkouts = request.document.completedWorkouts.len,
             .acceptedRecommendations = request.document.acceptedRecommendations.len,
@@ -2445,6 +2872,125 @@ fn importPortableCallback(context: *anyopaque, allocator: std.mem.Allocator, req
         try statement.bindInt(4, record.profile.revision);
         try statement.bindText(5, &fingerprint);
         try statement.bindText(6, request.document.exportedAt);
+        try statement.done();
+    }
+    for (request.document.programDefinitions) |record| {
+        const key: persistence.ProgramDefinitionKey = .{
+            .host_scope_key = record.hostScopeKey,
+            .definition_id = record.definition.id,
+            .definition_version = record.definition.version,
+        };
+        if (!validProgramDefinitionKey(key, record.definition)) return error.InvalidData;
+        const definition_json = try encodeAlloc(allocator, record.definition);
+        defer allocator.free(definition_json);
+        var existing_query = try self.prepare(
+            \\SELECT configuration_fingerprint, definition_json FROM program_definitions
+            \\WHERE host_scope_key=?1 AND definition_id=?2 AND definition_version=?3
+        );
+        defer existing_query.finalize();
+        try existing_query.bindText(1, record.hostScopeKey);
+        try existing_query.bindText(2, record.definition.id);
+        try existing_query.bindText(3, record.definition.version);
+        if (try existing_query.row()) {
+            if (request.mode == .merge and request.conflictPolicy == .keepExisting) continue;
+            if (!std.mem.eql(u8, column(existing_query.raw, 0) orelse return error.InvalidData, record.definition.configurationFingerprint) or
+                !std.mem.eql(u8, column(existing_query.raw, 1) orelse return error.InvalidData, definition_json))
+                return error.InvalidData;
+            continue;
+        }
+        var statement = try self.prepare(
+            \\INSERT INTO program_definitions
+            \\ (host_scope_key, definition_id, definition_version, configuration_fingerprint, definition_json)
+            \\VALUES (?1, ?2, ?3, ?4, ?5)
+        );
+        defer statement.finalize();
+        try statement.bindText(1, record.hostScopeKey);
+        try statement.bindText(2, record.definition.id);
+        try statement.bindText(3, record.definition.version);
+        try statement.bindText(4, record.definition.configurationFingerprint);
+        try statement.bindText(5, definition_json);
+        try statement.done();
+    }
+    for (request.document.programInstances) |record| {
+        const persistence_record: persistence.ProgramInstanceRecord = .{
+            .key = .{ .host_scope_key = record.hostScopeKey, .instance_id = record.instance.id },
+            .instance = record.instance,
+            .planning_state = record.planningState,
+        };
+        if (!validProgramInstanceRecord(persistence_record)) return error.InvalidData;
+        if (record.planningState) |state| if (state.revision > std.math.maxInt(i64)) return error.InvalidData;
+        const exists = try portableRecordExists(
+            self,
+            "SELECT 1 FROM program_instances WHERE host_scope_key=?1 AND instance_id=?2",
+            record.hostScopeKey,
+            record.instance.id,
+        );
+        if (exists and request.mode == .merge and request.conflictPolicy == .keepExisting) continue;
+        if (!try portableProgramDefinitionMatches(self, record.hostScopeKey, record.instance.definition)) return error.InvalidData;
+        const instance_json = try encodeAlloc(allocator, record.instance);
+        defer allocator.free(instance_json);
+        const state_json: ?[]u8 = if (record.planningState) |state| try encodeAlloc(allocator, state) else null;
+        defer if (state_json) |payload| allocator.free(payload);
+        var statement = try self.prepare(
+            \\INSERT INTO program_instances
+            \\ (host_scope_key, instance_id, definition_id, definition_version, configuration_fingerprint,
+            \\  planning_revision, instance_json, planning_state_json)
+            \\VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            \\ON CONFLICT (host_scope_key, instance_id) DO UPDATE SET
+            \\ definition_id=excluded.definition_id, definition_version=excluded.definition_version,
+            \\ configuration_fingerprint=excluded.configuration_fingerprint,
+            \\ planning_revision=excluded.planning_revision, instance_json=excluded.instance_json,
+            \\ planning_state_json=excluded.planning_state_json
+        );
+        defer statement.finalize();
+        try statement.bindText(1, record.hostScopeKey);
+        try statement.bindText(2, record.instance.id);
+        try statement.bindText(3, record.instance.definition.id);
+        try statement.bindText(4, record.instance.definition.version);
+        try statement.bindText(5, record.instance.definition.configurationFingerprint);
+        if (record.planningState) |state| try statement.bindInt(6, state.revision) else try statement.bindNull(6);
+        try statement.bindText(7, instance_json);
+        if (state_json) |payload| try statement.bindText(8, payload) else try statement.bindNull(8);
+        try statement.done();
+    }
+    for (request.document.programOccurrences) |record| {
+        const persistence_record: persistence.ProgramOccurrenceRecord = .{
+            .key = .{
+                .host_scope_key = record.hostScopeKey,
+                .instance_id = record.occurrence.instanceId,
+                .occurrence_id = record.occurrence.occurrenceId,
+            },
+            .occurrence = record.occurrence,
+        };
+        if (!validProgramOccurrenceRecord(persistence_record) or
+            record.occurrence.beforeRevision > std.math.maxInt(i64) or
+            record.occurrence.afterRevision > std.math.maxInt(i64)) return error.InvalidData;
+        const exists = try portableRecordExists3(
+            self,
+            "SELECT 1 FROM program_occurrences WHERE host_scope_key=?1 AND instance_id=?2 AND occurrence_id=?3",
+            record.hostScopeKey,
+            record.occurrence.instanceId,
+            record.occurrence.occurrenceId,
+        );
+        if (exists and request.mode == .merge and request.conflictPolicy == .keepExisting) continue;
+        if (!try portableProgramInstanceMatches(self, record.hostScopeKey, record.occurrence.instanceId, record.occurrence.definition)) return error.InvalidData;
+        const occurrence_json = try encodeAlloc(allocator, record.occurrence);
+        defer allocator.free(occurrence_json);
+        var statement = try self.prepare(
+            \\INSERT INTO program_occurrences
+            \\ (host_scope_key, instance_id, occurrence_id, before_revision, after_revision, occurrence_json)
+            \\VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            \\ON CONFLICT (host_scope_key, instance_id, occurrence_id) DO UPDATE SET
+            \\ before_revision=excluded.before_revision, after_revision=excluded.after_revision,
+            \\ occurrence_json=excluded.occurrence_json
+        );
+        defer statement.finalize();
+        try statement.bindText(1, record.hostScopeKey);
+        try statement.bindText(2, record.occurrence.instanceId);
+        try statement.bindText(3, record.occurrence.occurrenceId);
+        try statement.bindInt(4, record.occurrence.beforeRevision);
+        try statement.bindInt(5, record.occurrence.afterRevision);
+        try statement.bindText(6, occurrence_json);
         try statement.done();
     }
     for (request.document.activeWorkouts) |record| {
@@ -2593,6 +3139,45 @@ fn portableRecordExists(self: *Adapter, sql: []const u8, scope: []const u8, id: 
     return statement.row();
 }
 
+fn portableRecordExists3(self: *Adapter, sql: []const u8, scope: []const u8, first_id: []const u8, second_id: []const u8) persistence.AdapterError!bool {
+    var statement = try self.prepare(sql);
+    defer statement.finalize();
+    try statement.bindText(1, scope);
+    try statement.bindText(2, first_id);
+    try statement.bindText(3, second_id);
+    return statement.row();
+}
+
+fn portableProgramDefinitionMatches(self: *Adapter, scope: []const u8, reference: persistence.canonical.ProgramDefinitionReference) persistence.AdapterError!bool {
+    var statement = try self.prepare(
+        \\SELECT configuration_fingerprint FROM program_definitions
+        \\WHERE host_scope_key=?1 AND definition_id=?2 AND definition_version=?3
+    );
+    defer statement.finalize();
+    try statement.bindText(1, scope);
+    try statement.bindText(2, reference.id);
+    try statement.bindText(3, reference.version);
+    if (!try statement.row()) return false;
+    return std.mem.eql(u8, column(statement.raw, 0) orelse return error.InvalidData, reference.configurationFingerprint);
+}
+
+fn portableProgramInstanceMatches(self: *Adapter, scope: []const u8, instance_id: []const u8, reference: persistence.canonical.ProgramDefinitionReference) persistence.AdapterError!bool {
+    var statement = try self.prepare(
+        \\SELECT definition_id, definition_version, configuration_fingerprint
+        \\FROM program_instances WHERE host_scope_key=?1 AND instance_id=?2
+    );
+    defer statement.finalize();
+    try statement.bindText(1, scope);
+    try statement.bindText(2, instance_id);
+    if (!try statement.row()) return false;
+    const persisted: persistence.canonical.ProgramDefinitionReference = .{
+        .id = column(statement.raw, 0) orelse return error.InvalidData,
+        .version = column(statement.raw, 1) orelse return error.InvalidData,
+        .configurationFingerprint = column(statement.raw, 2) orelse return error.InvalidData,
+    };
+    return programDefinitionReferencesEqual(persisted, reference);
+}
+
 fn portableActiveExists(self: *Adapter, scope: []const u8, athlete: []const u8, id: []const u8) persistence.AdapterError!bool {
     var statement = try self.prepare("SELECT 1 FROM tracking_workouts WHERE host_scope_key=?1 AND athlete_id=?2 AND workout_id=?3");
     defer statement.finalize();
@@ -2608,6 +3193,9 @@ fn appendPortableConflicts(self: *Adapter, document: portable.Document, issues: 
     for (document.customExercises) |record| if (try portableRecordExists(self, "SELECT 1 FROM catalog WHERE host_scope_key=?1 AND exercise_id=?2", record.hostScopeKey, record.exercise.id)) appendPortableConflict(issues, &count, "/document/customExercises");
     for (document.templates) |record| if (try portableRecordExists(self, "SELECT 1 FROM workout_templates WHERE host_scope_key=?1 AND template_id=?2", record.hostScopeKey, record.template.id)) appendPortableConflict(issues, &count, "/document/templates");
     for (document.athleteProfiles) |record| if (try portableRecordExists(self, "SELECT 1 FROM athlete_profiles WHERE host_scope_key=?1 AND athlete_profile_id=?2", record.hostScopeKey, record.profile.id)) appendPortableConflict(issues, &count, "/document/athleteProfiles");
+    for (document.programDefinitions) |record| if (try portableRecordExists3(self, "SELECT 1 FROM program_definitions WHERE host_scope_key=?1 AND definition_id=?2 AND definition_version=?3", record.hostScopeKey, record.definition.id, record.definition.version)) appendPortableConflict(issues, &count, "/document/programDefinitions");
+    for (document.programInstances) |record| if (try portableRecordExists(self, "SELECT 1 FROM program_instances WHERE host_scope_key=?1 AND instance_id=?2", record.hostScopeKey, record.instance.id)) appendPortableConflict(issues, &count, "/document/programInstances");
+    for (document.programOccurrences) |record| if (try portableRecordExists3(self, "SELECT 1 FROM program_occurrences WHERE host_scope_key=?1 AND instance_id=?2 AND occurrence_id=?3", record.hostScopeKey, record.occurrence.instanceId, record.occurrence.occurrenceId)) appendPortableConflict(issues, &count, "/document/programOccurrences");
     for (document.activeWorkouts) |record| if (try portableActiveExists(self, record.hostScopeKey, record.athleteId orelse "", record.workoutId)) appendPortableConflict(issues, &count, "/document/activeWorkouts");
     for (document.completedWorkouts) |record| if (try portableRecordExists(self, "SELECT 1 FROM history WHERE host_scope_key=?1 AND workout_id=?2", record.hostScopeKey, record.workout.id)) appendPortableConflict(issues, &count, "/document/completedWorkouts");
     for (document.acceptedRecommendations) |record| if (try portableRecordExists(self, "SELECT 1 FROM accepted_recommendations WHERE host_scope_key=?1 AND accepted_recommendation_id=?2", record.hostScopeKey, record.id)) appendPortableConflict(issues, &count, "/document/acceptedRecommendations");
@@ -2654,6 +3242,9 @@ fn deletePortableScopes(self: *Adapter, allocator: std.mem.Allocator, document: 
     for (document.customExercises) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
     for (document.templates) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
     for (document.athleteProfiles) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
+    for (document.programDefinitions) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
+    for (document.programInstances) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
+    for (document.programOccurrences) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
     for (document.activeWorkouts) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
     for (document.completedWorkouts) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
     for (document.acceptedRecommendations) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
@@ -2679,6 +3270,9 @@ fn deletePortableScopes(self: *Adapter, allocator: std.mem.Allocator, document: 
         "DELETE FROM portable_catalog_references WHERE host_scope_key=?1",
         "DELETE FROM accepted_recommendations WHERE host_scope_key=?1",
         "DELETE FROM accepted_program_recommendations WHERE host_scope_key=?1",
+        "DELETE FROM program_occurrences WHERE host_scope_key=?1",
+        "DELETE FROM program_instances WHERE host_scope_key=?1",
+        "DELETE FROM program_definitions WHERE host_scope_key=?1",
         "DELETE FROM progression_state WHERE host_scope_key=?1",
         "DELETE FROM program_state WHERE host_scope_key=?1",
         "DELETE FROM workout_templates WHERE host_scope_key=?1",

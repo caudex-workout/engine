@@ -94,6 +94,39 @@ caudex --database caudex.sqlite --format json \
   workout show --workout workout-example
 ```
 
+## Program planning snapshots
+
+The `program` noun demonstrates the public deterministic planner without
+turning the workout database into hidden engine state. It can list and inspect
+the four structural presets, create an initial instance/state snapshot, resolve
+the next intent, and calculate an advancement proposal:
+
+```sh
+caudex program list
+caudex --format json program inspect block
+caudex --format json --athlete athlete-7 \
+  program start rotation --instance program-42
+caudex --format json program next rotation --instance program-42
+caudex --format json program advance rotation --instance program-42 \
+  --revision 0 --block 0 --microcycle 0 --cursor 0 --completed 0
+```
+
+`advance` prints a proposal; it does not persist or silently accept it. To
+continue, pass the proposal's `nextState` fields to `status`, `next`, or a later
+`advance` call. Fixed-weekday plans require the host's explicit civil-date
+interpretation:
+
+```sh
+caudex --format json program next weekdays \
+  --date 2026-08-10 --weekday monday
+caudex --format json program pause rotation --instance program-42 --revision 1
+caudex --format json program end rotation --instance program-42 --revision 1
+```
+
+The TUI program screen exposes the same inspect/start/status/next/advance/
+pause/end intents through its application-action boundary. Rendering never
+advances a cursor; acceptance remains an explicit host action.
+
 Catalog examples are created through the same public client surface; no SQL or
 private seed command is required:
 

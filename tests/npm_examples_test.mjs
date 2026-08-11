@@ -117,9 +117,12 @@ const ids = [
   "request-editor", "methodology", "run-request", "copy-fixture",
   "download-fixture", "action-status", "result-status", "result-summary",
   "explanations", "explanation-count", "output",
+  "program-example", "program-start", "program-advance", "program-status",
+  "program-summary", "program-output",
 ];
 const elements = Object.fromEntries(ids.map((id) => [id, new Element()]));
 elements.methodology.value = "double-progression";
+elements["program-example"].value = "rotation";
 let clipboardText = "";
 let downloaded = "";
 globalThis.document = {
@@ -156,6 +159,32 @@ if (
   elements.explanations.children.length === 0
 ) {
   throw new Error("playground did not render its recommendation and explanations");
+}
+const initialProgram = JSON.parse(elements["program-output"].textContent);
+if (
+  initialProgram.definition.source?.id !== "asynchronous-upper-lower" ||
+  initialProgram.nextIntent?.roleId !== "upper" ||
+  initialProgram.acceptedState?.revision !== 0
+) {
+  throw new Error("rotation program lifecycle did not render: " + elements["program-output"].textContent);
+}
+elements["program-advance"].click();
+const advancedRotation = JSON.parse(elements["program-output"].textContent);
+if (advancedRotation.acceptedState?.revision !== 1 || advancedRotation.nextIntent?.roleId !== "lower") {
+  throw new Error("program advancement did not use an accepted proposal");
+}
+elements["program-example"].value = "weekdays";
+elements["program-example"].listeners.change();
+const fixedWeekday = JSON.parse(elements["program-output"].textContent);
+if (fixedWeekday.definition.blocks[0]?.schedule?.kind !== "fixed_weekdays" || fixedWeekday.nextIntent?.roleId !== "upper") {
+  throw new Error("fixed-weekday program did not resolve explicit schedule input");
+}
+elements["program-example"].value = "block";
+elements["program-example"].listeners.change();
+for (let index = 0; index < 14; index += 1) elements["program-advance"].click();
+const structuredBlock = JSON.parse(elements["program-output"].textContent);
+if (structuredBlock.nextIntent?.phase !== "deload" || structuredBlock.acceptedState?.blockIndex !== 2) {
+  throw new Error("structured program did not advance into its declared deload block");
 }
 elements.methodology.value = "rpe-top-set-backoff";
 elements.methodology.listeners.change();
@@ -194,6 +223,7 @@ console.log(JSON.stringify({
     explanationCount: elements.explanations.children.length,
     copied: true,
     downloaded,
+    programPhase: structuredBlock.nextIntent.phase,
   },
 }));
 `,

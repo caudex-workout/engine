@@ -64,6 +64,7 @@ pub const RegistryDescriptor = struct {
     /// methods in the compositional programming architecture.
     progressionMethods: []const MethodologyDescriptor,
     programStrategies: []const ProgramStrategyDescriptor,
+    programPresets: []const ProgramPresetDescriptor,
     supportedOperations: []const []const u8,
 };
 
@@ -77,6 +78,30 @@ pub const ProgramStrategyDescriptor = struct {
     supportedOperations: []const Operation,
     configurationSchemaRef: []const u8,
     stateSchemaRef: ?[]const u8 = null,
+};
+
+pub const ProgramPresetScheduleKind = enum {
+    rotation,
+    fixed_weekday,
+};
+
+pub const ProgramPresetFrequency = struct {
+    minimumSessionsPerWeek: u8,
+    maximumSessionsPerWeek: u8,
+};
+
+/// Stable metadata for a compiled program-definition builder. The complete
+/// serializable definition is produced by that builder rather than duplicated
+/// in discovery output.
+pub const ProgramPresetDescriptor = struct {
+    id: []const u8,
+    displayName: []const u8,
+    description: []const u8,
+    definitionVersion: []const u8,
+    scheduleKind: ProgramPresetScheduleKind,
+    frequency: ProgramPresetFrequency,
+    goals: []const []const u8,
+    deprecated: bool = false,
 };
 
 const all_operations = [_]Operation{ .recommend, .evaluate, .validateConfig, .validateState };
@@ -96,6 +121,10 @@ const canonical_operations = [_][]const u8{
     "listCapabilities",
     "recommendProgram",
     "evaluateProgram",
+    "validateProgramDefinition",
+    "instantiateProgram",
+    "resolvePlannedSession",
+    "proposeProgramAdvancement",
 };
 
 const rounding_choices = [_][]const u8{ "nearest", "up", "down" };
@@ -179,17 +208,66 @@ pub const program_strategy_descriptors = [_]ProgramStrategyDescriptor{.{
     .configurationSchemaRef = "schemas/program-strategies/fixed-session-config-v1.schema.json",
 }};
 
+const hypertrophy_goals = [_][]const u8{"hypertrophy"};
+
+pub const program_preset_descriptors = [_]ProgramPresetDescriptor{
+    .{
+        .id = "caudex.asynchronous-upper-lower",
+        .displayName = "Asynchronous upper/lower",
+        .description = "Alternates upper- and lower-body sessions in a rolling rotation without assigning calendar weekdays.",
+        .definitionVersion = "1.0.0",
+        .scheduleKind = .rotation,
+        .frequency = .{ .minimumSessionsPerWeek = 4, .maximumSessionsPerWeek = 4 },
+        .goals = &hypertrophy_goals,
+    },
+    .{
+        .id = "caudex.fixed-weekday-upper-lower",
+        .displayName = "Fixed-weekday upper/lower",
+        .description = "Provides four upper- and lower-body roles for hosts that assign them to fixed weekdays.",
+        .definitionVersion = "1.0.0",
+        .scheduleKind = .fixed_weekday,
+        .frequency = .{ .minimumSessionsPerWeek = 4, .maximumSessionsPerWeek = 4 },
+        .goals = &hypertrophy_goals,
+    },
+    .{
+        .id = "caudex.ppl-rotation",
+        .displayName = "Push/pull/legs rotation",
+        .description = "Cycles push, pull, and legs roles continuously at a host-selected frequency.",
+        .definitionVersion = "1.0.0",
+        .scheduleKind = .rotation,
+        .frequency = .{ .minimumSessionsPerWeek = 3, .maximumSessionsPerWeek = 6 },
+        .goals = &hypertrophy_goals,
+    },
+    .{
+        .id = "caudex.structured-hypertrophy-block",
+        .displayName = "Structured hypertrophy block",
+        .description = "A four-session hypertrophy block with explicit microcycle and session-role structure.",
+        .definitionVersion = "1.0.0",
+        .scheduleKind = .rotation,
+        .frequency = .{ .minimumSessionsPerWeek = 4, .maximumSessionsPerWeek = 4 },
+        .goals = &hypertrophy_goals,
+    },
+};
+
 pub fn registry() RegistryDescriptor {
     return .{
         .methodologies = &descriptors,
         .progressionMethods = &descriptors,
         .programStrategies = &program_strategy_descriptors,
+        .programPresets = &program_preset_descriptors,
         .supportedOperations = &canonical_operations,
     };
 }
 
 pub fn find(id: []const u8) ?*const MethodologyDescriptor {
     for (&descriptors) |*descriptor| {
+        if (std.mem.eql(u8, descriptor.id, id)) return descriptor;
+    }
+    return null;
+}
+
+pub fn findProgramPreset(id: []const u8) ?*const ProgramPresetDescriptor {
+    for (&program_preset_descriptors) |*descriptor| {
         if (std.mem.eql(u8, descriptor.id, id)) return descriptor;
     }
     return null;
@@ -229,4 +307,18 @@ test "descriptors and typed validation share methodology sources" {
     try std.testing.expectEqual(double_progression.config_version, descriptor.configurationSchemaVersion);
     try std.testing.expect(descriptor.fields.len >= 10);
     try std.testing.expect(find("missing") == null);
+}
+
+test "program preset discovery exposes stable schedule and frequency metadata" {
+    try std.testing.expectEqual(@as(usize, 4), registry().programPresets.len);
+    const asynchronous = findProgramPreset("caudex.asynchronous-upper-lower").?;
+    try std.testing.expectEqual(ProgramPresetScheduleKind.rotation, asynchronous.scheduleKind);
+    try std.testing.expectEqual(@as(u8, 4), asynchronous.frequency.minimumSessionsPerWeek);
+    const fixed = findProgramPreset("caudex.fixed-weekday-upper-lower").?;
+    try std.testing.expectEqual(ProgramPresetScheduleKind.fixed_weekday, fixed.scheduleKind);
+    const ppl = findProgramPreset("caudex.ppl-rotation").?;
+    try std.testing.expectEqual(@as(u8, 3), ppl.frequency.minimumSessionsPerWeek);
+    try std.testing.expectEqual(@as(u8, 6), ppl.frequency.maximumSessionsPerWeek);
+    try std.testing.expectEqualStrings("hypertrophy", ppl.goals[0]);
+    try std.testing.expect(findProgramPreset("missing") == null);
 }

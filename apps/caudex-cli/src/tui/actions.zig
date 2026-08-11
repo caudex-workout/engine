@@ -12,6 +12,7 @@ pub const Action = union(enum) {
     catalog: CatalogAction,
     correct_historical_set: HistoricalCorrection,
     database: DatabaseAction,
+    program: ProgramAction,
     move_selection: Direction,
     show_help,
     quit,
@@ -32,6 +33,16 @@ pub const CatalogDraft = struct { id: []const u8, name: []const u8, aliases: []c
 pub const HistoricalCorrection = struct { workout_id: []const u8, membership_id: []const u8, set_id: []const u8, metrics: []const MetricInput, confirmed: bool };
 pub const MetricInput = struct { code: []const u8, decimal: []const u8, unit: []const u8 };
 pub const DatabaseAction = union(enum) { check, backup: []const u8, restore: []const u8, switch_to: []const u8 };
+pub const ProgramAction = union(enum) {
+    list,
+    inspect: []const u8,
+    start: []const u8,
+    status,
+    next,
+    advance,
+    pause,
+    end,
+};
 
 pub const Executor = struct {
     context: *anyopaque,

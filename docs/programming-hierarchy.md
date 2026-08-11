@@ -17,6 +17,11 @@ Strategies must consume this projection rather than rereading mutable profile
 storage. Exercise progression receives only its relevant exercise-local inputs,
 not the full profile or location model.
 
+For reusable definitions, roles, schedules, phases, occurrences, and explicit
+program-state advancement, see [program planning](programs.md). That layer
+plans session intent; this hierarchy still governs the ordered slots and their
+exercise-local progression routing.
+
 ## State and identity
 
 Program state belongs to the strategy. Progression state belongs to one method
@@ -100,6 +105,7 @@ neither function mutates supplied state.
 heterogeneous sessions. Discovery exposes the same implementations through the
 legacy `methodologies` and clearer `progressionMethods` collections.
 
-The fixed-session strategy is deliberately not adaptive. Recovery, volume,
-scheduling, mesocycles, deloading, and exercise selection remain future strategy
-behavior.
+The fixed-session strategy is deliberately not adaptive. Program planning can
+declare explicit schedules and phases, including a defined deload phase, but
+recovery/fatigue interpretation, automatic deload triggers, volume
+optimization, and adaptive exercise selection remain future strategy behavior.

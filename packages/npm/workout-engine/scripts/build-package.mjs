@@ -19,7 +19,7 @@ await Promise.all([
   mkdir(resolve(packageRoot, "wasm"), { recursive: true }),
 ]);
 
-for (const name of ["index", "active-workout", "application", "canonical", "measurements", "methodologies", "runtime", "testing", "wasm-runtime"]) {
+for (const name of ["index", "active-workout", "application", "canonical", "measurements", "methodologies", "programs", "runtime", "testing", "wasm-runtime"]) {
   const source = await readFile(resolve(packageRoot, `src/${name}.ts`), "utf8");
   const javascript = stripTypeScriptTypes(source, {
     mode: "strip",
@@ -30,6 +30,7 @@ for (const name of ["index", "active-workout", "application", "canonical", "meas
     .replaceAll("./active-workout.ts", "./active-workout.js")
     .replaceAll("./wasm-runtime.ts", "./wasm-runtime.js")
     .replaceAll("./measurements.ts", "./measurements.js")
+    .replaceAll("./programs.ts", "./programs.js")
     .replaceAll("./index.ts", "./index.js");
   await writeFile(resolve(packageRoot, `dist/${name}.js`), javascript);
 }
@@ -44,6 +45,10 @@ await cp(
 await cp(
   resolve(packageRoot, "types/runtime.d.ts"),
   resolve(packageRoot, "dist/runtime.d.ts"),
+);
+await cp(
+  resolve(packageRoot, "types/programs.d.ts"),
+  resolve(packageRoot, "dist/programs.d.ts"),
 );
 await cp(
   resolve(packageRoot, "types/index.d.ts"),

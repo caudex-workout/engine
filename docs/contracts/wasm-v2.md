@@ -8,6 +8,8 @@ exact-capacity call.
 
 It consumes the same versioned execution envelope and operation discriminators
 as the native C boundary. There is no separate evaluation export.
+This includes program-definition validation, instantiation, planned-session
+resolution, and proposal-only advancement operations.
 
 Request and result bytes are allocated with `caudex_wasm_alloc` and released
 with `caudex_wasm_free`. There is no runtime-owned result or disposal export.

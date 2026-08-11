@@ -27,6 +27,8 @@ for (const phrase of [
   "caudex command-reference",
   "database backup",
   "database restore",
+  "program advance",
+  "nextState",
   "NO_COLOR",
   "130",
 ]) {

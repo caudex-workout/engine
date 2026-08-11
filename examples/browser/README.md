@@ -8,6 +8,14 @@ requires no application backend or runtime network service.
 
 Both selectors execute their first-party methodology in the packaged runtime.
 
+The program-planning lab below the recommendation workspace uses the package's
+actual `programs` presets, `instantiateProgram`, `resolveNextSession`,
+`proposeProgramAdvancement`, and `acceptProgramAdvancement` exports. It contrasts
+an asynchronous upper/lower rotation, fixed weekdays supplied as explicit host
+facts, and a structured accumulation/deload block. Restarting creates a fresh
+versioned instance and state; previewing is pure; clicking **Accept completion**
+is the separate host decision that advances the accepted state.
+
 The default request also demonstrates the separation between a persistent
 athlete profile and today's training context. The profile holds durable intent
 such as hypertrophy, experience, usual duration, preferences, priorities, and

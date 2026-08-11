@@ -15,6 +15,7 @@ const commands = [_]Command{
     .{ .name = "set", .usage = "set log|skip|reopen", .summary = "Record or adjust a workout set." },
     .{ .name = "exercise", .usage = "exercise create|edit|show|list|search|archive|restore", .summary = "Manage the local exercise catalog." },
     .{ .name = "history", .usage = "history list|show|exercise|last|correct-set", .summary = "Inspect completed workouts and correct logged sets." },
+    .{ .name = "program", .usage = "program list|inspect|start|status|next|advance|pause|end", .summary = "Preview and explicitly advance deterministic program snapshots." },
     .{ .name = "config", .usage = "config path|show|set", .summary = "Inspect or change client-only presentation preferences." },
     .{ .name = "batch", .usage = "batch FILE", .summary = "Run bounded JSON Lines automation input." },
     .{ .name = "completion", .usage = "completion bash|zsh|fish", .summary = "Print a shell completion script without opening a database." },

@@ -9,6 +9,7 @@ const output = @import("output.zig");
 const security = @import("security.zig");
 const use_cases = @import("use_cases.zig");
 const commands = @import("commands.zig");
+const program_commands = @import("program_commands.zig");
 const tui_actions = @import("tui/actions.zig");
 
 const version = "0.1.0";
@@ -40,6 +41,7 @@ const help_text =
     \\  caudex [global options] history exercise EXERCISE [--limit N]
     \\  caudex [global options] history last EXERCISE
     \\  caudex [global options] history correct-set --workout ID --exercise ID --set ID METRICS... [--yes]
+    \\  caudex [global options] program list|inspect|start|status|next|advance|pause|end [options]
     \\  caudex [global options] config path|show|set (color|table) VALUE
     \\  caudex batch FILE
     \\  caudex completion bash|zsh|fish
@@ -258,6 +260,12 @@ fn run(
     // create unrelated database state.
     if (remaining.len >= 2 and std.mem.eql(u8, remaining[0], "config"))
         return try configCommand(io, allocator, environment, remaining[1..], settings, stdout);
+    // Program planning is a pure snapshot workflow and must not open or create
+    // a workout database. Hosts persist an accepted state separately.
+    if (remaining.len >= 2 and std.mem.eql(u8, remaining[0], "program")) {
+        try program_commands.run(allocator, remaining[1], remaining[2..], global.athlete orelse "local-athlete", settings, stdout);
+        return null;
+    }
     const path = try resolveDatabasePath(
         allocator,
         global.database_path,
@@ -1633,6 +1641,7 @@ test "client source imports only approved public packages" {
                 std.mem.eql(u8, name, "output.zig") or
                 std.mem.eql(u8, name, "use_cases.zig") or
                 std.mem.eql(u8, name, "commands.zig") or
+                std.mem.eql(u8, name, "program_commands.zig") or
                 std.mem.eql(u8, name, "tui/actions.zig") or
                 std.mem.eql(u8, name, "security.zig"),
         );
@@ -1641,7 +1650,7 @@ test "client source imports only approved public packages" {
         remainder = tail[name_end + 1 ..];
     }
 
-    try std.testing.expectEqual(@as(usize, 12), import_count);
+    try std.testing.expectEqual(@as(usize, 13), import_count);
 }
 
 test "line client does not import libvaxis" {
@@ -1656,6 +1665,7 @@ test "client sources contain no SQL or private path imports" {
         @embedFile("errors.zig"),
         @embedFile("output.zig"),
         @embedFile("commands.zig"),
+        @embedFile("program_commands.zig"),
     };
     const forbidden = [_][]const u8{
         ".." ++ "/",

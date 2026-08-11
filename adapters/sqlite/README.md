@@ -87,6 +87,16 @@ revision, a SHA-256 integrity fingerprint, and adapter write timestamp.
 Profile state remains optional: hosts may always pass a direct profile snapshot
 to the deterministic engine instead of using this store.
 
+Schema version 13 adds first-class program planning persistence.
+`programDefinitionStore()` creates immutable, versioned definitions;
+`programInstanceStore()` atomically compare-and-sets each instance together
+with its planning-state revision; and `programOccurrenceStore()` appends
+immutable occurrence transitions. Their scoped identity keys, complete
+canonical JSON, definition fingerprints, and revision columns are verified
+when rows are loaded. Portable export and import preserve all three record
+kinds in definition-instance-occurrence dependency order, including custom
+definitions and active planning state.
+
 ## SQL and concurrency
 
 All production SQL is prepared with `sqlite3_prepare_v2`. Host values are bound

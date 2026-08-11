@@ -14,6 +14,9 @@ pub const ContractError = persistence.StateStoreError || error{
     RollbackMismatch,
     TemplateMismatch,
     RecoveryMismatch,
+    ProgramDefinitionMismatch,
+    ProgramInstanceMismatch,
+    ProgramOccurrenceMismatch,
     SerializationFailed,
 };
 
@@ -34,6 +37,9 @@ pub const InMemoryAdapter = struct {
     transaction_active: bool = false,
     template: ?persistence.TemplateRecord = null,
     recovery: ?persistence.WorkflowRecoveryRecord = null,
+    program_definition: ?persistence.ProgramDefinitionRecord = null,
+    program_instance: ?persistence.ProgramInstanceRecord = null,
+    program_occurrence: ?persistence.ProgramOccurrenceRecord = null,
 
     pub fn catalogSource(self: *InMemoryAdapter) persistence.CatalogSource {
         return .{ .context = self, .load_fn = loadCatalog };
@@ -57,6 +63,18 @@ pub const InMemoryAdapter = struct {
 
     pub fn recoveryStore(self: *InMemoryAdapter) persistence.WorkflowRecoveryStore {
         return .{ .context = self, .load_fn = loadRecovery, .put_fn = putRecovery };
+    }
+
+    pub fn programDefinitionStore(self: *InMemoryAdapter) persistence.ProgramDefinitionStore {
+        return .{ .context = self, .load_fn = loadProgramDefinition, .put_fn = putProgramDefinition };
+    }
+
+    pub fn programInstanceStore(self: *InMemoryAdapter) persistence.ProgramInstanceStore {
+        return .{ .context = self, .load_fn = loadProgramInstance, .compare_and_set_fn = compareAndSetProgramInstance };
+    }
+
+    pub fn programOccurrenceStore(self: *InMemoryAdapter) persistence.ProgramOccurrenceStore {
+        return .{ .context = self, .load_fn = loadProgramOccurrence, .append_fn = appendProgramOccurrence };
     }
 
     pub fn beginTransaction(self: *InMemoryAdapter) void {
@@ -209,6 +227,84 @@ pub const InMemoryAdapter = struct {
         }
         self.recovery = record;
     }
+
+    fn loadProgramDefinition(
+        context: *anyopaque,
+        _: std.mem.Allocator,
+        key: persistence.ProgramDefinitionKey,
+    ) persistence.CapabilityError!?persistence.ProgramDefinitionRecord {
+        const self: *InMemoryAdapter = @ptrCast(@alignCast(context));
+        const record = self.program_definition orelse return null;
+        return if (programDefinitionKeysEqual(record.key, key)) record else null;
+    }
+
+    fn putProgramDefinition(
+        context: *anyopaque,
+        _: std.mem.Allocator,
+        record: persistence.ProgramDefinitionRecord,
+    ) persistence.StateStoreError!persistence.ProgramDefinitionRecord {
+        const self: *InMemoryAdapter = @ptrCast(@alignCast(context));
+        if (self.program_definition) |existing| if (programDefinitionKeysEqual(existing.key, record.key)) return error.Conflict;
+        if (!std.mem.eql(u8, record.key.definition_id, record.definition.id) or
+            !std.mem.eql(u8, record.key.definition_version, record.definition.version)) return error.InvalidData;
+        self.program_definition = record;
+        return record;
+    }
+
+    fn loadProgramInstance(
+        context: *anyopaque,
+        _: std.mem.Allocator,
+        key: persistence.ProgramInstanceKey,
+    ) persistence.CapabilityError!?persistence.ProgramInstanceRecord {
+        const self: *InMemoryAdapter = @ptrCast(@alignCast(context));
+        const record = self.program_instance orelse return null;
+        return if (programInstanceKeysEqual(record.key, key)) record else null;
+    }
+
+    fn compareAndSetProgramInstance(
+        context: *anyopaque,
+        _: std.mem.Allocator,
+        change: persistence.CompareAndSetProgramInstance,
+    ) persistence.StateStoreError!persistence.ProgramInstanceRecord {
+        const self: *InMemoryAdapter = @ptrCast(@alignCast(context));
+        const current = if (self.program_instance) |record|
+            if (programInstanceKeysEqual(record.key, change.record.key)) record else null
+        else
+            null;
+        if (current == null) {
+            if (change.expected_revision != null) return error.Conflict;
+        } else {
+            const actual_revision = if (current.?.planning_state) |state| state.revision else null;
+            if (change.expected_revision == null or actual_revision != change.expected_revision) return error.Conflict;
+        }
+        if (!std.mem.eql(u8, change.record.key.instance_id, change.record.instance.id)) return error.InvalidData;
+        if (change.record.planning_state) |state| if (!std.mem.eql(u8, state.instanceId, change.record.instance.id)) return error.InvalidData;
+        self.program_instance = change.record;
+        return change.record;
+    }
+
+    fn loadProgramOccurrence(
+        context: *anyopaque,
+        _: std.mem.Allocator,
+        key: persistence.ProgramOccurrenceKey,
+    ) persistence.CapabilityError!?persistence.ProgramOccurrenceRecord {
+        const self: *InMemoryAdapter = @ptrCast(@alignCast(context));
+        const record = self.program_occurrence orelse return null;
+        return if (programOccurrenceKeysEqual(record.key, key)) record else null;
+    }
+
+    fn appendProgramOccurrence(
+        context: *anyopaque,
+        _: std.mem.Allocator,
+        record: persistence.ProgramOccurrenceRecord,
+    ) persistence.StateStoreError!persistence.ProgramOccurrenceRecord {
+        const self: *InMemoryAdapter = @ptrCast(@alignCast(context));
+        if (self.program_occurrence) |existing| if (programOccurrenceKeysEqual(existing.key, record.key)) return error.Conflict;
+        if (!std.mem.eql(u8, record.key.instance_id, record.occurrence.instanceId) or
+            !std.mem.eql(u8, record.key.occurrence_id, record.occurrence.occurrenceId)) return error.InvalidData;
+        self.program_occurrence = record;
+        return record;
+    }
 };
 
 pub const TransactionProbe = struct {
@@ -334,6 +430,47 @@ pub fn verifyRecoveryStore(
     if (final.status != .completed) return error.RecoveryMismatch;
 }
 
+pub fn verifyProgramStores(
+    allocator: std.mem.Allocator,
+    definition_store: persistence.ProgramDefinitionStore,
+    instance_store: persistence.ProgramInstanceStore,
+    occurrence_store: persistence.ProgramOccurrenceStore,
+    definition: persistence.ProgramDefinitionRecord,
+    initial_instance: persistence.ProgramInstanceRecord,
+    next_instance: persistence.ProgramInstanceRecord,
+    occurrence: persistence.ProgramOccurrenceRecord,
+) ContractError!void {
+    if (try definition_store.load(allocator, definition.key) != null) return error.ProgramDefinitionMismatch;
+    _ = try definition_store.put(allocator, definition);
+    const loaded_definition = (try definition_store.load(allocator, definition.key)) orelse return error.ProgramDefinitionMismatch;
+    if (!std.mem.eql(u8, loaded_definition.definition.configurationFingerprint, definition.definition.configurationFingerprint)) return error.ProgramDefinitionMismatch;
+    if (definition_store.put(allocator, definition)) |_| return error.ConflictNotReported else |err| switch (err) {
+        error.Conflict => {},
+        else => return err,
+    }
+
+    if (try instance_store.load(allocator, initial_instance.key) != null) return error.ProgramInstanceMismatch;
+    _ = try instance_store.compareAndSet(allocator, .{ .record = initial_instance, .expected_revision = null });
+    const initial_revision = if (initial_instance.planning_state) |state| state.revision else null;
+    _ = try instance_store.compareAndSet(allocator, .{ .record = next_instance, .expected_revision = initial_revision });
+    const loaded_instance = (try instance_store.load(allocator, next_instance.key)) orelse return error.ProgramInstanceMismatch;
+    if (loaded_instance.planning_state == null or next_instance.planning_state == null or
+        loaded_instance.planning_state.?.revision != next_instance.planning_state.?.revision) return error.ProgramInstanceMismatch;
+    if (instance_store.compareAndSet(allocator, .{ .record = next_instance, .expected_revision = initial_revision })) |_| return error.ConflictNotReported else |err| switch (err) {
+        error.Conflict => {},
+        else => return err,
+    }
+
+    if (try occurrence_store.load(allocator, occurrence.key) != null) return error.ProgramOccurrenceMismatch;
+    _ = try occurrence_store.append(allocator, occurrence);
+    const loaded_occurrence = (try occurrence_store.load(allocator, occurrence.key)) orelse return error.ProgramOccurrenceMismatch;
+    if (loaded_occurrence.occurrence.afterRevision != occurrence.occurrence.afterRevision) return error.ProgramOccurrenceMismatch;
+    if (occurrence_store.append(allocator, occurrence)) |_| return error.ConflictNotReported else |err| switch (err) {
+        error.Conflict => {},
+        else => return err,
+    }
+}
+
 pub fn verifyCanonicalEquivalence(
     allocator: std.mem.Allocator,
     host_scope_key: []const u8,
@@ -404,4 +541,21 @@ fn keysEqual(
 fn optionalStringsEqual(left: ?[]const u8, right: ?[]const u8) bool {
     if (left == null or right == null) return left == null and right == null;
     return std.mem.eql(u8, left.?, right.?);
+}
+
+fn programDefinitionKeysEqual(left: persistence.ProgramDefinitionKey, right: persistence.ProgramDefinitionKey) bool {
+    return std.mem.eql(u8, left.host_scope_key, right.host_scope_key) and
+        std.mem.eql(u8, left.definition_id, right.definition_id) and
+        std.mem.eql(u8, left.definition_version, right.definition_version);
+}
+
+fn programInstanceKeysEqual(left: persistence.ProgramInstanceKey, right: persistence.ProgramInstanceKey) bool {
+    return std.mem.eql(u8, left.host_scope_key, right.host_scope_key) and
+        std.mem.eql(u8, left.instance_id, right.instance_id);
+}
+
+fn programOccurrenceKeysEqual(left: persistence.ProgramOccurrenceKey, right: persistence.ProgramOccurrenceKey) bool {
+    return std.mem.eql(u8, left.host_scope_key, right.host_scope_key) and
+        std.mem.eql(u8, left.instance_id, right.instance_id) and
+        std.mem.eql(u8, left.occurrence_id, right.occurrence_id);
 }

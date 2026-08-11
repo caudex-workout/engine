@@ -19,6 +19,7 @@
       "methodology",
       "ordering",
       "primitives",
+      "program_planning",
       "programming",
       "rpe_top_set_backoff",
       "training"
@@ -84,6 +85,7 @@
     "doctor",
     "exercise",
     "history",
+    "program",
     "set",
     "workout"
   ],
@@ -126,7 +128,8 @@
     "adapters/sqlite/migrations/009_accepted_recommendations.sql",
     "adapters/sqlite/migrations/010_tracking_exercise_receipts.sql",
     "adapters/sqlite/migrations/011_programming_hierarchy.sql",
-    "adapters/sqlite/migrations/012_athlete_profiles.sql"
+    "adapters/sqlite/migrations/012_athlete_profiles.sql",
+    "adapters/sqlite/migrations/013_program_planning.sql"
   ],
   "methodologyIds": [
     "caudex.double-progression",

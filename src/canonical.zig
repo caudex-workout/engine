@@ -372,6 +372,277 @@ pub const ProgramPlan = struct {
     trainingContext: ProgramTrainingContext = .{},
 };
 
+/// Identifies how a serialized program definition entered the host's catalog.
+/// The definition remains fully embedded regardless of provenance so custom
+/// definitions and discontinued built-in presets remain replayable.
+pub const ProgramDefinitionSource = struct {
+    kind: enum { built_in_preset, host_custom, imported },
+    id: ?[]const u8 = null,
+    version: ?[]const u8 = null,
+};
+
+pub const ProgramWeekday = enum { monday, tuesday, wednesday, thursday, friday, saturday, sunday };
+
+pub const ProgramFrequencyTarget = struct {
+    sessions: u8,
+    days: u16,
+};
+
+pub const ProgramWeekdayScheduleEntry = struct {
+    weekday: ProgramWeekday,
+    roleId: []const u8,
+};
+
+pub const ProgramDatedScheduleEntry = struct {
+    localDate: []const u8,
+    roleId: []const u8,
+};
+
+pub const ProgramSchedule = union(enum) {
+    rotation: struct {
+        roleIds: []const []const u8,
+        frequency: ?ProgramFrequencyTarget = null,
+    },
+    fixedWeekdays: struct { entries: []const ProgramWeekdayScheduleEntry },
+    frequencyTargeted: struct {
+        roleIds: []const []const u8,
+        target: ProgramFrequencyTarget,
+    },
+    explicitDates: struct { entries: []const ProgramDatedScheduleEntry },
+    hybrid: struct {
+        roleIds: []const []const u8,
+        target: ProgramFrequencyTarget,
+        preferredWeekdays: []const ProgramWeekday = &.{},
+    },
+};
+
+pub const ProgramItemOrdering = struct {
+    priorityTier: u8 = 0,
+    beforeItemIds: []const []const u8 = &.{},
+    afterItemIds: []const []const u8 = &.{},
+};
+
+pub const ProgramSlotRequirements = struct {
+    targetMuscleIds: []const []const u8 = &.{},
+    movementPatternIds: []const []const u8 = &.{},
+    exerciseFamilyIds: []const []const u8 = &.{},
+    requiredExerciseIds: []const []const u8 = &.{},
+    excludedExerciseIds: []const []const u8 = &.{},
+    requiredEquipmentIds: []const []const u8 = &.{},
+    progressionRequirement: ?enum { externally_loadable_repetitions, repetitions, duration, distance } = null,
+};
+
+pub const ProgramExercisePool = struct {
+    exerciseIds: []const []const u8 = &.{},
+    exerciseFamilyIds: []const []const u8 = &.{},
+};
+
+pub const ProgramSessionItem = union(enum) {
+    fixed: struct {
+        id: []const u8,
+        exerciseId: []const u8,
+        anchor: enum { none, preferred, required, block } = .none,
+        progression: ?ProgressionAssignment = null,
+        ordering: ProgramItemOrdering = .{},
+    },
+    dynamic: struct {
+        id: []const u8,
+        requirements: ProgramSlotRequirements = .{},
+        pool: ProgramExercisePool = .{},
+        progression: ?ProgressionAssignment = null,
+        ordering: ProgramItemOrdering = .{},
+    },
+};
+
+pub const ProgramSessionRoleDefinition = struct {
+    id: []const u8,
+    displayName: ?[]const u8 = null,
+    description: ?[]const u8 = null,
+    items: []const ProgramSessionItem,
+    defaultProgression: ?ProgressionAssignment = null,
+    musclePriorities: []const MusclePriority = &.{},
+    expectedDurationMinutes: ?u16 = null,
+    trainingContext: ProgramTrainingContext = .{},
+    configuration: ?std.json.Value = null,
+};
+
+pub const ProgramBlockDefinition = struct {
+    id: []const u8,
+    displayName: ?[]const u8 = null,
+    description: ?[]const u8 = null,
+    microcycleCount: u32,
+    phase: enum { base, accumulation, intensification, realization, deload, custom } = .base,
+    phaseSemantic: ?[]const u8 = null,
+    schedule: ProgramSchedule,
+    sessionRoles: []const ProgramSessionRoleDefinition,
+    musclePriorities: []const MusclePriority = &.{},
+    defaultProgression: ?ProgressionAssignment = null,
+    nextBlockId: ?[]const u8 = null,
+    configuration: ?std.json.Value = null,
+};
+
+/// Immutable, serializable program structure. Runtime state is held by a
+/// ProgramInstanceDocument and ProgramPlanningState instead of this value.
+pub const ProgramDefinitionDocument = struct {
+    schemaVersion: u32 = 1,
+    id: []const u8,
+    version: []const u8,
+    displayName: []const u8,
+    description: ?[]const u8 = null,
+    strategy: ProgramStrategyRef,
+    configurationFingerprint: []const u8,
+    source: ?ProgramDefinitionSource = null,
+    blocks: []const ProgramBlockDefinition,
+};
+
+/// Pins an instance, state, occurrence, or intent to exact definition bytes.
+pub const ProgramDefinitionReference = struct {
+    id: []const u8,
+    version: []const u8,
+    configurationFingerprint: []const u8,
+};
+
+pub const ProgramInstanceLifecycle = enum {
+    planned,
+    active,
+    paused,
+    completed,
+    abandoned,
+};
+
+/// Athlete-specific activation of an immutable program definition.
+pub const ProgramInstanceDocument = struct {
+    schemaVersion: u32 = 1,
+    id: []const u8,
+    athleteId: []const u8,
+    definition: ProgramDefinitionReference,
+    startedOn: ?[]const u8 = null,
+    lifecycle: ProgramInstanceLifecycle,
+    configuration: std.json.Value,
+};
+
+/// Explicit host-persisted cursor used to derive the next session intent.
+pub const ProgramPlanningState = struct {
+    schemaVersion: u32 = 1,
+    instanceId: []const u8,
+    definition: ProgramDefinitionReference,
+    revision: u64,
+    blockIndex: u32,
+    microcycleIndex: u32,
+    sessionCursor: u32,
+    completedOccurrenceCount: u64,
+    completed: bool = false,
+    strategyState: ?ProgramState = null,
+};
+
+pub const ProgramOccurrenceStatus = enum {
+    upcoming,
+    due,
+    overdue,
+    completed,
+    skipped,
+    partial,
+    abandoned,
+};
+
+/// Immutable ledger record for one planned session occurrence and the state
+/// revision transition it consumed.
+pub const ProgramOccurrenceRecord = struct {
+    schemaVersion: u32 = 1,
+    instanceId: []const u8,
+    definition: ProgramDefinitionReference,
+    blockId: []const u8,
+    roleId: []const u8,
+    occurrenceId: []const u8,
+    status: ProgramOccurrenceStatus,
+    beforeRevision: u64,
+    afterRevision: u64,
+};
+
+/// Complete serializable input for instantiating the next planned workout.
+pub const PlannedSessionIntentDocument = struct {
+    schemaVersion: u32 = 1,
+    instanceId: []const u8,
+    definition: ProgramDefinitionReference,
+    blockId: []const u8,
+    roleId: []const u8,
+    occurrenceId: []const u8,
+    scheduledDate: ?[]const u8 = null,
+    scheduleStatus: ProgramOccurrenceStatus = .upcoming,
+    planningStateRevision: u64,
+    program: ProgramPlan,
+};
+
+/// Pure validation operation over an immutable program-definition snapshot.
+pub const ProgramDefinitionValidationRequest = struct {
+    schemaVersion: u32 = 1,
+    definition: ProgramDefinitionDocument,
+};
+
+pub const ProgramDefinitionValidationResult = struct {
+    schemaVersion: u32 = 1,
+    valid: bool,
+    issues: []const ValidationIssue,
+};
+
+/// Host-supplied identities used to instantiate a definition. No identity,
+/// date, or configuration value is generated by the engine.
+pub const ProgramInstantiationRequest = struct {
+    schemaVersion: u32 = 1,
+    definition: ProgramDefinitionDocument,
+    instanceId: []const u8,
+    athleteId: []const u8,
+    startedOn: ?[]const u8 = null,
+    lifecycle: ProgramInstanceLifecycle = .planned,
+    configuration: std.json.Value,
+    strategyState: ?ProgramState = null,
+};
+
+pub const ProgramInstantiationResult = struct {
+    schemaVersion: u32 = 1,
+    instance: ProgramInstanceDocument,
+    state: ProgramPlanningState,
+};
+
+/// Local calendar interpretation supplied explicitly by the host. The core
+/// never reads a clock or infers a time zone.
+pub const ProgramLocalDate = struct {
+    isoDate: []const u8,
+    weekday: ProgramWeekday,
+};
+
+pub const ProgramResolutionRequest = struct {
+    schemaVersion: u32 = 1,
+    definition: ProgramDefinitionDocument,
+    instance: ProgramInstanceDocument,
+    state: ProgramPlanningState,
+    localDate: ?ProgramLocalDate = null,
+    catalog: []const Exercise = &.{},
+};
+
+pub const ProgramAdvancementStatus = enum { completed, skipped };
+
+pub const ProgramAdvancementRequest = struct {
+    schemaVersion: u32 = 1,
+    definition: ProgramDefinitionDocument,
+    instance: ProgramInstanceDocument,
+    state: ProgramPlanningState,
+    intent: PlannedSessionIntentDocument,
+    status: ProgramAdvancementStatus,
+    nextStrategyState: ?ProgramState = null,
+};
+
+/// A successor state is only a proposal. The expected revision allows a host
+/// to perform its own optimistic acceptance check before persistence.
+pub const ProgramStateProposalDocument = struct {
+    schemaVersion: u32 = 1,
+    instanceId: []const u8,
+    definition: ProgramDefinitionReference,
+    expectedRevision: u64,
+    nextState: ProgramPlanningState,
+    occurrence: ProgramOccurrenceRecord,
+};
+
 pub const ProgramRecommendationRequest = struct {
     schemaVersion: u32,
     asOf: []const u8,

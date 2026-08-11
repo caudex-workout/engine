@@ -53,6 +53,26 @@
           <details class="raw-result"><summary>Raw result JSON</summary><pre id="output"></pre></details>
         </div>
       </section>
+      <section class="program-lab" aria-label="Program planning lifecycle">
+        <div class="panel-heading">
+          <div><span class="step">04</span><h2>Program planning lifecycle</h2></div>
+          <span id="program-status" class="result-status">Waiting</span>
+        </div>
+        <p class="program-intro">Preview a rotation, a fixed-weekday schedule, or a structured accumulation/deload block. Every transition is calculated locally and accepted explicitly.</p>
+        <div class="program-controls">
+          <label><span>Structural preset</span><select id="program-example">
+            <option value="rotation">Asynchronous upper / lower</option>
+            <option value="weekdays">Fixed-weekday upper / lower</option>
+            <option value="block">Structured hypertrophy block</option>
+          </select></label>
+          <div class="actions">
+            <button id="program-start" class="secondary" type="button">Restart instance</button>
+            <button id="program-advance" class="primary" type="button">Accept completion <span>→</span></button>
+          </div>
+        </div>
+        <div id="program-summary" class="result-summary"><p>Loading the program planner…</p></div>
+        <details class="raw-result"><summary>Definition, instance, state, intent, and proposal JSON</summary><pre id="program-output"></pre></details>
+      </section>
     </main>
     <footer><span>Runs entirely in this browser</span><span>Deterministic · Stateless · Explainable</span></footer>
     <script type="module" src="./dist/app.js"></script>
