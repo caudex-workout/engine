@@ -40,6 +40,15 @@
       },
       "additionalProperties": false
     },
+    "athleteProfile": {
+      "type": "object",
+      "required": ["hostScopeKey", "profile"],
+      "properties": {
+        "hostScopeKey": { "$ref": "#/$defs/scope" },
+        "profile": { "$ref": "../../v0/canonical.schema.json#/$defs/athleteProfile" }
+      },
+      "additionalProperties": false
+    },
     "activeWorkout": {
       "type": "object",
       "required": ["hostScopeKey", "workoutId", "snapshot"],
@@ -125,6 +134,7 @@
         "catalogReferences": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/catalogReference" } },
         "customExercises": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/customExercise" } },
         "templates": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/template" } },
+        "athleteProfiles": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/athleteProfile" } },
         "activeWorkouts": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/activeWorkout" } },
         "completedWorkouts": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/completedWorkout" } },
         "acceptedRecommendations": { "type": "array", "maxItems": 10000, "items": { "$ref": "#/$defs/acceptedRecommendation" } },
@@ -149,11 +159,12 @@
     },
     "counts": {
       "type": "object",
-      "required": ["catalogReferences", "customExercises", "templates", "activeWorkouts", "completedWorkouts", "acceptedRecommendations", "acceptedProgramRecommendations", "methodologyStates", "progressionStates", "programStates", "workflowRecovery"],
+      "required": ["catalogReferences", "customExercises", "templates", "athleteProfiles", "activeWorkouts", "completedWorkouts", "acceptedRecommendations", "acceptedProgramRecommendations", "methodologyStates", "progressionStates", "programStates", "workflowRecovery"],
       "properties": {
         "catalogReferences": { "type": "integer", "minimum": 0, "maximum": 10000 },
         "customExercises": { "type": "integer", "minimum": 0, "maximum": 10000 },
         "templates": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "athleteProfiles": { "type": "integer", "minimum": 0, "maximum": 10000 },
         "activeWorkouts": { "type": "integer", "minimum": 0, "maximum": 10000 },
         "completedWorkouts": { "type": "integer", "minimum": 0, "maximum": 10000 },
         "acceptedRecommendations": { "type": "integer", "minimum": 0, "maximum": 10000 },

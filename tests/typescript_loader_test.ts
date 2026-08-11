@@ -70,20 +70,36 @@ const result = caudex.recommendSession(request);
 if (!result.ok || !result.recommendation) {
   throw new Error("ordinary object request did not produce a recommendation");
 }
+if (result.recommendation.resolvedTrainingContext?.availableMinutes !== 35 ||
+    result.recommendation.resolvedTrainingContext.preferences[0]?.source !== "athlete_profile") {
+  throw new Error("recommendation did not snapshot the resolved athlete/session context");
+}
+const historicalRequest = structuredClone(request);
+const changedProfileRequest = structuredClone(request);
+if (changedProfileRequest.athleteProfile) {
+  changedProfileRequest.athleteProfile.revision = 2;
+  changedProfileRequest.athleteProfile.goals = { primary: { id: "strength" } };
+}
+const historicalReplay = caudex.recommendSession(historicalRequest);
+const changedProfileResult = caudex.recommendSession(changedProfileRequest);
+if (!historicalReplay.ok || historicalReplay.metadata.resultFingerprint !== result.metadata.resultFingerprint ||
+    changedProfileResult.metadata.inputFingerprint === result.metadata.inputFingerprint) {
+  throw new Error("profile changes rewrote a historical request or failed to affect a future request");
+}
 const program = caudex.createProgram({
   catalog: request.catalog,
   methodology: request.methodology,
   hostScopeKey: "scope-program",
-  athlete: request.athlete,
+  athleteProfile: request.athleteProfile,
   history: request.history,
   methodologyState: request.methodologyState,
 });
-const programResult = program.recommend({ asOf: request.asOf, session: request.session, alternativeLimit: request.alternativeLimit });
+const programResult = program.recommend({ asOf: request.asOf, trainingContext: request.trainingContext, alternativeLimit: request.alternativeLimit });
 if (!programResult.ok || programResult.metadata.resultFingerprint !== result.metadata.resultFingerprint) {
   throw new Error("bound program and canonical runtime did not produce equivalent behavior");
 }
 program.replaceHistory({ workouts: [] });
-const refreshedHistoryResult = program.recommend({ asOf: request.asOf, session: request.session, alternativeLimit: request.alternativeLimit });
+const refreshedHistoryResult = program.recommend({ asOf: request.asOf, trainingContext: request.trainingContext, alternativeLimit: request.alternativeLimit });
 if (refreshedHistoryResult.metadata.inputFingerprint === programResult.metadata.inputFingerprint) {
   throw new Error("replacing program history did not affect the next complete canonical request");
 }
@@ -102,9 +118,9 @@ try {
 }
 if (
   result.metadata.resultFingerprint !==
-  "83481330a812bb41384d958c104038d230bf93ceee163fd47b7c62a41361fd6f"
+  "acc27989785258bff14df982a222e277e9b51bfed565c363d1f3300277fabe47"
 ) {
-  throw new Error("TypeScript facade fingerprint differs from core fixtures");
+  throw new Error(`TypeScript facade fingerprint differs from core fixtures: ${result.metadata.resultFingerprint}`);
 }
 const registry = caudex.listMethodologies();
 if (registry.methodologies.length !== 2 || !registry.supportedOperations.includes("applyTrackingCommand")) {
@@ -215,7 +231,7 @@ const evaluatedCompletion = await caudex.workflows.evaluateCompletionFromPersist
   hostScopeKey: "scope-high-level",
   asOf: request.asOf,
   methodology: request.methodology,
-  athlete: request.athlete,
+  athleteProfile: request.athleteProfile,
   completedWorkout: completion,
 });
 if (evaluatedCompletion.metadata.methodology.id !== request.methodology.id) {

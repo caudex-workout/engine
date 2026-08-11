@@ -77,6 +77,16 @@ program state and per-lane progression state are stored in distinct tables and
 keep their opaque revisions. Portable merge conflict, keep-existing, overwrite,
 replace, export, and re-import behavior applies to all three record kinds.
 
+Schema version 12 adds host-scoped athlete profiles. `athleteProfileStore()`
+loads or atomically compare-and-sets a canonical `AthleteProfile` by the
+opaque `(host_scope_key, athlete_profile_id)` pair. This is deliberately not
+an account or authentication facility. The adapter assigns an increasing
+programming revision on each accepted write; `expected_revision = null`
+creates only an absent record. It stores canonical profile JSON with its
+revision, a SHA-256 integrity fingerprint, and adapter write timestamp.
+Profile state remains optional: hosts may always pass a direct profile snapshot
+to the deterministic engine instead of using this store.
+
 ## SQL and concurrency
 
 All production SQL is prepared with `sqlite3_prepare_v2`. Host values are bound

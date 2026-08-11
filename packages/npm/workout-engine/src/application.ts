@@ -24,7 +24,7 @@ export function createProgramFacade(
   dependencies: ProgramDependencies,
 ): Program {
   const catalog = [...options.catalog];
-  const scope = { hostScopeKey: options.hostScopeKey, athleteId: options.athlete?.id };
+  const scope = { hostScopeKey: options.hostScopeKey, athleteId: options.athleteProfile?.id };
   let history = structuredClone(options.history);
   let state = options.methodologyState;
   let stateRevision = options.methodologyStateRevision ?? null;
@@ -37,9 +37,9 @@ export function createProgramFacade(
         methodology: options.methodology,
         methodologyState: state,
         catalog,
-        athlete: options.athlete,
+        athleteProfile: options.athleteProfile,
         history,
-        session: recommendationOptions.session,
+        trainingContext: recommendationOptions.trainingContext,
         alternativeLimit: recommendationOptions.alternativeLimit,
         tieBreakSeed: recommendationOptions.tieBreakSeed,
       });
@@ -76,7 +76,7 @@ export function createProgramFacade(
         methodology: options.methodology,
         methodologyState: state,
         catalog,
-        athlete: options.athlete,
+        athleteProfile: options.athleteProfile,
         history: evaluationOptions.history ?? history,
         completedWorkout,
       });

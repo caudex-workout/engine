@@ -65,7 +65,7 @@ void active;
 void templates;
 void recovery;
 
-if (PERSISTENCE_CONTRACT_VERSION !== 2) {
+if (PERSISTENCE_CONTRACT_VERSION !== 3) {
   throw new Error("unexpected persistence contract version");
 }
 

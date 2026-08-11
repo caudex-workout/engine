@@ -30,9 +30,9 @@ try {
   });
   const result = program.recommend({
     asOf: "2026-07-25T14:00:00Z",
-    session: {
+    trainingContext: {
       availableMinutes: 35,
-      availableEquipmentIds: ["dumbbell", "adjustable-bench"],
+      equipment: { override: ["dumbbell", "adjustable-bench"] },
     },
   });
   if (!result.ok) {

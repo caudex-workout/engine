@@ -15,7 +15,7 @@ const c = @cImport({
 });
 
 pub const adapter_version = "0.1.0";
-pub const schema_version: u32 = 11;
+pub const schema_version: u32 = 12;
 pub const minimum_schema_version: u32 = 1;
 
 pub const Options = struct {
@@ -147,6 +147,17 @@ pub const Adapter = opaque {
             .context = self,
             .load_fn = loadStateCallback,
             .compare_and_set_fn = compareAndSetStateCallback,
+        };
+    }
+
+    /// Stores host-owned persistent athlete profiles separately from program
+    /// and progression state. The adapter assigns the programming revision;
+    /// callers use it as the optimistic-concurrency token.
+    pub fn athleteProfileStore(self: *Adapter) persistence.AthleteProfileStore {
+        return .{
+            .context = self,
+            .load_fn = loadAthleteProfileCallback,
+            .compare_and_set_fn = compareAndSetAthleteProfileCallback,
         };
     }
 
@@ -580,6 +591,10 @@ pub const Adapter = opaque {
         if (current < 11) try self.applyMigration(
             11,
             @embedFile("sqlite/migrations/011_programming_hierarchy.sql"),
+        );
+        if (current < 12) try self.applyMigration(
+            12,
+            @embedFile("sqlite/migrations/012_athlete_profiles.sql"),
         );
     }
 
@@ -2102,6 +2117,27 @@ fn exportPortableCallback(context: *anyopaque, allocator: std.mem.Allocator, que
         });
     }
 
+    var athlete_profiles: std.ArrayList(portable.AthleteProfileRecord) = .empty;
+    {
+        var statement = try self.prepare(
+            "SELECT athlete_profile_id, profile_json, revision, fingerprint FROM athlete_profiles WHERE host_scope_key = ?1 ORDER BY athlete_profile_id",
+        );
+        defer statement.finalize();
+        try statement.bindText(1, query.host_scope_key);
+        while (try statement.row()) {
+            const id = column(statement.raw, 0) orelse return error.InvalidData;
+            const json = column(statement.raw, 1) orelse return error.InvalidData;
+            const revision = c.sqlite3_column_int64(statement.raw, 2);
+            if (revision <= 0 or !std.mem.eql(u8, column(statement.raw, 3) orelse return error.InvalidData, &athleteProfileFingerprint(json))) return error.InvalidData;
+            const profile = try parseColumn(persistence.canonical.AthleteProfile, allocator, statement.raw, 1);
+            if (!std.mem.eql(u8, profile.id, id) or profile.revision != @as(u64, @intCast(revision))) return error.InvalidData;
+            try athlete_profiles.append(allocator, .{
+                .hostScopeKey = try allocator.dupe(u8, query.host_scope_key),
+                .profile = profile,
+            });
+        }
+    }
+
     var active: std.ArrayList(portable.ActiveWorkoutRecord) = .empty;
     {
         var statement = try self.prepare(
@@ -2238,6 +2274,7 @@ fn exportPortableCallback(context: *anyopaque, allocator: std.mem.Allocator, que
         .catalogReferences = try catalog_references.toOwnedSlice(allocator),
         .customExercises = try custom_exercises.toOwnedSlice(allocator),
         .templates = try templates.toOwnedSlice(allocator),
+        .athleteProfiles = try athlete_profiles.toOwnedSlice(allocator),
         .activeWorkouts = try active.toOwnedSlice(allocator),
         .completedWorkouts = try completed.toOwnedSlice(allocator),
         .acceptedRecommendations = try accepted.toOwnedSlice(allocator),
@@ -2313,6 +2350,7 @@ fn importPortableCallback(context: *anyopaque, allocator: std.mem.Allocator, req
             .catalogReferences = request.document.catalogReferences.len,
             .customExercises = request.document.customExercises.len,
             .templates = request.document.templates.len,
+            .athleteProfiles = request.document.athleteProfiles.len,
             .activeWorkouts = request.document.activeWorkouts.len,
             .completedWorkouts = request.document.completedWorkouts.len,
             .acceptedRecommendations = request.document.acceptedRecommendations.len,
@@ -2381,6 +2419,32 @@ fn importPortableCallback(context: *anyopaque, allocator: std.mem.Allocator, req
         try statement.bindText(2, record.template.id);
         try statement.bindInt(3, record.template.revision);
         try statement.bindText(4, payload);
+        try statement.done();
+    }
+    for (request.document.athleteProfiles) |record| {
+        if (record.profile.revision > std.math.maxInt(i64)) return error.InvalidData;
+        const exists = try portableRecordExists(self, "SELECT 1 FROM athlete_profiles WHERE host_scope_key = ?1 AND athlete_profile_id = ?2", record.hostScopeKey, record.profile.id);
+        if (exists and request.mode == .merge and request.conflictPolicy == .keepExisting) continue;
+        const profile_json = try encodeAlloc(allocator, record.profile);
+        defer allocator.free(profile_json);
+        const fingerprint = athleteProfileFingerprint(profile_json);
+        var statement = try self.prepare(
+            \\INSERT INTO athlete_profiles
+            \\  (host_scope_key, athlete_profile_id, profile_json, revision, fingerprint, updated_at)
+            \\VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            \\ON CONFLICT (host_scope_key, athlete_profile_id) DO UPDATE SET
+            \\  profile_json = excluded.profile_json,
+            \\  revision = excluded.revision,
+            \\  fingerprint = excluded.fingerprint,
+            \\  updated_at = excluded.updated_at
+        );
+        defer statement.finalize();
+        try statement.bindText(1, record.hostScopeKey);
+        try statement.bindText(2, record.profile.id);
+        try statement.bindText(3, profile_json);
+        try statement.bindInt(4, record.profile.revision);
+        try statement.bindText(5, &fingerprint);
+        try statement.bindText(6, request.document.exportedAt);
         try statement.done();
     }
     for (request.document.activeWorkouts) |record| {
@@ -2543,6 +2607,7 @@ fn appendPortableConflicts(self: *Adapter, document: portable.Document, issues: 
     for (document.catalogReferences) |record| if (try portableRecordExists(self, "SELECT 1 FROM portable_catalog_references WHERE host_scope_key=?1 AND exercise_id=?2", record.hostScopeKey, record.exerciseId)) appendPortableConflict(issues, &count, "/document/catalogReferences");
     for (document.customExercises) |record| if (try portableRecordExists(self, "SELECT 1 FROM catalog WHERE host_scope_key=?1 AND exercise_id=?2", record.hostScopeKey, record.exercise.id)) appendPortableConflict(issues, &count, "/document/customExercises");
     for (document.templates) |record| if (try portableRecordExists(self, "SELECT 1 FROM workout_templates WHERE host_scope_key=?1 AND template_id=?2", record.hostScopeKey, record.template.id)) appendPortableConflict(issues, &count, "/document/templates");
+    for (document.athleteProfiles) |record| if (try portableRecordExists(self, "SELECT 1 FROM athlete_profiles WHERE host_scope_key=?1 AND athlete_profile_id=?2", record.hostScopeKey, record.profile.id)) appendPortableConflict(issues, &count, "/document/athleteProfiles");
     for (document.activeWorkouts) |record| if (try portableActiveExists(self, record.hostScopeKey, record.athleteId orelse "", record.workoutId)) appendPortableConflict(issues, &count, "/document/activeWorkouts");
     for (document.completedWorkouts) |record| if (try portableRecordExists(self, "SELECT 1 FROM history WHERE host_scope_key=?1 AND workout_id=?2", record.hostScopeKey, record.workout.id)) appendPortableConflict(issues, &count, "/document/completedWorkouts");
     for (document.acceptedRecommendations) |record| if (try portableRecordExists(self, "SELECT 1 FROM accepted_recommendations WHERE host_scope_key=?1 AND accepted_recommendation_id=?2", record.hostScopeKey, record.id)) appendPortableConflict(issues, &count, "/document/acceptedRecommendations");
@@ -2588,6 +2653,7 @@ fn deletePortableScopes(self: *Adapter, allocator: std.mem.Allocator, document: 
     for (document.catalogReferences) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
     for (document.customExercises) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
     for (document.templates) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
+    for (document.athleteProfiles) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
     for (document.activeWorkouts) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
     for (document.completedWorkouts) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
     for (document.acceptedRecommendations) |record| try appendUniqueScope(allocator, &scopes, record.hostScopeKey);
@@ -2616,6 +2682,7 @@ fn deletePortableScopes(self: *Adapter, allocator: std.mem.Allocator, document: 
         "DELETE FROM progression_state WHERE host_scope_key=?1",
         "DELETE FROM program_state WHERE host_scope_key=?1",
         "DELETE FROM workout_templates WHERE host_scope_key=?1",
+        "DELETE FROM athlete_profiles WHERE host_scope_key=?1",
         "DELETE FROM workflow_recovery WHERE host_scope_key=?1",
     };
     for (scopes.items) |scope| for (statements) |sql| try executeScopeDelete(self, sql, scope);
@@ -2734,6 +2801,73 @@ fn loadStateCallback(
     return try readStateRecord(allocator, statement.raw, key);
 }
 
+fn loadAthleteProfileCallback(
+    context: *anyopaque,
+    allocator: std.mem.Allocator,
+    key: persistence.AthleteProfileKey,
+) persistence.CapabilityError!?persistence.AthleteProfileRecord {
+    const self: *Adapter = @ptrCast(@alignCast(context));
+    var statement = try self.prepare(
+        \\SELECT profile_json, revision, fingerprint
+        \\FROM athlete_profiles
+        \\WHERE host_scope_key = ?1 AND athlete_profile_id = ?2
+    );
+    defer statement.finalize();
+    try statement.bindText(1, key.host_scope_key);
+    try statement.bindText(2, key.athlete_profile_id);
+    if (!try statement.row()) return null;
+    return try readAthleteProfileRecord(allocator, statement.raw, key);
+}
+
+fn compareAndSetAthleteProfileCallback(
+    context: *anyopaque,
+    allocator: std.mem.Allocator,
+    change: persistence.CompareAndSetAthleteProfile,
+) persistence.StateStoreError!persistence.AthleteProfileRecord {
+    const self: *Adapter = @ptrCast(@alignCast(context));
+    if (change.key.host_scope_key.len == 0 or change.key.athlete_profile_id.len == 0 or
+        !std.mem.eql(u8, change.next_profile.id, change.key.athlete_profile_id))
+        return error.InvalidData;
+
+    try self.execute("BEGIN IMMEDIATE");
+    errdefer self.execute("ROLLBACK") catch {};
+
+    const current = try loadAthleteProfileCallback(context, allocator, change.key);
+    const actual_revision = if (current) |record| record.profile.revision else null;
+    if (actual_revision != change.expected_revision) {
+        self.execute("ROLLBACK") catch {};
+        return error.Conflict;
+    }
+    const next_revision = nextAthleteProfileRevision(actual_revision) catch return error.InvalidData;
+    var profile = change.next_profile;
+    profile.revision = next_revision;
+    const profile_json = try encodeAlloc(allocator, profile);
+    defer allocator.free(profile_json);
+    const fingerprint = athleteProfileFingerprint(profile_json);
+
+    var statement = try self.prepare(
+        \\INSERT INTO athlete_profiles
+        \\  (host_scope_key, athlete_profile_id, profile_json, revision, fingerprint, updated_at)
+        \\VALUES (?1, ?2, ?3, ?4, ?5, CURRENT_TIMESTAMP)
+        \\ON CONFLICT (host_scope_key, athlete_profile_id) DO UPDATE SET
+        \\  profile_json = excluded.profile_json,
+        \\  revision = excluded.revision,
+        \\  fingerprint = excluded.fingerprint,
+        \\  updated_at = excluded.updated_at
+    );
+    defer statement.finalize();
+    try statement.bindText(1, change.key.host_scope_key);
+    try statement.bindText(2, change.key.athlete_profile_id);
+    try statement.bindText(3, profile_json);
+    try statement.bindInt(4, next_revision);
+    try statement.bindText(5, &fingerprint);
+    try statement.done();
+    try self.execute("COMMIT");
+
+    return (try loadAthleteProfileCallback(context, allocator, change.key)) orelse
+        return error.OperationFailed;
+}
+
 fn compareAndSetStateCallback(
     context: *anyopaque,
     allocator: std.mem.Allocator,
@@ -2809,6 +2943,13 @@ fn nextMethodologyStateRevision(
     return std.math.add(u64, revision, 1) catch error.RevisionOverflow;
 }
 
+fn nextAthleteProfileRevision(current_revision: ?u64) error{RevisionOverflow}!u64 {
+    const current = current_revision orelse return 1;
+    const next = std.math.add(u64, current, 1) catch return error.RevisionOverflow;
+    if (next > std.math.maxInt(i64)) return error.RevisionOverflow;
+    return next;
+}
+
 test "methodology state revisions and metric counts reject overflow" {
     try std.testing.expectEqual(
         @as(u64, 1),
@@ -2866,6 +3007,43 @@ fn readStateRecord(
         .revision = revision,
         .updated_at = try dupeColumn(allocator, statement, 4),
     };
+}
+
+fn readAthleteProfileRecord(
+    allocator: std.mem.Allocator,
+    statement: *c.sqlite3_stmt,
+    key: persistence.AthleteProfileKey,
+) persistence.CapabilityError!persistence.AthleteProfileRecord {
+    const json = column(statement, 0) orelse return error.InvalidData;
+    const stored_revision = c.sqlite3_column_int64(statement, 1);
+    if (stored_revision <= 0) return error.InvalidData;
+    const fingerprint = column(statement, 2) orelse return error.InvalidData;
+    const expected_fingerprint = athleteProfileFingerprint(json);
+    if (!std.mem.eql(u8, fingerprint, &expected_fingerprint)) return error.InvalidData;
+    const profile = std.json.parseFromSliceLeaky(
+        persistence.canonical.AthleteProfile,
+        allocator,
+        json,
+        .{ .allocate = .alloc_always },
+    ) catch return error.InvalidData;
+    if (!std.mem.eql(u8, profile.id, key.athlete_profile_id) or
+        profile.revision != @as(u64, @intCast(stored_revision))) return error.InvalidData;
+    return .{
+        .key = .{
+            .host_scope_key = try allocator.dupe(u8, key.host_scope_key),
+            .athlete_profile_id = try allocator.dupe(u8, key.athlete_profile_id),
+        },
+        .profile = profile,
+    };
+}
+
+fn athleteProfileFingerprint(profile_json: []const u8) [64]u8 {
+    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+    hasher.update("caudex:sqlite-athlete-profile:v1\x00");
+    hasher.update(profile_json);
+    var digest: [32]u8 = undefined;
+    hasher.final(&digest);
+    return std.fmt.bytesToHex(digest, .lower);
 }
 
 fn parseColumn(

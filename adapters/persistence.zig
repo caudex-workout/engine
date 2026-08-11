@@ -10,7 +10,7 @@ const caudex = @import("caudex");
 pub const portable = @import("caudex_portable");
 
 pub const canonical = caudex.canonical;
-pub const contract_version: u32 = 3;
+pub const contract_version: u32 = 4;
 
 pub const AdapterError = error{
     Unavailable,
@@ -31,6 +31,63 @@ pub const HistoryQuery = struct {
     host_scope_key: []const u8,
     through: []const u8,
     exercise_ids: []const []const u8 = &.{},
+};
+
+/// Identifies a host-owned persistent athlete profile without prescribing an
+/// account, authentication, or tenancy model.
+pub const AthleteProfileKey = struct {
+    host_scope_key: []const u8,
+    athlete_profile_id: []const u8,
+};
+
+/// A programming-relevant athlete-profile snapshot. The profile's numeric
+/// revision is its optimistic-concurrency token; hosts may retain separate
+/// presentation-only metadata without changing this record.
+pub const AthleteProfileRecord = struct {
+    key: AthleteProfileKey,
+    profile: canonical.AthleteProfile,
+};
+
+/// Replaces a profile only when the stored programming revision matches.
+/// `expected_revision = null` means create only if absent. The returned
+/// profile is the accepted persisted snapshot, including its next revision.
+pub const CompareAndSetAthleteProfile = struct {
+    key: AthleteProfileKey,
+    expected_revision: ?u64,
+    next_profile: canonical.AthleteProfile,
+};
+
+/// Optional persistent-profile capability. It deliberately remains separate
+/// from program and progression state: hosts may instead pass an explicit
+/// profile snapshot directly to the deterministic engine.
+pub const AthleteProfileStore = struct {
+    context: *anyopaque,
+    load_fn: *const fn (
+        context: *anyopaque,
+        allocator: std.mem.Allocator,
+        key: AthleteProfileKey,
+    ) CapabilityError!?AthleteProfileRecord,
+    compare_and_set_fn: *const fn (
+        context: *anyopaque,
+        allocator: std.mem.Allocator,
+        change: CompareAndSetAthleteProfile,
+    ) StateStoreError!AthleteProfileRecord,
+
+    pub fn load(
+        self: AthleteProfileStore,
+        allocator: std.mem.Allocator,
+        key: AthleteProfileKey,
+    ) CapabilityError!?AthleteProfileRecord {
+        return self.load_fn(self.context, allocator, key);
+    }
+
+    pub fn compareAndSet(
+        self: AthleteProfileStore,
+        allocator: std.mem.Allocator,
+        change: CompareAndSetAthleteProfile,
+    ) StateStoreError!AthleteProfileRecord {
+        return self.compare_and_set_fn(self.context, allocator, change);
+    }
 };
 
 pub const MethodologyStateKey = struct {

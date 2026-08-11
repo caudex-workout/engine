@@ -47,10 +47,9 @@
       ]
     }
   ],
-  "athlete": {
-    "preferences": {
-      "preferredExerciseIds": ["incline-dumbbell-press"]
-    }
+  "athleteProfile": {
+    "id": "athlete-1",
+    "exercisePreferences": [{ "targetKind": "exercise", "targetId": "incline-dumbbell-press", "level": "preferred" }]
   },
   "history": {
     "workouts": [
@@ -77,10 +76,10 @@
       }
     ]
   },
-  "session": {
+  "trainingContext": {
     "availableMinutes": 35,
-    "availableEquipmentIds": ["dumbbell", "adjustable-bench"],
-    "goals": ["hypertrophy"],
+    "equipment": { "override": ["dumbbell", "adjustable-bench"] },
+    "goals": { "primary": { "id": "hypertrophy" } },
     "maxExercises": 4
   },
   "alternativeLimit": 1

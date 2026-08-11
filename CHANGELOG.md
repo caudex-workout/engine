@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Replace the loose athlete/session settings contract with first-class athlete
+  profiles, reusable training locations, session-scoped training context,
+  deterministic resolution/provenance, and profile persistence/portable state.
+  This is an intentional canonical and TypeScript request-shape change:
+  `athlete` becomes `athleteProfile`, and `session` becomes `trainingContext`.
+
 All notable changes to Caudex Workout Engine will be documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),

@@ -4,10 +4,14 @@ import {
   PersistenceRevisionConflictError,
   type ActiveWorkoutRecord,
   type ActiveWorkoutStore,
+  type AthleteProfileKey,
+  type AthleteProfileRecord,
+  type AthleteProfileStore,
   type AcceptedRecommendationRecord,
   type CatalogScope,
   type CatalogSource,
   type CompareAndSetMethodologyState,
+  type CompareAndSetAthleteProfile,
   type CompletedWorkoutSink,
   type HistoryQuery,
   type HistorySnapshot,
@@ -32,7 +36,7 @@ import type {
   PortableIssue,
 } from "@caudex-workout/engine";
 
-export const INDEXEDDB_SCHEMA_VERSION = 4;
+export const INDEXEDDB_SCHEMA_VERSION = 5;
 
 const CATALOG_STORE = "catalog";
 const HISTORY_STORE = "history";
@@ -42,6 +46,7 @@ const ACTIVE_WORKOUT_STORE = "active_workouts";
 const TEMPLATE_STORE = "workout_templates";
 const RECOVERY_STORE = "workflow_recovery";
 const CATALOG_REFERENCE_STORE = "portable_catalog_references";
+const ATHLETE_PROFILE_STORE = "athlete_profiles";
 
 interface CatalogRow {
   hostScopeKey: string;
@@ -65,6 +70,7 @@ interface ActiveWorkoutRow extends ActiveWorkoutRecord { revision: number }
 interface TemplateRow extends WorkoutTemplateRecord { revision: number }
 interface RecoveryRow extends WorkflowRecoveryRecord {}
 interface CatalogReferenceRow { hostScopeKey: string; exerciseId: string; catalogId?: string; catalogVersion?: string }
+interface AthleteProfileRow extends AthleteProfileRecord { hostScopeKey: string; athleteProfileId: string; revision: number }
 
 export interface IndexedDbAdapterOptions {
   databaseName?: string;
@@ -81,6 +87,7 @@ export class IndexedDbPersistenceAdapter
     ActiveWorkoutStore,
     WorkoutTemplateStore,
     WorkflowRecoveryStore,
+    AthleteProfileStore,
     PortableDataStore
 {
   readonly databaseName: string;
@@ -99,6 +106,37 @@ export class IndexedDbPersistenceAdapter
       );
     }
     this.#factory = factory;
+  }
+
+  async loadAthleteProfile(key: AthleteProfileKey): Promise<AthleteProfileRecord | null> {
+    const database = await this.#open();
+    const transaction = database.transaction(ATHLETE_PROFILE_STORE, "readonly");
+    const row = await request<AthleteProfileRow | undefined>(transaction.objectStore(ATHLETE_PROFILE_STORE).get([key.hostScopeKey, key.athleteProfileId]));
+    await transactionDone(transaction, "loadAthleteProfile");
+    return row ? structuredClone(row) : null;
+  }
+
+  async compareAndSetAthleteProfile(change: CompareAndSetAthleteProfile): Promise<AthleteProfileRecord> {
+    const database = await this.#open();
+    const transaction = database.transaction(ATHLETE_PROFILE_STORE, "readwrite");
+    const store = transaction.objectStore(ATHLETE_PROFILE_STORE);
+    try {
+      const existing = await request<AthleteProfileRow | undefined>(store.get([change.key.hostScopeKey, change.key.athleteProfileId]));
+      const currentRevision = existing?.profile.revision ?? null;
+      if (currentRevision !== change.expectedRevision) {
+        transaction.abort();
+        throw new PersistenceRevisionConflictError("athlete_profile", change.key.athleteProfileId, change.expectedRevision, currentRevision);
+      }
+      if (change.nextProfile.id !== change.key.athleteProfileId) throw new PersistenceAdapterError("invalid_data", "compareAndSetAthleteProfile", "Profile ID must match the scoped profile key.");
+      const nextRevision = (currentRevision ?? 0) + 1;
+      const row: AthleteProfileRow = { key: structuredClone(change.key), profile: structuredClone({ ...change.nextProfile, revision: nextRevision }), revision: nextRevision, hostScopeKey: change.key.hostScopeKey, athleteProfileId: change.key.athleteProfileId };
+      store.put(row);
+      await transactionDone(transaction, "compareAndSetAthleteProfile");
+      return row;
+    } catch (error) {
+      if (error instanceof PersistenceRevisionConflictError) throw error;
+      throw adapterError("compareAndSetAthleteProfile", error);
+    }
   }
 
   async replaceCatalog(
@@ -367,7 +405,7 @@ export class IndexedDbPersistenceAdapter
 
   async exportPortable(query: PortableExportQuery): Promise<PortableDocument> {
     const database = await this.#open();
-    const stores = [CATALOG_STORE, HISTORY_STORE, STATE_STORE, JOURNAL_STORE, ACTIVE_WORKOUT_STORE, TEMPLATE_STORE, RECOVERY_STORE, CATALOG_REFERENCE_STORE];
+    const stores = [CATALOG_STORE, HISTORY_STORE, STATE_STORE, JOURNAL_STORE, ACTIVE_WORKOUT_STORE, TEMPLATE_STORE, RECOVERY_STORE, CATALOG_REFERENCE_STORE, ATHLETE_PROFILE_STORE];
     const transaction = database.transaction(stores, "readonly");
     const scope = query.hostScopeKey;
     const catalogPromise = request<CatalogRow[]>(transaction.objectStore(CATALOG_STORE).index("by_scope").getAll(scope));
@@ -378,8 +416,9 @@ export class IndexedDbPersistenceAdapter
     const templatePromise = request<TemplateRow[]>(transaction.objectStore(TEMPLATE_STORE).getAll());
     const recoveryPromise = request<RecoveryRow[]>(transaction.objectStore(RECOVERY_STORE).getAll());
     const referencesPromise = request<CatalogReferenceRow[]>(transaction.objectStore(CATALOG_REFERENCE_STORE).getAll());
-    const [catalog, history, states, journal, active, templates, recovery, references] = await Promise.all([
-      catalogPromise, historyPromise, statePromise, journalPromise, activePromise, templatePromise, recoveryPromise, referencesPromise,
+    const profilesPromise = request<Array<AthleteProfileRow & { hostScopeKey: string; athleteProfileId: string }>>(transaction.objectStore(ATHLETE_PROFILE_STORE).getAll());
+    const [catalog, history, states, journal, active, templates, recovery, references, profiles] = await Promise.all([
+      catalogPromise, historyPromise, statePromise, journalPromise, activePromise, templatePromise, recoveryPromise, referencesPromise, profilesPromise,
     ]);
     await transactionDone(transaction, "exportPortable");
     const document: PortableDocument = {
@@ -394,6 +433,9 @@ export class IndexedDbPersistenceAdapter
       templates: templates.filter((row) => row.hostScopeKey === scope)
         .sort((left, right) => portableCompare(left.template.id, right.template.id))
         .map((row) => ({ hostScopeKey: scope, template: structuredClone(row.template) })),
+      athleteProfiles: profiles.filter((row) => row.hostScopeKey === scope)
+        .sort((left, right) => portableCompare(left.athleteProfileId, right.athleteProfileId))
+        .map((row) => ({ hostScopeKey: scope, profile: structuredClone(row.profile) })),
       activeWorkouts: active.filter((row) => row.hostScopeKey === scope)
         .sort((left, right) => {
           const athlete = portableCompare(left.athleteId ?? left.snapshot.workouts?.find((workout) => workout.id === left.workoutId)?.scope.athleteId ?? "", right.athleteId ?? right.snapshot.workouts?.find((workout) => workout.id === right.workoutId)?.scope.athleteId ?? "");
@@ -426,7 +468,7 @@ export class IndexedDbPersistenceAdapter
     const plan = validatePortableRequest(input);
     if (!plan.valid || input.dryRun !== false) return plan;
     const database = await this.#open();
-    const storeNames = [CATALOG_STORE, HISTORY_STORE, STATE_STORE, JOURNAL_STORE, ACTIVE_WORKOUT_STORE, TEMPLATE_STORE, RECOVERY_STORE, CATALOG_REFERENCE_STORE];
+    const storeNames = [CATALOG_STORE, HISTORY_STORE, STATE_STORE, JOURNAL_STORE, ACTIVE_WORKOUT_STORE, TEMPLATE_STORE, RECOVERY_STORE, CATALOG_REFERENCE_STORE, ATHLETE_PROFILE_STORE];
     const transaction = database.transaction(storeNames, "readwrite");
     try {
       if (input.mode === "replace") {
@@ -453,6 +495,8 @@ export class IndexedDbPersistenceAdapter
         transaction.objectStore(CATALOG_STORE).put({ hostScopeKey: record.hostScopeKey, exerciseId: record.exercise.id, exercise: record.exercise } satisfies CatalogRow);
       for (const record of input.document.templates ?? []) if (shouldWrite(`template:${record.hostScopeKey}:${record.template.id}`))
         transaction.objectStore(TEMPLATE_STORE).put({ hostScopeKey: record.hostScopeKey, template: record.template, revision: record.template.revision } satisfies TemplateRow);
+      for (const record of input.document.athleteProfiles ?? []) if (shouldWrite(`profile:${record.hostScopeKey}:${record.profile.id}`))
+        transaction.objectStore(ATHLETE_PROFILE_STORE).put({ hostScopeKey: record.hostScopeKey, athleteProfileId: record.profile.id, key: { hostScopeKey: record.hostScopeKey, athleteProfileId: record.profile.id }, profile: record.profile, revision: record.profile.revision ?? 0 });
       for (const record of input.document.activeWorkouts ?? []) if (shouldWrite(`active:${record.hostScopeKey}:${record.workoutId}`)) {
         const workout = record.snapshot.workouts?.find((candidate) => candidate.id === record.workoutId);
         if (!workout) throw new PersistenceAdapterError("invalid_data", "importPortable", "An active-workout record does not contain its workout.");
@@ -518,7 +562,7 @@ function validatePortableRequest(input: PortableImportRequest): PortableImportPl
   if (input.schemaVersion !== 1 || document.schemaVersion !== 1) add("portable.unsupported_version", "/schemaVersion", "Only portable schema version 1 is supported.");
   if (!validTimestamp(document.exportedAt)) add("portable.timestamp_invalid", "/document/exportedAt", "The export timestamp is not valid RFC 3339.");
   const collections = {
-    catalogReferences: document.catalogReferences ?? [], customExercises: document.customExercises ?? [], templates: document.templates ?? [],
+    catalogReferences: document.catalogReferences ?? [], customExercises: document.customExercises ?? [], templates: document.templates ?? [], athleteProfiles: document.athleteProfiles ?? [],
     activeWorkouts: document.activeWorkouts ?? [], completedWorkouts: document.completedWorkouts ?? [], acceptedRecommendations: document.acceptedRecommendations ?? [],
     methodologyStates: document.methodologyStates ?? [], workflowRecovery: document.workflowRecovery ?? [],
   };
@@ -528,6 +572,7 @@ function validatePortableRequest(input: PortableImportRequest): PortableImportPl
     ["catalogReferences", collections.catalogReferences.map((value) => `${value.hostScopeKey}\0${value.exerciseId}`)],
     ["customExercises", collections.customExercises.map((value) => `${value.hostScopeKey}\0${value.exercise.id}`)],
     ["templates", collections.templates.map((value) => `${value.hostScopeKey}\0${value.template.id}`)],
+    ["athleteProfiles", collections.athleteProfiles.map((value) => `${value.hostScopeKey}\0${value.profile.id}`)],
     ["activeWorkouts", collections.activeWorkouts.map((value) => `${value.hostScopeKey}\0${value.athleteId ?? ""}\0${value.workoutId}`)],
     ["completedWorkouts", collections.completedWorkouts.map((value) => `${value.hostScopeKey}\0${value.workout.id}`)],
     ["acceptedRecommendations", collections.acceptedRecommendations.map((value) => `${value.hostScopeKey}\0${value.id}`)],
@@ -535,6 +580,10 @@ function validatePortableRequest(input: PortableImportRequest): PortableImportPl
     ["workflowRecovery", collections.workflowRecovery.map((value) => `${value.hostScopeKey}\0${value.workflowId}`)],
   ];
   const indexedDbActiveKeys = new Set<string>();
+  for (const record of collections.athleteProfiles) {
+    if (!record.profile.id) add("portable.profile_id_invalid", "/document/athleteProfiles", "An athlete profile must have a stable non-empty ID.");
+    if ((record.profile.schemaVersion ?? 1) !== 1) add("portable.profile_version_unsupported", "/document/athleteProfiles", "An athlete profile uses an unsupported schema version.");
+  }
   for (const record of collections.activeWorkouts) {
     const key = `${record.hostScopeKey}\0${record.workoutId}`;
     if (indexedDbActiveKeys.has(key)) add("portable.adapter_key_conflict", "/document/activeWorkouts", "IndexedDB requires workout IDs to be unique within a host scope.");
@@ -650,6 +699,7 @@ function portableScopes(document: PortableDocument): Set<string> {
     ...(document.catalogReferences ?? []).map((value) => value.hostScopeKey),
     ...(document.customExercises ?? []).map((value) => value.hostScopeKey),
     ...(document.templates ?? []).map((value) => value.hostScopeKey),
+    ...(document.athleteProfiles ?? []).map((value) => value.hostScopeKey),
     ...(document.activeWorkouts ?? []).map((value) => value.hostScopeKey),
     ...(document.completedWorkouts ?? []).map((value) => value.hostScopeKey),
     ...(document.acceptedRecommendations ?? []).map((value) => value.hostScopeKey),
@@ -659,9 +709,9 @@ function portableScopes(document: PortableDocument): Set<string> {
 }
 
 async function portableConflicts(transaction: IDBTransaction, document: PortableDocument): Promise<Set<string>> {
-  const stores = [CATALOG_STORE, HISTORY_STORE, STATE_STORE, JOURNAL_STORE, ACTIVE_WORKOUT_STORE, TEMPLATE_STORE, RECOVERY_STORE, CATALOG_REFERENCE_STORE];
+  const stores = [CATALOG_STORE, HISTORY_STORE, STATE_STORE, JOURNAL_STORE, ACTIVE_WORKOUT_STORE, TEMPLATE_STORE, RECOVERY_STORE, CATALOG_REFERENCE_STORE, ATHLETE_PROFILE_STORE];
   const requests = stores.map((name) => request<unknown[]>(transaction.objectStore(name).getAll()));
-  const [catalog, history, states, journal, active, templates, recovery, references] = await Promise.all(requests) as [CatalogRow[], HistoryRow[], StateRow[], JournalRow[], ActiveWorkoutRow[], TemplateRow[], RecoveryRow[], CatalogReferenceRow[]];
+  const [catalog, history, states, journal, active, templates, recovery, references, profiles] = await Promise.all(requests) as [CatalogRow[], HistoryRow[], StateRow[], JournalRow[], ActiveWorkoutRow[], TemplateRow[], RecoveryRow[], CatalogReferenceRow[], Array<AthleteProfileRow & { hostScopeKey: string; athleteProfileId: string }>];
   const existing = new Set<string>([
     ...catalog.map((row) => `catalog:${row.hostScopeKey}:${row.exerciseId}`),
     ...history.map((row) => `history:${row.hostScopeKey}:${row.workoutId}`),
@@ -671,6 +721,7 @@ async function portableConflicts(transaction: IDBTransaction, document: Portable
     ...templates.map((row) => `template:${row.hostScopeKey}:${row.template.id}`),
     ...recovery.map((row) => `recovery:${row.hostScopeKey}:${row.workflowId}`),
     ...references.map((row) => `reference:${row.hostScopeKey}:${row.exerciseId}`),
+    ...profiles.map((row) => `profile:${row.hostScopeKey}:${row.athleteProfileId}`),
   ]);
   const incoming = [
     ...(document.catalogReferences ?? []).map((row) => `reference:${row.hostScopeKey}:${row.exerciseId}`),
@@ -680,6 +731,7 @@ async function portableConflicts(transaction: IDBTransaction, document: Portable
     ...(document.acceptedRecommendations ?? []).map((row) => `journal:${row.hostScopeKey}:${row.id}`),
     ...(document.activeWorkouts ?? []).map((row) => `active:${row.hostScopeKey}:${row.workoutId}`),
     ...(document.templates ?? []).map((row) => `template:${row.hostScopeKey}:${row.template.id}`),
+    ...(document.athleteProfiles ?? []).map((row) => `profile:${row.hostScopeKey}:${row.profile.id}`),
     ...(document.workflowRecovery ?? []).map((row) => `recovery:${row.hostScopeKey}:${row.workflowId}`),
   ];
   return new Set(incoming.filter((key) => existing.has(key)));
@@ -762,6 +814,9 @@ function openDatabase(
       }
       if (!database.objectStoreNames.contains(CATALOG_REFERENCE_STORE)) {
         database.createObjectStore(CATALOG_REFERENCE_STORE, { keyPath: ["hostScopeKey", "exerciseId"] });
+      }
+      if (!database.objectStoreNames.contains(ATHLETE_PROFILE_STORE)) {
+        database.createObjectStore(ATHLETE_PROFILE_STORE, { keyPath: ["hostScopeKey", "athleteProfileId"] });
       }
     };
     open.onerror = () => reject(adapterError("open", open.error));

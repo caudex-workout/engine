@@ -2,6 +2,7 @@ const std = @import("std");
 const caudex = @import("caudex");
 const canonical = caudex.canonical;
 const canonical_json = caudex.canonical_json;
+const athlete_profile = caudex.athlete_profile;
 const double_progression = caudex.double_progression;
 const discovery = caudex.discovery;
 const engine = caudex.engine;
@@ -305,6 +306,7 @@ fn executeRecommendationInstantiation(runtime: *Runtime, input: []const u8, out:
     defer arena.deinit();
     const allocator = arena.allocator();
     const value = document.value;
+    const resolved_context = if (value.recommendationResult.recommendation) |recommendation| recommendation.resolvedTrainingContext else null;
     const result = workflows.instantiateRecommendation(value.recommendationResult, value.catalog, .{
         .scope = .{
             .host_scope_key = tracking.Id.parse(value.scope.hostScopeKey) catch return error.InvalidRequest,
@@ -315,12 +317,27 @@ fn executeRecommendationInstantiation(runtime: *Runtime, input: []const u8, out:
         .accepted_recommendation_id = tracking.Id.parse(value.acceptedRecommendationId) catch return error.InvalidRequest,
         .methodology_state_revision = value.methodologyStateRevision,
         .methodology_state_fingerprint = value.methodologyStateFingerprint,
+        .athlete_profile_id = if (resolved_context) |context| context.athleteProfileId else null,
+        .athlete_profile_revision = if (resolved_context) |context| context.athleteProfileRevision else null,
+        .athlete_profile_fingerprint = if (resolved_context) |context| context.athleteProfileFingerprint else null,
+        .training_location_id = if (resolved_context) |context| context.locationId else null,
+        .effective_equipment_ids = if (resolved_context) |context| context.availableEquipmentIds else &.{},
+        .available_minutes = if (resolved_context) |context| context.availableMinutes else null,
+        .hard_maximum_minutes = if (resolved_context) |context| context.hardMaximumMinutes else null,
+        .session_goal_id = if (resolved_context) |context| if (context.goals.primary) |goal| goal.id else null else null,
+        .active_restriction_ids = if (resolved_context) |context| try canonicalRestrictionIds(allocator, context.restrictions) else &.{},
     }, try instantiationStorage(allocator), allocator.alloc(tracking.Issue, 16) catch return error.OutOfMemory) catch return error.InvalidRequest;
     const wire: workflows.InstantiationDocumentResult = .{ .outcome = switch (result) {
         .accepted => |workout| .{ .accepted = try workflowWorkoutToWire(allocator, workout) },
         .rejected => |issues| .{ .rejected = try workflowIssuesToWire(allocator, issues) },
     } };
     try encodeOwned(runtime, wire, out);
+}
+
+fn canonicalRestrictionIds(allocator: std.mem.Allocator, restrictions: []const canonical.ResolvedRestriction) ExecuteError![]const []const u8 {
+    const ids = allocator.alloc([]const u8, restrictions.len) catch return error.OutOfMemory;
+    for (restrictions, ids) |restriction, *id| id.* = restriction.value.id;
+    return ids;
 }
 
 fn executeTemplateInstantiation(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) ExecuteError!void {
@@ -526,9 +543,29 @@ fn executeRecommendation(
             out,
         );
     }
-    const request = try translateRequest(arena.allocator(), document.value);
+    var resolved_context: ?athlete_profile.OwnedResolved = null;
+    defer if (resolved_context) |*owned| owned.deinit();
+    if (document.value.athleteProfile) |profile| {
+        resolved_context = athlete_profile.resolve(
+            runtime.allocator(),
+            try translateAthleteProfile(arena.allocator(), profile),
+            .{},
+            try translateTrainingContext(arena.allocator(), document.value.trainingContext),
+            .{},
+        ) catch return error.InvalidRequest;
+    }
+    const effective_equipment = if (resolved_context) |owned| owned.value.available_equipment_ids else document.value.trainingContext.equipment.override orelse document.value.trainingContext.equipment.additions;
+    const request = try translateRequest(arena.allocator(), document.value, effective_equipment, if (resolved_context) |owned| owned.value else null);
     var engine_output: engine.Output = .{};
-    const result = try engine.recommendSession(request, &engine_output);
+    var result = try engine.recommendSession(request, &engine_output);
+    if (resolved_context) |owned| result.recommendation.?.resolvedTrainingContext = try resolvedToCanonical(arena.allocator(), owned.value);
+    var input_fingerprint: [64]u8 = undefined;
+    var result_fingerprint: [64]u8 = undefined;
+    fingerprintBytes("caudex:recommendation-request:v1\x00", input, &input_fingerprint);
+    const result_projection = std.json.Stringify.valueAlloc(arena.allocator(), result.recommendation, .{ .emit_null_optional_fields = false }) catch return error.OutOfMemory;
+    fingerprintBytes("caudex:recommendation-result:v1\x00", result_projection, &result_fingerprint);
+    result.metadata.inputFingerprint = &input_fingerprint;
+    result.metadata.resultFingerprint = &result_fingerprint;
 
     const bytes = runtime.allocator().alloc(u8, max_result_bytes) catch
         return error.OutOfMemory;
@@ -557,6 +594,17 @@ fn executeRpeRecommendation(
     source: canonical.RecommendationRequest,
     out: *OwnedBuffer,
 ) ExecuteError!void {
+    var resolved_context: ?athlete_profile.OwnedResolved = null;
+    defer if (resolved_context) |*owned| owned.deinit();
+    if (source.athleteProfile) |profile| {
+        resolved_context = athlete_profile.resolve(
+            runtime.allocator(),
+            try translateAthleteProfile(allocator, profile),
+            .{},
+            try translateTrainingContext(allocator, source.trainingContext),
+            .{},
+        ) catch return error.InvalidRequest;
+    }
     if (source.methodology.configVersion != rpe_top_set_backoff.config_version) {
         return error.UnsupportedVersion;
     }
@@ -574,13 +622,9 @@ fn executeRpeRecommendation(
     const exercise = catalog.exercises[0];
     const available = try translateIds(
         allocator,
-        source.session.availableEquipmentIds,
+        if (resolved_context) |owned| owned.value.available_equipment_ids else source.trainingContext.equipment.override orelse source.trainingContext.equipment.additions,
     );
-    for (exercise.equipment_ids) |required| {
-        for (available) |candidate| {
-            if (required.eql(candidate)) break;
-        } else return error.InvalidRequest;
-    }
+    if (!caudex.exercise_knowledge.requiredEquipmentSatisfied(exercise, available)) return error.InvalidRequest;
     const top = rpe_top_set_backoff.recommendTopSet(
         config,
         state,
@@ -688,7 +732,7 @@ fn executeRpeRecommendation(
     result_hash.update(backoff.explanation.code);
     finishHex(&result_hash, &result_fingerprint);
     const wire = RpeWireResult{
-        .recommendation = .{ .exercises = &exercises },
+        .recommendation = .{ .exercises = &exercises, .resolvedTrainingContext = if (resolved_context) |owned| try resolvedToCanonical(allocator, owned.value) else null },
         .explanations = &explanations,
         .warnings = warnings,
         .metadata = .{
@@ -724,6 +768,17 @@ fn executeProgramRecommendation(runtime: *Runtime, input: []const u8, out: *Owne
     var arena = std.heap.ArenaAllocator.init(runtime.allocator());
     defer arena.deinit();
     const allocator = arena.allocator();
+    var resolved_context: ?athlete_profile.OwnedResolved = null;
+    defer if (resolved_context) |*owned| owned.deinit();
+    if (source.athleteProfile) |profile| {
+        resolved_context = athlete_profile.resolve(
+            runtime.allocator(),
+            try translateAthleteProfile(allocator, profile),
+            try translateProgramContext(allocator, source.program.trainingContext),
+            try translateTrainingContext(allocator, source.trainingContext),
+            .{},
+        ) catch return error.InvalidRequest;
+    }
     const slots = allocator.alloc(programming.ExerciseSlot, source.program.exercises.len) catch return error.OutOfMemory;
     for (source.program.exercises, slots) |slot, *translated| {
         translated.* = .{
@@ -733,15 +788,25 @@ fn executeProgramRecommendation(runtime: *Runtime, input: []const u8, out: *Owne
             .progression = try translateProgression(allocator, slot.progression),
         };
     }
+    const translated_catalog = try translateCatalog(allocator, source.catalog);
+    if (resolved_context) |owned| try validateResolvedProgramContext(translated_catalog, slots, owned.value);
     var recommendation = programming.recommendFixedSession(runtime.allocator(), .{
         .as_of = primitives.Timestamp.parse(source.asOf) catch return error.InvalidRequest,
-        .catalog = try translateCatalog(allocator, source.catalog),
+        .catalog = translated_catalog,
         .history = try translateHistory(allocator, source.history),
-        .available_equipment_ids = try translateIds(allocator, source.session.availableEquipmentIds),
+        .available_equipment_ids = if (resolved_context) |owned|
+            try translateIds(allocator, owned.value.available_equipment_ids)
+        else
+            try translateIds(allocator, source.trainingContext.equipment.override orelse source.trainingContext.equipment.additions),
         .slots = slots,
         .program_state = if (source.program.state) |state| .{ .schema_version = state.schemaVersion, .data = state.data } else null,
     }) catch |err| return mapProgrammingError(err);
     defer recommendation.deinit();
+    if (resolved_context) |owned| {
+        const resolved_wire = try resolvedToCanonical(allocator, owned.value);
+        recommendation.recommendation.programming.?.resolvedTrainingContext = resolved_wire;
+        recommendation.recommendation.resolvedTrainingContext = resolved_wire;
+    }
 
     var input_fingerprint: [64]u8 = undefined;
     var result_fingerprint: [64]u8 = undefined;
@@ -761,6 +826,29 @@ fn executeProgramRecommendation(runtime: *Runtime, input: []const u8, out: *Owne
         },
     };
     try encodeOwned(runtime, result, out);
+}
+
+fn validateResolvedProgramContext(catalog: training.ExerciseCatalog, slots: []const programming.ExerciseSlot, context: athlete_profile.Resolved) ExecuteError!void {
+    for (context.required_exercises) |required| {
+        for (slots) |slot| if (std.mem.eql(u8, slot.exercise_id.bytes, required.exercise_id)) break else {} else return error.InvalidRequest;
+    }
+    for (slots) |slot| {
+        const exercise = catalog.find(slot.exercise_id) orelse return error.InvalidRequest;
+        for (context.excluded_exercises) |excluded| if (std.mem.eql(u8, excluded.exercise_id, slot.exercise_id.bytes)) return error.InvalidRequest;
+        for (context.restrictions) |restriction| switch (restriction.value.target_kind) {
+            .exercise => if (std.mem.eql(u8, restriction.value.target_id, slot.exercise_id.bytes)) return error.InvalidRequest,
+            .movement_pattern => if (caudex.exercise_knowledge.hasMovementPattern(exercise.*, restriction.value.target_id)) return error.InvalidRequest,
+            .restriction_tag => if (caudex.exercise_knowledge.hasRestriction(exercise.*, restriction.value.target_id)) return error.InvalidRequest,
+            .equipment => if (exerciseUsesEquipment(exercise.*, restriction.value.target_id)) return error.InvalidRequest,
+            .exercise_family => if (exercise.knowledge) |knowledge| if (knowledge.familyId) |family| if (std.mem.eql(u8, family, restriction.value.target_id)) return error.InvalidRequest,
+        };
+    }
+}
+
+fn exerciseUsesEquipment(exercise: training.Exercise, equipment_id: []const u8) bool {
+    if (exercise.knowledge) |knowledge| for (knowledge.equipmentRequirements) |requirement| if (std.mem.eql(u8, requirement.equipmentId, equipment_id)) return true;
+    for (exercise.equipment_ids) |equipment| if (std.mem.eql(u8, equipment.bytes, equipment_id)) return true;
+    return false;
 }
 
 fn executeProgramEvaluation(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) ExecuteError!void {
@@ -1097,6 +1185,8 @@ fn finishHex(hash: *std.crypto.hash.sha2.Sha256, out: *[64]u8) void {
 fn translateRequest(
     allocator: std.mem.Allocator,
     request: canonical.RecommendationRequest,
+    effective_equipment: []const []const u8,
+    resolved_context: ?athlete_profile.Resolved,
 ) ExecuteError!engine.RecommendationRequest {
     if (!std.mem.eql(
         u8,
@@ -1118,8 +1208,12 @@ fn translateRequest(
     const history = try translateHistory(allocator, request.history);
     const equipment = try translateIds(
         allocator,
-        request.session.availableEquipmentIds,
+        effective_equipment,
     );
+    const excluded_exercises = if (resolved_context) |context| try translateResolvedExercises(allocator, context.excluded_exercises) else &.{};
+    const excluded_movements = if (resolved_context) |context| try translateResolvedRestrictions(allocator, context.restrictions, .movement_pattern) else &.{};
+    const excluded_restriction_tags = if (resolved_context) |context| try translateResolvedRestrictions(allocator, context.restrictions, .restriction_tag) else &.{};
+    const required_exercises = if (resolved_context) |context| try translateResolvedExercises(allocator, context.required_exercises) else &.{};
     return .{
         .as_of = primitives.Timestamp.parse(request.asOf) catch
             return error.InvalidRequest,
@@ -1137,8 +1231,226 @@ fn translateRequest(
         .catalog = catalog,
         .history = history,
         .available_equipment_ids = equipment,
-        .max_working_sets = request.session.maxSets,
+        .excluded_exercise_ids = excluded_exercises,
+        .excluded_movement_pattern_ids = excluded_movements,
+        .excluded_restriction_tag_ids = excluded_restriction_tags,
+        .required_exercise_ids = required_exercises,
+        .max_working_sets = request.trainingContext.maxSets,
     };
+}
+
+fn translateResolvedExercises(allocator: std.mem.Allocator, values: []const athlete_profile.SourcedExercise) ExecuteError![]const primitives.Id {
+    const result = allocator.alloc(primitives.Id, values.len) catch return error.OutOfMemory;
+    for (values, result) |value, *target| target.* = primitives.Id.parse(value.exercise_id) catch return error.InvalidRequest;
+    return result;
+}
+
+fn translateResolvedRestrictions(allocator: std.mem.Allocator, values: []const athlete_profile.SourcedRestriction, kind: athlete_profile.RestrictionTargetKind) ExecuteError![]const primitives.Id {
+    const result = allocator.alloc(primitives.Id, values.len) catch return error.OutOfMemory;
+    var count: usize = 0;
+    for (values) |value| if (value.value.target_kind == kind) {
+        result[count] = primitives.Id.parse(value.value.target_id) catch return error.InvalidRequest;
+        count += 1;
+    };
+    return result[0..count];
+}
+
+fn translateAthleteProfile(allocator: std.mem.Allocator, value: canonical.AthleteProfile) ExecuteError!athlete_profile.AthleteProfile {
+    const preferences = allocator.alloc(athlete_profile.Preference, value.exercisePreferences.len) catch return error.OutOfMemory;
+    for (value.exercisePreferences, preferences) |source, *target| target.* = .{
+        .target_kind = @enumFromInt(@intFromEnum(source.targetKind)),
+        .target_id = source.targetId,
+        .level = @enumFromInt(@intFromEnum(source.level)),
+    };
+    const priorities = allocator.alloc(athlete_profile.MusclePriority, value.musclePriorities.len) catch return error.OutOfMemory;
+    for (value.musclePriorities, priorities) |source, *target| target.* = .{
+        .muscle_id = source.muscleId,
+        .priority = @enumFromInt(@intFromEnum(source.priority)),
+        .weight = source.weight,
+    };
+    const restrictions = try translateRestrictions(allocator, value.restrictions);
+    const locations = allocator.alloc(athlete_profile.TrainingLocation, value.locations.len) catch return error.OutOfMemory;
+    for (value.locations, locations) |source, *target| {
+        const equipment = allocator.alloc(athlete_profile.EquipmentItem, source.equipment.len) catch return error.OutOfMemory;
+        for (source.equipment, equipment) |item, *translated| translated.* = .{
+            .equipment_id = item.equipmentId,
+            .minimum_load_increment = if (item.minimumLoadIncrement) |measurement| .{ .amount = measurement.amount, .unit = measurement.unit } else null,
+        };
+        target.* = .{ .id = source.id, .name = source.name, .equipment = equipment, .metadata = source.metadata };
+    }
+    const capabilities = allocator.alloc(athlete_profile.CapabilityObservation, value.capabilityObservations.len) catch return error.OutOfMemory;
+    for (value.capabilityObservations, capabilities) |source, *target| target.* = .{
+        .id = source.id,
+        .kind = @enumFromInt(@intFromEnum(source.kind)),
+        .exercise_id = source.exerciseId,
+        .value = if (source.value) |measurement| .{ .amount = measurement.amount, .unit = measurement.unit } else null,
+        .observed_at = source.observedAt,
+        .provenance = @enumFromInt(@intFromEnum(source.provenance)),
+        .custom_kind_id = source.customKindId,
+    };
+    const secondary = allocator.alloc(athlete_profile.Goal, value.goals.secondary.len) catch return error.OutOfMemory;
+    for (value.goals.secondary, secondary) |goal, *target| target.* = try translateGoal(goal);
+    const familiarity = allocator.alloc(athlete_profile.ExerciseFamiliarity, value.experience.exercises.len) catch return error.OutOfMemory;
+    for (value.experience.exercises, familiarity) |source, *target| target.* = .{ .exercise_id = source.exerciseId, .familiarity = @enumFromInt(@intFromEnum(source.familiarity)) };
+    const days = allocator.alloc(athlete_profile.Weekday, value.schedule.preferredDays.len) catch return error.OutOfMemory;
+    for (value.schedule.preferredDays, days) |source, *target| target.* = @enumFromInt(@intFromEnum(source));
+    return .{
+        .schema_version = value.schemaVersion,
+        .id = value.id,
+        .revision = value.revision,
+        .display_name = value.displayName,
+        .goals = .{ .primary = if (value.goals.primary) |goal| try translateGoal(goal) else null, .secondary = secondary, .body_composition_objective = value.goals.bodyCompositionObjective },
+        .experience = .{
+            .resistance_training = if (value.experience.resistanceTraining) |category| @enumFromInt(@intFromEnum(category)) else null,
+            .consistent_months = value.experience.consistentMonths,
+            .technical_lift_familiarity = if (value.experience.technicalLiftFamiliarity) |item| @enumFromInt(@intFromEnum(item)) else null,
+            .exercise = familiarity,
+        },
+        .schedule = .{
+            .preferred_sessions_per_week = value.schedule.preferredSessionsPerWeek,
+            .minimum_sessions_per_week = value.schedule.minimumSessionsPerWeek,
+            .maximum_sessions_per_week = value.schedule.maximumSessionsPerWeek,
+            .preferred_days = days,
+            .cadence = @enumFromInt(@intFromEnum(value.schedule.cadence)),
+            .prefer_rest_between_sessions = value.schedule.preferRestBetweenSessions,
+        },
+        .duration = .{
+            .preferred_minutes = value.duration.preferredMinutes,
+            .acceptable_minimum_minutes = value.duration.acceptableMinimumMinutes,
+            .acceptable_maximum_minutes = value.duration.acceptableMaximumMinutes,
+            .hard_maximum_minutes = value.duration.hardMaximumMinutes,
+        },
+        .units = .{
+            .load = if (value.units.load) |item| @enumFromInt(@intFromEnum(item)) else null,
+            .bodyweight = if (value.units.bodyweight) |item| @enumFromInt(@intFromEnum(item)) else null,
+            .distance = if (value.units.distance) |item| @enumFromInt(@intFromEnum(item)) else null,
+        },
+        .exercise_preferences = preferences,
+        .muscle_priorities = priorities,
+        .restrictions = restrictions,
+        .locations = locations,
+        .capability_observations = capabilities,
+        .metadata = value.metadata,
+    };
+}
+
+fn translateGoal(value: canonical.Goal) ExecuteError!athlete_profile.Goal {
+    const family: athlete_profile.GoalFamily = if (std.mem.eql(u8, value.id, "hypertrophy")) .hypertrophy else if (std.mem.eql(u8, value.id, "strength")) .strength else if (std.mem.eql(u8, value.id, "general-fitness")) .general_fitness else if (std.mem.eql(u8, value.id, "muscular-endurance")) .muscular_endurance else if (std.mem.eql(u8, value.id, "powerlifting-practice")) .powerlifting_practice else if (std.mem.eql(u8, value.id, "limited-equipment")) .limited_equipment else if (std.mem.eql(u8, value.id, "maintenance")) .maintenance else .{ .custom = value.id };
+    return .{ .family = family, .weight = value.weight };
+}
+
+fn translateRestrictions(allocator: std.mem.Allocator, values: []const canonical.Restriction) ExecuteError![]const athlete_profile.Restriction {
+    const translated = allocator.alloc(athlete_profile.Restriction, values.len) catch return error.OutOfMemory;
+    for (values, translated) |source, *target| target.* = .{ .id = source.id, .target_kind = @enumFromInt(@intFromEnum(source.targetKind)), .target_id = source.targetId };
+    return translated;
+}
+
+fn translatePreferences(allocator: std.mem.Allocator, values: []const canonical.Preference) ExecuteError![]const athlete_profile.Preference {
+    const translated = allocator.alloc(athlete_profile.Preference, values.len) catch return error.OutOfMemory;
+    for (values, translated) |source, *target| target.* = .{ .target_kind = @enumFromInt(@intFromEnum(source.targetKind)), .target_id = source.targetId, .level = @enumFromInt(@intFromEnum(source.level)) };
+    return translated;
+}
+
+fn translateGoalSet(allocator: std.mem.Allocator, value: canonical.GoalSet) ExecuteError!athlete_profile.GoalSet {
+    const secondary = allocator.alloc(athlete_profile.Goal, value.secondary.len) catch return error.OutOfMemory;
+    for (value.secondary, secondary) |goal, *target| target.* = try translateGoal(goal);
+    return .{ .primary = if (value.primary) |goal| try translateGoal(goal) else null, .secondary = secondary, .body_composition_objective = value.bodyCompositionObjective };
+}
+
+fn translateProgramContext(allocator: std.mem.Allocator, value: canonical.ProgramTrainingContext) ExecuteError!athlete_profile.ProgramContext {
+    const priorities = allocator.alloc(athlete_profile.MusclePriority, value.musclePriorities.len) catch return error.OutOfMemory;
+    for (value.musclePriorities, priorities) |source, *target| target.* = .{ .muscle_id = source.muscleId, .priority = @enumFromInt(@intFromEnum(source.priority)), .weight = source.weight };
+    return .{
+        .goals = try translateGoalSet(allocator, value.goals),
+        .exercise_preferences = try translatePreferences(allocator, value.exercisePreferences),
+        .muscle_priorities = priorities,
+        .restrictions = try translateRestrictions(allocator, value.restrictions),
+        .required_exercise_ids = value.requiredExerciseIds,
+        .excluded_exercise_ids = value.excludedExerciseIds,
+    };
+}
+
+fn translateTrainingContext(allocator: std.mem.Allocator, value: canonical.TrainingContext) ExecuteError!athlete_profile.Context {
+    const readiness = allocator.alloc(athlete_profile.ReadinessObservation, value.readiness.len) catch return error.OutOfMemory;
+    for (value.readiness, readiness) |source, *target| target.* = .{
+        .id = source.id,
+        .dimension = @enumFromInt(@intFromEnum(source.dimension)),
+        .subject_id = source.subjectId,
+        .value = source.value,
+        .scale_maximum = source.scaleMaximum,
+        .observed_at = source.observedAt,
+        .provenance = @enumFromInt(@intFromEnum(source.provenance)),
+    };
+    return .{
+        .location_id = value.locationId,
+        .equipment = .{ .override = value.equipment.override, .additions = value.equipment.additions, .removals = value.equipment.removals },
+        .available_minutes = if (value.availableMinutes) |minutes| std.math.cast(u16, minutes) orelse return error.InvalidRequest else null,
+        .hard_maximum_minutes = if (value.hardMaximumMinutes) |minutes| std.math.cast(u16, minutes) orelse return error.InvalidRequest else null,
+        .goals = try translateGoalSet(allocator, value.goals),
+        .preferences = try translatePreferences(allocator, value.preferences),
+        .restrictions = try translateRestrictions(allocator, value.restrictions),
+        .required_exercise_ids = value.requiredExerciseIds,
+        .excluded_exercise_ids = value.excludedExerciseIds,
+        .readiness = readiness,
+    };
+}
+
+fn resolvedToCanonical(allocator: std.mem.Allocator, value: athlete_profile.Resolved) ExecuteError!canonical.ResolvedTrainingContext {
+    const equipment = try allocator.dupe([]const u8, value.available_equipment_ids);
+    const preferences = allocator.alloc(canonical.ResolvedPreference, value.preferences.len) catch return error.OutOfMemory;
+    for (value.preferences, preferences) |source, *target| target.* = .{ .value = .{ .targetKind = @enumFromInt(@intFromEnum(source.value.target_kind)), .targetId = source.value.target_id, .level = @enumFromInt(@intFromEnum(source.value.level)) }, .source = @enumFromInt(@intFromEnum(source.source)) };
+    const restrictions = allocator.alloc(canonical.ResolvedRestriction, value.restrictions.len) catch return error.OutOfMemory;
+    for (value.restrictions, restrictions) |source, *target| target.* = .{ .value = .{ .id = source.value.id, .targetKind = @enumFromInt(@intFromEnum(source.value.target_kind)), .targetId = source.value.target_id }, .source = @enumFromInt(@intFromEnum(source.source)) };
+    const priorities = allocator.alloc(canonical.ResolvedMusclePriority, value.muscle_priorities.len) catch return error.OutOfMemory;
+    for (value.muscle_priorities, priorities) |source, *target| target.* = .{ .value = .{ .muscleId = source.value.muscle_id, .priority = @enumFromInt(@intFromEnum(source.value.priority)), .weight = source.value.weight }, .source = @enumFromInt(@intFromEnum(source.source)) };
+    const required = allocator.alloc(canonical.ResolvedExerciseConstraint, value.required_exercises.len) catch return error.OutOfMemory;
+    for (value.required_exercises, required) |source, *target| target.* = .{ .exerciseId = source.exercise_id, .source = @enumFromInt(@intFromEnum(source.source)) };
+    const excluded = allocator.alloc(canonical.ResolvedExerciseConstraint, value.excluded_exercises.len) catch return error.OutOfMemory;
+    for (value.excluded_exercises, excluded) |source, *target| target.* = .{ .exerciseId = source.exercise_id, .source = @enumFromInt(@intFromEnum(source.source)) };
+    const secondary = allocator.alloc(canonical.Goal, value.goals.secondary.len) catch return error.OutOfMemory;
+    for (value.goals.secondary, secondary) |goal, *target| target.* = goalToCanonical(goal);
+    const familiarity = allocator.alloc(@typeInfo(@TypeOf((canonical.Experience{}).exercises)).pointer.child, value.experience.exercise.len) catch return error.OutOfMemory;
+    for (value.experience.exercise, familiarity) |source, *target| target.* = .{ .exerciseId = source.exercise_id, .familiarity = @enumFromInt(@intFromEnum(source.familiarity)) };
+    const days = allocator.alloc(@typeInfo(@TypeOf((canonical.SchedulePreference{}).preferredDays)).pointer.child, value.schedule.preferred_days.len) catch return error.OutOfMemory;
+    for (value.schedule.preferred_days, days) |source, *target| target.* = @enumFromInt(@intFromEnum(source));
+    const readiness = allocator.alloc(canonical.ReadinessObservation, value.readiness.len) catch return error.OutOfMemory;
+    for (value.readiness, readiness) |source, *target| target.* = .{ .id = source.id, .dimension = @enumFromInt(@intFromEnum(source.dimension)), .subjectId = source.subject_id, .value = source.value, .scaleMaximum = source.scale_maximum, .observedAt = source.observed_at, .provenance = @enumFromInt(@intFromEnum(source.provenance)) };
+    const capabilities = allocator.alloc(canonical.CapabilityObservation, value.capability_observations.len) catch return error.OutOfMemory;
+    for (value.capability_observations, capabilities) |source, *target| target.* = .{ .id = source.id, .kind = @enumFromInt(@intFromEnum(source.kind)), .exerciseId = source.exercise_id, .value = if (source.value) |measurement| .{ .amount = measurement.amount, .unit = measurement.unit } else null, .observedAt = source.observed_at, .provenance = @enumFromInt(@intFromEnum(source.provenance)), .customKindId = source.custom_kind_id };
+    return .{
+        .athleteProfileId = value.athlete_profile_id,
+        .athleteProfileRevision = value.athlete_profile_revision,
+        .athleteProfileFingerprint = value.athlete_profile_fingerprint,
+        .goals = .{ .primary = if (value.goals.primary) |goal| goalToCanonical(goal) else null, .secondary = secondary, .bodyCompositionObjective = value.goals.body_composition_objective },
+        .experience = .{ .resistanceTraining = if (value.experience.resistance_training) |item| @enumFromInt(@intFromEnum(item)) else null, .consistentMonths = value.experience.consistent_months, .technicalLiftFamiliarity = if (value.experience.technical_lift_familiarity) |item| @enumFromInt(@intFromEnum(item)) else null, .exercises = familiarity },
+        .schedule = .{ .preferredSessionsPerWeek = value.schedule.preferred_sessions_per_week, .minimumSessionsPerWeek = value.schedule.minimum_sessions_per_week, .maximumSessionsPerWeek = value.schedule.maximum_sessions_per_week, .preferredDays = days, .cadence = @enumFromInt(@intFromEnum(value.schedule.cadence)), .preferRestBetweenSessions = value.schedule.prefer_rest_between_sessions },
+        .preferredDuration = .{ .preferredMinutes = value.preferred_duration.preferred_minutes, .acceptableMinimumMinutes = value.preferred_duration.acceptable_minimum_minutes, .acceptableMaximumMinutes = value.preferred_duration.acceptable_maximum_minutes, .hardMaximumMinutes = value.preferred_duration.hard_maximum_minutes },
+        .availableMinutes = value.available_minutes,
+        .hardMaximumMinutes = value.hard_maximum_minutes,
+        .units = .{ .load = if (value.units.load) |item| @enumFromInt(@intFromEnum(item)) else null, .bodyweight = if (value.units.bodyweight) |item| @enumFromInt(@intFromEnum(item)) else null, .distance = if (value.units.distance) |item| @enumFromInt(@intFromEnum(item)) else null },
+        .locationId = value.location_id,
+        .availableEquipmentIds = equipment,
+        .preferences = preferences,
+        .restrictions = restrictions,
+        .musclePriorities = priorities,
+        .requiredExercises = required,
+        .excludedExercises = excluded,
+        .readiness = readiness,
+        .capabilityObservations = capabilities,
+    };
+}
+
+fn goalToCanonical(value: athlete_profile.Goal) canonical.Goal {
+    return .{ .id = switch (value.family) {
+        .hypertrophy => "hypertrophy",
+        .strength => "strength",
+        .general_fitness => "general-fitness",
+        .muscular_endurance => "muscular-endurance",
+        .powerlifting_practice => "powerlifting-practice",
+        .limited_equipment => "limited-equipment",
+        .maintenance => "maintenance",
+        .custom => |id| id,
+    }, .weight = value.weight };
 }
 
 fn resolvedVersion(requirement: ?[]const u8) ExecuteError!methodology.Version {

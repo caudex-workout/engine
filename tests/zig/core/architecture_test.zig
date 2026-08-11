@@ -5,33 +5,33 @@ const assets = @import("repository_test_assets");
 test "public root exports are intentional" {
     const declarations = std.meta.declarations(caudex);
 
-    try std.testing.expectEqual(@as(usize, 17), declarations.len);
+    try std.testing.expectEqual(@as(usize, 18), declarations.len);
     try std.testing.expectEqualStrings("canonical", declarations[0].name);
     try std.testing.expectEqualStrings("canonical_json", declarations[1].name);
-    try std.testing.expectEqualStrings("diagnostics", declarations[2].name);
-    try std.testing.expectEqualStrings("discovery", declarations[3].name);
-    try std.testing.expectEqualStrings("double_progression", declarations[4].name);
-    try std.testing.expectEqualStrings("duration", declarations[5].name);
-    try std.testing.expectEqualStrings("engine", declarations[6].name);
-    try std.testing.expectEqualStrings("exercise_knowledge", declarations[7].name);
-    try std.testing.expectEqualStrings("filtering", declarations[8].name);
-    try std.testing.expectEqualStrings("history", declarations[9].name);
-    try std.testing.expectEqualStrings("load_math", declarations[10].name);
-    try std.testing.expectEqualStrings("methodology", declarations[11].name);
-    try std.testing.expectEqualStrings("ordering", declarations[12].name);
-    try std.testing.expectEqualStrings("primitives", declarations[13].name);
-    try std.testing.expectEqualStrings("programming", declarations[14].name);
-    try std.testing.expectEqualStrings("rpe_top_set_backoff", declarations[15].name);
-    try std.testing.expectEqualStrings("training", declarations[16].name);
+    try std.testing.expectEqualStrings("athlete_profile", declarations[2].name);
+    try std.testing.expectEqualStrings("diagnostics", declarations[3].name);
+    try std.testing.expectEqualStrings("discovery", declarations[4].name);
+    try std.testing.expectEqualStrings("double_progression", declarations[5].name);
+    try std.testing.expectEqualStrings("duration", declarations[6].name);
+    try std.testing.expectEqualStrings("engine", declarations[7].name);
+    try std.testing.expectEqualStrings("exercise_knowledge", declarations[8].name);
+    try std.testing.expectEqualStrings("filtering", declarations[9].name);
+    try std.testing.expectEqualStrings("history", declarations[10].name);
+    try std.testing.expectEqualStrings("load_math", declarations[11].name);
+    try std.testing.expectEqualStrings("methodology", declarations[12].name);
+    try std.testing.expectEqualStrings("ordering", declarations[13].name);
+    try std.testing.expectEqualStrings("primitives", declarations[14].name);
+    try std.testing.expectEqualStrings("programming", declarations[15].name);
+    try std.testing.expectEqualStrings("rpe_top_set_backoff", declarations[16].name);
+    try std.testing.expectEqualStrings("training", declarations[17].name);
 }
 
 test "core source has no forbidden effect or dependency imports" {
     const sources = .{
-        assets.src_root,               assets.src_canonical,          assets.src_canonical_json, assets.src_diagnostics,
-        assets.src_discovery,          assets.src_double_progression, assets.src_duration,       assets.src_engine,
-        assets.src_exercise_knowledge, assets.src_filtering,          assets.src_history,        assets.src_load_math,
-        assets.src_methodology,        assets.src_ordering,           assets.src_primitives,     assets.src_rpe_top_set_backoff,
-        assets.src_training,
+        assets.src_root,       assets.src_athlete_profile,     assets.src_canonical, assets.src_canonical_json, assets.src_diagnostics,
+        assets.src_discovery,  assets.src_double_progression,  assets.src_duration,  assets.src_engine,         assets.src_exercise_knowledge,
+        assets.src_filtering,  assets.src_history,             assets.src_load_math, assets.src_methodology,    assets.src_ordering,
+        assets.src_primitives, assets.src_rpe_top_set_backoff, assets.src_training,
     };
     const forbidden = .{
         "std.fs",

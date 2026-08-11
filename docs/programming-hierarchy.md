@@ -3,10 +3,19 @@
 Caudex separates deciding **what training happens** from deciding **how an
 exercise progresses**.
 
-A program strategy receives explicit athlete, history, session, configuration,
-and program-state snapshots. It produces an ordered session. Each exercise slot
-has its own progression assignment. Double progression and RPE top-set/backoff
-are progression methods; “methodology” remains their v0.1 compatibility name.
+A program strategy receives a resolved athlete/training context, history,
+configuration, and program-state snapshots. It produces an ordered session.
+Each exercise slot has its own progression assignment. Double progression and
+RPE top-set/backoff are progression methods; “methodology” remains their v0.1
+compatibility name.
+
+The resolved context is the deterministic projection of persistent
+`AthleteProfile`, program specialization, selected training location, and
+today's `TrainingContext`; see
+[athlete profiles and training context](athlete-profiles-and-training-context.md).
+Strategies must consume this projection rather than rereading mutable profile
+storage. Exercise progression receives only its relevant exercise-local inputs,
+not the full profile or location model.
 
 ## State and identity
 
@@ -17,7 +26,9 @@ without sharing state.
 
 Evaluation does not use a bare exercise ID to rediscover routing. The accepted
 recommendation carries the slot ID, state ID, method ID/version, config, and
-input state used for each prescription.
+input state used for each prescription. It also captures the minimal resolved
+training-context provenance used for the recommendation, so later profile edits
+do not change historical replay.
 
 ## Mixed-method TypeScript example
 

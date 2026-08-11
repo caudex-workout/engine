@@ -26,6 +26,10 @@ pub const RecommendationRequest = struct {
     catalog: training.ExerciseCatalog,
     history: training.HistorySnapshot = .{},
     available_equipment_ids: []const primitives.Id,
+    excluded_exercise_ids: []const primitives.Id = &.{},
+    excluded_movement_pattern_ids: []const primitives.Id = &.{},
+    excluded_restriction_tag_ids: []const primitives.Id = &.{},
+    required_exercise_ids: []const primitives.Id = &.{},
     max_working_sets: ?u16 = null,
 };
 
@@ -324,6 +328,9 @@ pub fn recommendSession(
     }
     if (issues.items().len != 0) return error.InvalidRequest;
     for (request.catalog.exercises) |exercise| {
+        for (request.excluded_exercise_ids) |excluded| if (exercise.id.eql(excluded)) return error.InvalidRequest;
+        for (request.excluded_movement_pattern_ids) |excluded| if (exercise_knowledge.hasMovementPattern(exercise, excluded.bytes)) return error.InvalidRequest;
+        for (request.excluded_restriction_tag_ids) |excluded| if (exercise_knowledge.hasRestriction(exercise, excluded.bytes)) return error.InvalidRequest;
         if (!exercise_knowledge.requiredEquipmentSatisfied(
             exercise,
             request.available_equipment_ids,
@@ -333,6 +340,7 @@ pub fn recommendSession(
             .externally_loadable_repetitions,
         ) == .incompatible) return error.InvalidRequest;
     }
+    for (request.required_exercise_ids) |required| if (request.catalog.find(required) == null) return error.InvalidRequest;
 
     output.explanation_len = 0;
     output.warning_len = 0;
@@ -472,6 +480,22 @@ fn fingerprintRequest(request: RecommendationRequest, out: *[64]u8) void {
     for (request.available_equipment_ids) |equipment| {
         hash.update(equipment.bytes);
         hash.update("\x00");
+    }
+    for (request.excluded_exercise_ids) |id| {
+        hash.update("excluded-exercise\x00");
+        hash.update(id.bytes);
+    }
+    for (request.excluded_movement_pattern_ids) |id| {
+        hash.update("excluded-movement\x00");
+        hash.update(id.bytes);
+    }
+    for (request.excluded_restriction_tag_ids) |id| {
+        hash.update("excluded-restriction\x00");
+        hash.update(id.bytes);
+    }
+    for (request.required_exercise_ids) |id| {
+        hash.update("required-exercise\x00");
+        hash.update(id.bytes);
     }
     updatePresence(&hash, request.max_working_sets != null);
     if (request.max_working_sets) |limit| updateU64(&hash, limit);

@@ -14,6 +14,7 @@ const std = @import("std");
 
 pub const canonical = @import("canonical.zig");
 pub const canonical_json = @import("canonical_json.zig");
+pub const athlete_profile = @import("athlete_profile.zig");
 pub const diagnostics = @import("diagnostics.zig");
 pub const discovery = @import("discovery.zig");
 pub const double_progression = @import("double_progression.zig");
@@ -31,5 +32,6 @@ pub const rpe_top_set_backoff = @import("rpe_top_set_backoff.zig");
 pub const training = @import("training.zig");
 
 test "library test target is wired" {
+    _ = athlete_profile;
     try std.testing.expect(true);
 }

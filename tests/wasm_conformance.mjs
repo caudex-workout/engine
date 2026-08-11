@@ -46,7 +46,7 @@ if (!runtime || !requestPointer || !requiredPointer) {
 }
 
 const expectedFingerprint =
-  "83481330a812bb41384d958c104038d230bf93ceee163fd47b7c62a41361fd6f";
+  "acc27989785258bff14df982a222e277e9b51bfed565c363d1f3300277fabe47";
 
 new Uint8Array(exports.memory.buffer, requestPointer, 1)[0] = "{".charCodeAt(0);
 if (

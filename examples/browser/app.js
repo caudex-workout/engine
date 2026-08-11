@@ -65,14 +65,24 @@ const initialRequest = {
       { muscleId: "triceps", role: "secondary" },
     ],
   }],
-  athlete: {
-    preferences: { preferredExerciseIds: ["incline-dumbbell-press"] },
+  athleteProfile: {
+    id: "athlete-1",
+    goals: { primary: { id: "hypertrophy" } },
+    schedule: { preferredSessionsPerWeek: 4 },
+    duration: { preferredMinutes: 60, acceptableMinimumMinutes: 45, acceptableMaximumMinutes: 75 },
+    musclePriorities: [{ muscleId: "pectoralis-major", priority: "emphasize" }],
+    exercisePreferences: [{ targetKind: "exercise", targetId: "incline-dumbbell-press", level: "preferred" }],
+    locations: [
+      { id: "gym", equipment: [{ equipmentId: "dumbbell" }, { equipmentId: "barbell" }, { equipmentId: "cable-stack" }, { equipmentId: "adjustable-bench" }] },
+      { id: "home", equipment: [{ equipmentId: "dumbbell" }, { equipmentId: "adjustable-bench" }, { equipmentId: "pull-up-bar" }] },
+    ],
   },
   history: { workouts: [] },
-  session: {
+  trainingContext: {
+    locationId: "home",
     availableMinutes: 35,
-    availableEquipmentIds: ["dumbbell", "adjustable-bench"],
-    goals: ["hypertrophy"],
+    equipment: { removals: ["pull-up-bar"] },
+    restrictions: [{ id: "today-no-overhead", targetKind: "movement_pattern", targetId: "overhead-push" }],
     maxExercises: 4,
   },
   alternativeLimit: 1,

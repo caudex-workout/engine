@@ -135,13 +135,13 @@ const program = caudex.createProgram({
   catalog: request.catalog,
   methodology: methodologies.presets.hypertrophy({ initialLoad: lb(45) }),
 });
-const ergonomic = program.recommend({ asOf: request.asOf, session: request.session });
+const ergonomic = program.recommend({ asOf: request.asOf, trainingContext: request.trainingContext });
 const result = caudex.recommendSession(request);
 const invalid = caudex.recommendSession({ ...request, schemaVersion: 2 });
 const discovered = caudex.listMethodologies();
 caudex.dispose();
 if (!result.ok || result.metadata.resultFingerprint !==
-  "83481330a812bb41384d958c104038d230bf93ceee163fd47b7c62a41361fd6f") {
+  "acc27989785258bff14df982a222e277e9b51bfed565c363d1f3300277fabe47") {
   throw new Error("npm clean-consumer packaging: canonical tarball fixture failed");
 }
 if (!ergonomic.ok || ergonomic.recommendation.exercises.length !== 1) {

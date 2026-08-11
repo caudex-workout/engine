@@ -32,6 +32,52 @@ const key: persistence.MethodologyStateKey = .{
     .host_scope_key = "athlete-1",
     .methodology_id = "caudex.double-progression",
 };
+const athlete_profile_key: persistence.AthleteProfileKey = .{
+    .host_scope_key = "host-1",
+    .athlete_profile_id = "athlete-profile-1",
+};
+const athlete_profile: persistence.canonical.AthleteProfile = .{
+    .id = "athlete-profile-1",
+};
+
+test "athlete profiles compare-and-set independently from methodology state" {
+    const adapter = try sqlite.openInMemory(.{});
+    defer adapter.close();
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    try std.testing.expect((try adapter.athleteProfileStore().load(
+        allocator,
+        athlete_profile_key,
+    )) == null);
+    const first = try adapter.athleteProfileStore().compareAndSet(allocator, .{
+        .key = athlete_profile_key,
+        .expected_revision = null,
+        .next_profile = athlete_profile,
+    });
+    try std.testing.expectEqual(@as(u64, 1), first.profile.revision);
+    try std.testing.expectError(
+        error.Conflict,
+        adapter.athleteProfileStore().compareAndSet(allocator, .{
+            .key = athlete_profile_key,
+            .expected_revision = null,
+            .next_profile = athlete_profile,
+        }),
+    );
+    const second = try adapter.athleteProfileStore().compareAndSet(allocator, .{
+        .key = athlete_profile_key,
+        .expected_revision = first.profile.revision,
+        .next_profile = athlete_profile,
+    });
+    try std.testing.expectEqual(@as(u64, 2), second.profile.revision);
+    const loaded = (try adapter.athleteProfileStore().load(
+        allocator,
+        athlete_profile_key,
+    )).?;
+    try std.testing.expectEqual(@as(u64, 2), loaded.profile.revision);
+    try std.testing.expectEqualStrings("athlete-profile-1", loaded.profile.id);
+}
 
 test "in-memory adapter loads canonical snapshots and compare-and-sets state" {
     const adapter = try sqlite.openInMemory(.{});
@@ -160,7 +206,14 @@ test "newer schema is rejected distinctly" {
         database,
         "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY)",
     );
-    try execRaw(database, "INSERT INTO schema_migrations (version) VALUES (12)");
+    const newer_version_sql = try std.fmt.allocPrintSentinel(
+        std.testing.allocator,
+        "INSERT INTO schema_migrations (version) VALUES ({d})",
+        .{sqlite.schema_version + 1},
+        0,
+    );
+    defer std.testing.allocator.free(newer_version_sql);
+    try execRaw(database, newer_version_sql);
 
     try std.testing.expectError(
         error.UnsupportedSchema,
@@ -264,6 +317,11 @@ test "portable data dry-runs and round trips across independent SQLite databases
             },
         },
     });
+    _ = try source.athleteProfileStore().compareAndSet(allocator, .{
+        .key = .{ .host_scope_key = "scope-1", .athlete_profile_id = "profile-1" },
+        .expected_revision = null,
+        .next_profile = .{ .id = "profile-1" },
+    });
     const empty_data = std.json.Value{ .object = try .init(allocator, &.{}, &.{}) };
     const programming_records: persistence.portable.Document = .{
         .schemaVersion = 1,
@@ -310,6 +368,7 @@ test "portable data dry-runs and round trips across independent SQLite databases
     try std.testing.expectEqualStrings("accepted-program-1", exported.acceptedProgramRecommendations[0].id);
     try std.testing.expectEqualStrings("progression-revision-1", exported.progressionStates[0].revision);
     try std.testing.expectEqualStrings("program-revision-1", exported.programStates[0].revision);
+    try std.testing.expectEqualStrings("profile-1", exported.athleteProfiles[0].profile.id);
     try std.testing.expectEqualStrings("185.00", exported.completedWorkouts[0].workout.exercises[0].sets[0].actualMetrics[0].value.amount);
     const dry_run = try destination.portableStore().importData(allocator, .{ .schemaVersion = 1, .mode = .merge, .conflictPolicy = .reject, .dryRun = true, .document = exported });
     try std.testing.expect(dry_run.valid);
@@ -324,6 +383,7 @@ test "portable data dry-runs and round trips across independent SQLite databases
     try std.testing.expectEqualStrings("program-result", reexported.acceptedProgramRecommendations[0].result.metadata.resultFingerprint);
     try std.testing.expectEqualStrings("block-1-accessory", reexported.progressionStates[0].stateId);
     try std.testing.expectEqualStrings("program-1", reexported.programStates[0].programId);
+    try std.testing.expectEqualStrings("profile-1", reexported.athleteProfiles[0].profile.id);
     const conflict = try destination.portableStore().importData(allocator, .{ .schemaVersion = 1, .mode = .merge, .conflictPolicy = .reject, .dryRun = false, .document = exported });
     try std.testing.expect(!conflict.valid);
     try std.testing.expectEqualStrings("portable.conflict", conflict.issues[0].code);

@@ -119,37 +119,110 @@ pub const Exercise = struct {
     knowledge: ?ExerciseKnowledge = null,
 };
 
-pub const AthletePreferences = struct {
-    preferredExerciseIds: []const []const u8 = &.{},
-    dislikedExerciseIds: []const []const u8 = &.{},
-    avoidedEquipmentIds: []const []const u8 = &.{},
-    muscleEmphasis: []const MuscleEmphasis = &.{},
+pub const Goal = struct {
+    /// Built-in IDs include hypertrophy, strength, general-fitness,
+    /// muscular-endurance, powerlifting-practice, limited-equipment, and
+    /// maintenance. Namespaced host strategy IDs are also valid.
+    id: []const u8,
+    weight: ?u16 = null,
 };
 
-pub const MuscleEmphasis = struct {
+pub const GoalSet = struct {
+    primary: ?Goal = null,
+    secondary: []const Goal = &.{},
+    bodyCompositionObjective: ?[]const u8 = null,
+};
+
+pub const Experience = struct {
+    resistanceTraining: ?enum { novice, intermediate, advanced } = null,
+    consistentMonths: ?u16 = null,
+    technicalLiftFamiliarity: ?enum { unfamiliar, learning, familiar, proficient } = null,
+    exercises: []const struct {
+        exerciseId: []const u8,
+        familiarity: enum { unfamiliar, learning, familiar, proficient },
+    } = &.{},
+};
+
+pub const SchedulePreference = struct {
+    preferredSessionsPerWeek: ?u8 = null,
+    minimumSessionsPerWeek: ?u8 = null,
+    maximumSessionsPerWeek: ?u8 = null,
+    preferredDays: []const enum { monday, tuesday, wednesday, thursday, friday, saturday, sunday } = &.{},
+    cadence: enum { unspecified, fixed_weekdays, rolling } = .unspecified,
+    preferRestBetweenSessions: ?bool = null,
+};
+
+pub const DurationPreference = struct {
+    preferredMinutes: ?u16 = null,
+    acceptableMinimumMinutes: ?u16 = null,
+    acceptableMaximumMinutes: ?u16 = null,
+    hardMaximumMinutes: ?u16 = null,
+};
+
+pub const UnitPreferences = struct {
+    load: ?enum { kilograms, pounds } = null,
+    bodyweight: ?enum { kilograms, pounds } = null,
+    distance: ?enum { meters, kilometers, feet, miles } = null,
+};
+
+pub const Preference = struct {
+    targetKind: enum { exercise, exercise_family, movement_pattern, equipment_category },
+    targetId: []const u8,
+    level: enum { preferred, deprioritized, excluded, required },
+};
+
+pub const MusclePriority = struct {
     muscleId: []const u8,
-    weight: []const u8,
+    priority: enum { emphasize, balanced, maintain, deprioritize },
+    weight: ?u16 = null,
 };
 
-pub const AthleteRestrictions = struct {
-    excludedExerciseIds: []const []const u8 = &.{},
-    excludedMovementTags: []const []const u8 = &.{},
-    equipmentLimitations: []const []const u8 = &.{},
-    constraints: []const Constraint = &.{},
+pub const Restriction = struct {
+    id: []const u8,
+    targetKind: enum { exercise, exercise_family, movement_pattern, restriction_tag, equipment },
+    targetId: []const u8,
 };
 
-pub const Constraint = struct {
-    code: []const u8,
-    subjectId: ?[]const u8 = null,
-    details: ?std.json.Value = null,
+pub const EquipmentItem = struct {
+    equipmentId: []const u8,
+    minimumLoadIncrement: ?Measurement = null,
 };
 
-pub const Athlete = struct {
-    id: ?[]const u8 = null,
-    preferences: AthletePreferences = .{},
-    restrictions: AthleteRestrictions = .{},
-    capabilities: ?std.json.Value = null,
-    readiness: ?std.json.Value = null,
+pub const TrainingLocation = struct {
+    id: []const u8,
+    name: ?[]const u8 = null,
+    equipment: []const EquipmentItem = &.{},
+    metadata: ?std.json.Value = null,
+};
+
+pub const CapabilityObservation = struct {
+    id: []const u8,
+    kind: enum { recent_performance, estimated_one_rep_max, assistance_capacity, exercise_familiarity, benchmark, custom },
+    exerciseId: ?[]const u8 = null,
+    value: ?Measurement = null,
+    observedAt: []const u8,
+    provenance: enum { athlete_reported, host_observed, device_supplied, imported, unknown } = .unknown,
+    customKindId: ?[]const u8 = null,
+};
+
+/// Explicit persistent training intent. It is neither an account nor derived
+/// athlete state, and it never owns progression-method state.
+pub const AthleteProfile = struct {
+    schemaVersion: u32 = 1,
+    id: []const u8,
+    revision: u64 = 0,
+    displayName: ?[]const u8 = null,
+    goals: GoalSet = .{},
+    experience: Experience = .{},
+    schedule: SchedulePreference = .{},
+    duration: DurationPreference = .{},
+    units: UnitPreferences = .{},
+    exercisePreferences: []const Preference = &.{},
+    musclePriorities: []const MusclePriority = &.{},
+    restrictions: []const Restriction = &.{},
+    locations: []const TrainingLocation = &.{},
+    capabilityObservations: []const CapabilityObservation = &.{},
+    metadata: ?std.json.Value = null,
 };
 
 pub const SetStatus = enum {
@@ -210,17 +283,46 @@ pub const HistorySnapshot = struct {
     summaries: ?std.json.Value = null,
 };
 
-pub const SessionContext = struct {
+pub const ReadinessObservation = struct {
+    id: []const u8,
+    dimension: enum { overall, fatigue, sleep_quality, pain, soreness },
+    subjectId: ?[]const u8 = null,
+    value: u8,
+    scaleMaximum: u8,
+    observedAt: []const u8,
+    provenance: enum { athlete_reported, host_observed, device_supplied, imported, unknown } = .athlete_reported,
+};
+
+pub const EquipmentDelta = struct {
+    override: ?[]const []const u8 = null,
+    additions: []const []const u8 = &.{},
+    removals: []const []const u8 = &.{},
+};
+
+/// Facts and constraints scoped only to the recommendation being made.
+pub const TrainingContext = struct {
+    locationId: ?[]const u8 = null,
+    equipment: EquipmentDelta = .{},
     availableMinutes: ?u32 = null,
-    availableEquipmentIds: []const []const u8 = &.{},
-    goals: []const []const u8 = &.{},
+    hardMaximumMinutes: ?u32 = null,
+    goals: GoalSet = .{},
+    preferences: []const Preference = &.{},
+    restrictions: []const Restriction = &.{},
     minExercises: ?u16 = null,
     maxExercises: ?u16 = null,
     maxSets: ?u16 = null,
     excludedExerciseIds: []const []const u8 = &.{},
     requiredExerciseIds: []const []const u8 = &.{},
-    locationTags: []const []const u8 = &.{},
-    readiness: ?std.json.Value = null,
+    readiness: []const ReadinessObservation = &.{},
+};
+
+pub const ProgramTrainingContext = struct {
+    goals: GoalSet = .{},
+    exercisePreferences: []const Preference = &.{},
+    musclePriorities: []const MusclePriority = &.{},
+    restrictions: []const Restriction = &.{},
+    requiredExerciseIds: []const []const u8 = &.{},
+    excludedExerciseIds: []const []const u8 = &.{},
 };
 
 pub const MethodologyRef = struct {
@@ -267,6 +369,7 @@ pub const ProgramPlan = struct {
     strategy: ProgramStrategyRef,
     state: ?ProgramState = null,
     exercises: []const ProgramExerciseSlot,
+    trainingContext: ProgramTrainingContext = .{},
 };
 
 pub const ProgramRecommendationRequest = struct {
@@ -274,9 +377,9 @@ pub const ProgramRecommendationRequest = struct {
     asOf: []const u8,
     program: ProgramPlan,
     catalog: []const Exercise,
-    athlete: Athlete = .{},
+    athleteProfile: ?AthleteProfile = null,
     history: HistorySnapshot = .{},
-    session: SessionContext = .{},
+    trainingContext: TrainingContext = .{},
 };
 
 pub const RecommendationRequest = struct {
@@ -285,9 +388,9 @@ pub const RecommendationRequest = struct {
     methodology: MethodologyRef,
     methodologyState: ?MethodologyState = null,
     catalog: []const Exercise,
-    athlete: Athlete = .{},
+    athleteProfile: ?AthleteProfile = null,
     history: HistorySnapshot = .{},
-    session: SessionContext = .{},
+    trainingContext: TrainingContext = .{},
     alternativeLimit: u16 = 0,
     tieBreakSeed: ?[]const u8 = null,
 };
@@ -298,7 +401,7 @@ pub const EvaluationRequest = struct {
     methodology: MethodologyRef,
     methodologyState: ?MethodologyState = null,
     catalog: []const Exercise,
-    athlete: Athlete = .{},
+    athleteProfile: ?AthleteProfile = null,
     history: HistorySnapshot = .{},
     completedWorkout: CompletedWorkout,
 };
@@ -360,6 +463,37 @@ pub const ResolvedComponent = struct {
     configVersion: u32,
 };
 
+pub const ResolvedSource = enum { engine_default, athlete_profile, program, location_profile, session, explicit_request };
+pub const ResolvedRestriction = struct { value: Restriction, source: ResolvedSource };
+pub const ResolvedPreference = struct { value: Preference, source: ResolvedSource };
+pub const ResolvedMusclePriority = struct { value: MusclePriority, source: ResolvedSource };
+pub const ResolvedExerciseConstraint = struct { exerciseId: []const u8, source: ResolvedSource };
+
+/// Minimal deterministic projection captured with the recommendation. It is
+/// sufficient to explain/replay decisions without consulting a mutable profile.
+pub const ResolvedTrainingContext = struct {
+    schemaVersion: u32 = 1,
+    athleteProfileId: []const u8,
+    athleteProfileRevision: u64,
+    athleteProfileFingerprint: []const u8,
+    goals: GoalSet,
+    experience: Experience,
+    schedule: SchedulePreference,
+    preferredDuration: DurationPreference,
+    availableMinutes: ?u16 = null,
+    hardMaximumMinutes: ?u16 = null,
+    units: UnitPreferences,
+    locationId: ?[]const u8 = null,
+    availableEquipmentIds: []const []const u8,
+    preferences: []const ResolvedPreference,
+    restrictions: []const ResolvedRestriction,
+    musclePriorities: []const ResolvedMusclePriority,
+    requiredExercises: []const ResolvedExerciseConstraint,
+    excludedExercises: []const ResolvedExerciseConstraint,
+    readiness: []const ReadinessObservation,
+    capabilityObservations: []const CapabilityObservation,
+};
+
 pub const ExerciseProgrammingProvenance = struct {
     slotId: []const u8,
     stateId: []const u8,
@@ -372,6 +506,7 @@ pub const SessionProgrammingProvenance = struct {
     strategy: ResolvedComponent,
     config: std.json.Value,
     inputState: ?ProgramState = null,
+    resolvedTrainingContext: ?ResolvedTrainingContext = null,
 };
 
 pub const SessionRecommendation = struct {
@@ -379,6 +514,7 @@ pub const SessionRecommendation = struct {
     estimatedDuration: ?Measurement = null,
     exercises: []const ExerciseRecommendation,
     programming: ?SessionProgrammingProvenance = null,
+    resolvedTrainingContext: ?ResolvedTrainingContext = null,
 };
 
 pub const ExerciseEvaluation = struct {
@@ -434,7 +570,7 @@ pub const ProgramEvaluationRequest = struct {
     asOf: []const u8,
     recommendation: SessionRecommendation,
     catalog: []const Exercise,
-    athlete: Athlete = .{},
+    athleteProfile: ?AthleteProfile = null,
     history: HistorySnapshot = .{},
     completedWorkout: CompletedWorkout,
 };

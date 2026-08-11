@@ -94,35 +94,37 @@ export interface ProgressionAssignment<TConfig = JsonValue> { stateId: string; m
 export interface ProgramExerciseSlot<TConfig = JsonValue> { slotId: string; exerciseId: string; progression: ProgressionAssignment<TConfig> }
 export interface ProgramRecommendationRequest {
   schemaVersion: 1; asOf: string;
-  program: { strategy: ProgramStrategyRef; state?: ProgramState; exercises: ProgramExerciseSlot[] };
-  catalog: Exercise[]; athlete?: Athlete; history?: { workouts?: CompletedWorkout[]; summaries?: JsonValue }; session?: RecommendationRequest["session"];
+  program: { strategy: ProgramStrategyRef; state?: ProgramState; exercises: ProgramExerciseSlot[]; trainingContext?: ProgramTrainingContext };
+  catalog: Exercise[]; athleteProfile?: AthleteProfile; history?: { workouts?: CompletedWorkout[]; summaries?: JsonValue }; trainingContext?: TrainingContext;
 }
 
-export interface AthletePreferences {
-  preferredExerciseIds?: string[];
-  dislikedExerciseIds?: string[];
-  avoidedEquipmentIds?: string[];
-  muscleEmphasis?: Array<{ muscleId: string; weight: string }>;
-}
-
-export interface AthleteRestrictions {
-  excludedExerciseIds?: string[];
-  excludedMovementTags?: string[];
-  equipmentLimitations?: string[];
-  constraints?: Array<{
-    code: string;
-    subjectId?: string;
-    details?: JsonValue;
-  }>;
-}
-
-export interface Athlete {
-  id?: string;
-  preferences?: AthletePreferences;
-  restrictions?: AthleteRestrictions;
-  capabilities?: JsonValue;
-  readiness?: JsonValue;
-}
+export type GoalId = "hypertrophy" | "strength" | "general-fitness" | "muscular-endurance" | "powerlifting-practice" | "limited-equipment" | "maintenance" | (string & {});
+export interface Goal { id: GoalId; weight?: number }
+export interface GoalSet { primary?: Goal; secondary?: Goal[]; bodyCompositionObjective?: string }
+export type Familiarity = "unfamiliar" | "learning" | "familiar" | "proficient";
+export interface Experience { resistanceTraining?: "novice" | "intermediate" | "advanced"; consistentMonths?: number; technicalLiftFamiliarity?: Familiarity; exercises?: Array<{ exerciseId: string; familiarity: Familiarity }> }
+export interface SchedulePreference { preferredSessionsPerWeek?: number; minimumSessionsPerWeek?: number; maximumSessionsPerWeek?: number; preferredDays?: Array<"monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday">; cadence?: "unspecified" | "fixed_weekdays" | "rolling"; preferRestBetweenSessions?: boolean }
+export interface DurationPreference { preferredMinutes?: number; acceptableMinimumMinutes?: number; acceptableMaximumMinutes?: number; hardMaximumMinutes?: number }
+export interface UnitPreferences { load?: "kilograms" | "pounds"; bodyweight?: "kilograms" | "pounds"; distance?: "meters" | "kilometers" | "feet" | "miles" }
+export type PreferenceTargetKind = "exercise" | "exercise_family" | "movement_pattern" | "equipment_category";
+export type PreferenceLevel = "preferred" | "deprioritized" | "excluded" | "required";
+export interface ExercisePreference { targetKind: PreferenceTargetKind; targetId: string; level: PreferenceLevel }
+export interface MusclePriority { muscleId: string; priority: "emphasize" | "balanced" | "maintain" | "deprioritize"; weight?: number }
+export interface TrainingRestriction { id: string; targetKind: "exercise" | "exercise_family" | "movement_pattern" | "restriction_tag" | "equipment"; targetId: string }
+export interface EquipmentItem { equipmentId: string; minimumLoadIncrement?: Measurement }
+export interface TrainingLocation { id: string; name?: string; equipment?: EquipmentItem[]; metadata?: JsonValue }
+export interface CapabilityObservation { id: string; kind: "recent_performance" | "estimated_one_rep_max" | "assistance_capacity" | "exercise_familiarity" | "benchmark" | "custom"; exerciseId?: string; value?: Measurement; observedAt: string; provenance?: "athlete_reported" | "host_observed" | "device_supplied" | "imported" | "unknown"; customKindId?: string }
+export interface AthleteProfile { schemaVersion?: 1; id: string; revision?: number; displayName?: string; goals?: GoalSet; experience?: Experience; schedule?: SchedulePreference; duration?: DurationPreference; units?: UnitPreferences; exercisePreferences?: ExercisePreference[]; musclePriorities?: MusclePriority[]; restrictions?: TrainingRestriction[]; locations?: TrainingLocation[]; capabilityObservations?: CapabilityObservation[]; metadata?: JsonValue }
+export interface ReadinessObservation { id: string; dimension: "overall" | "fatigue" | "sleep_quality" | "pain" | "soreness"; subjectId?: string; value: number; scaleMaximum: number; observedAt: string; provenance?: "athlete_reported" | "host_observed" | "device_supplied" | "imported" | "unknown" }
+export interface EquipmentDelta { override?: string[]; additions?: string[]; removals?: string[] }
+export interface TrainingContext { locationId?: string; equipment?: EquipmentDelta; availableMinutes?: number; hardMaximumMinutes?: number; goals?: GoalSet; preferences?: ExercisePreference[]; restrictions?: TrainingRestriction[]; minExercises?: number; maxExercises?: number; maxSets?: number; excludedExerciseIds?: string[]; requiredExerciseIds?: string[]; readiness?: ReadinessObservation[] }
+export interface ProgramTrainingContext { goals?: GoalSet; exercisePreferences?: ExercisePreference[]; musclePriorities?: MusclePriority[]; restrictions?: TrainingRestriction[]; requiredExerciseIds?: string[]; excludedExerciseIds?: string[] }
+export type ContextSource = "engine_default" | "athlete_profile" | "program" | "location_profile" | "session" | "explicit_request";
+export interface ResolvedTrainingContext { schemaVersion: 1; athleteProfileId: string; athleteProfileRevision: number; athleteProfileFingerprint: string; goals: GoalSet; experience: Experience; schedule: SchedulePreference; preferredDuration: DurationPreference; availableMinutes?: number; hardMaximumMinutes?: number; units: UnitPreferences; locationId?: string; availableEquipmentIds: string[]; preferences: Array<{ value: ExercisePreference; source: ContextSource }>; restrictions: Array<{ value: TrainingRestriction; source: ContextSource }>; musclePriorities: Array<{ value: MusclePriority; source: ContextSource }>; requiredExercises: Array<{ exerciseId: string; source: ContextSource }>; excludedExercises: Array<{ exerciseId: string; source: ContextSource }>; readiness: ReadinessObservation[]; capabilityObservations: CapabilityObservation[] }
+export declare function defineAthleteProfile(profile: AthleteProfile): AthleteProfile;
+export interface AthleteProfileDiff { fromRevision: number; toRevision: number; changedFields: string[] }
+export declare function diffAthleteProfiles(before: AthleteProfile, after: AthleteProfile): AthleteProfileDiff;
+export declare function resolveTrainingContext(profile: AthleteProfile, session?: TrainingContext, program?: ProgramTrainingContext, request?: TrainingContext): ResolvedTrainingContext;
 
 export interface RecommendationRequest {
   schemaVersion: 1;
@@ -130,20 +132,9 @@ export interface RecommendationRequest {
   methodology: MethodologyRef<unknown>;
   methodologyState?: MethodologyState;
   catalog: Exercise[];
-  athlete?: Athlete;
+  athleteProfile?: AthleteProfile;
   history?: { workouts?: CompletedWorkout[]; summaries?: JsonValue };
-  session?: {
-    availableMinutes?: number;
-    availableEquipmentIds?: string[];
-    goals?: string[];
-    minExercises?: number;
-    maxExercises?: number;
-    maxSets?: number;
-    excludedExerciseIds?: string[];
-    requiredExerciseIds?: string[];
-    locationTags?: string[];
-    readiness?: JsonValue;
-  };
+  trainingContext?: TrainingContext;
   alternativeLimit?: number;
   tieBreakSeed?: string;
 }
@@ -154,7 +145,7 @@ export interface EvaluationRequest {
   methodology: MethodologyRef<unknown>;
   methodologyState?: MethodologyState;
   catalog: Exercise[];
-  athlete?: Athlete;
+  athleteProfile?: AthleteProfile;
   history?: { workouts?: CompletedWorkout[]; summaries?: JsonValue };
   completedWorkout: CompletedWorkout;
 }
@@ -199,7 +190,8 @@ export interface SessionRecommendation {
     explanationRefs?: string[];
     programming?: ExerciseProgrammingProvenance;
   }>;
-  programming?: { strategy: ResolvedComponent; config: JsonValue; inputState?: ProgramState };
+  programming?: { strategy: ResolvedComponent; config: JsonValue; inputState?: ProgramState; resolvedTrainingContext?: ResolvedTrainingContext };
+  resolvedTrainingContext?: ResolvedTrainingContext;
 }
 export interface ResolvedComponent { id: string; version: string; configVersion: number }
 export interface ExerciseProgrammingProvenance { slotId: string; stateId: string; progression: ResolvedComponent; config: JsonValue; inputState?: MethodologyState }
@@ -237,7 +229,7 @@ export type EvaluationResult = ProgrammingResultCommon & (
   | { ok: true; evaluation: PerformanceEvaluation; nextMethodologyState?: MethodologyState; issues?: never }
   | { ok: false; evaluation?: never; nextMethodologyState?: never; issues: ValidationIssue[] }
 );
-export interface ProgramEvaluationRequest { schemaVersion: 1; asOf: string; recommendation: SessionRecommendation; catalog: Exercise[]; athlete?: Athlete; history?: { workouts?: CompletedWorkout[]; summaries?: JsonValue }; completedWorkout: CompletedWorkout }
+export interface ProgramEvaluationRequest { schemaVersion: 1; asOf: string; recommendation: SessionRecommendation; catalog: Exercise[]; athleteProfile?: AthleteProfile; history?: { workouts?: CompletedWorkout[]; summaries?: JsonValue }; completedWorkout: CompletedWorkout }
 export interface ProgramResultMetadata { engineVersion: string; schemaVersion: number; programStrategy: ResolvedComponent; inputFingerprint: string; resultFingerprint: string }
 export type ProgramRecommendationResult =
   | { ok: true; recommendation: SessionRecommendation; explanations?: Explanation[]; warnings?: ValidationIssue[]; metadata: ProgramResultMetadata; issues?: never }
@@ -379,6 +371,7 @@ export interface MethodologyStateAcceptancePersistence {
   compareAndSetState(change: { key: { hostScopeKey: string; methodologyId: string }; expectedRevision: string | null; methodologyVersion: string; nextState: MethodologyState; updatedAt: string }): Promise<unknown>;
 }
 export interface OrchestrationPersistence {
+  loadAthleteProfile?(key: { hostScopeKey: string; athleteProfileId: string }): Promise<{ profile: AthleteProfile } | null>;
   loadCatalog(input: { hostScopeKey: string; asOf: string }): Promise<readonly Exercise[]>;
   loadHistory(input: { hostScopeKey: string; through: string }): Promise<{ workouts: readonly CompletedWorkout[]; summaries?: JsonValue }>;
   loadState(input: { hostScopeKey: string; methodologyId: string }): Promise<{ state: MethodologyState; revision: string } | null>;
@@ -399,6 +392,7 @@ export interface WorkflowRecoveryRecord {
 export interface PortableCatalogReference { hostScopeKey: string; exerciseId: string; catalogId?: string; catalogVersion?: string }
 export interface PortableCustomExerciseRecord { hostScopeKey: string; exercise: Exercise }
 export interface PortableTemplateRecord { hostScopeKey: string; template: WorkoutTemplateDocument }
+export interface PortableAthleteProfileRecord { hostScopeKey: string; profile: AthleteProfile }
 export interface PortableCompletedWorkoutRecord { hostScopeKey: string; workout: CompletedWorkout }
 export interface PortableAcceptedRecommendationRecord { id: string; hostScopeKey: string; acceptedAt: string; result: RecommendationResult }
 export interface PortableMethodologyStateRecord { hostScopeKey: string; methodologyId: string; methodologyVersion: string; state: MethodologyState; revision: string; updatedAt: string }
@@ -411,6 +405,7 @@ export interface PortableDocument {
   catalogReferences?: PortableCatalogReference[];
   customExercises?: PortableCustomExerciseRecord[];
   templates?: PortableTemplateRecord[];
+  athleteProfiles?: PortableAthleteProfileRecord[];
   activeWorkouts?: ActiveWorkoutRecord[];
   completedWorkouts?: PortableCompletedWorkoutRecord[];
   acceptedRecommendations?: PortableAcceptedRecommendationRecord[];
@@ -424,7 +419,7 @@ export type PortableImportMode = "merge" | "replace";
 export type PortableConflictPolicy = "reject" | "keepExisting" | "overwrite";
 export interface PortableImportRequest { schemaVersion: 1; mode: PortableImportMode; conflictPolicy: PortableConflictPolicy; dryRun?: boolean; document: PortableDocument }
 export interface PortableIssue { code: string; path: string; message: string; severity: "warning" | "error" }
-export interface PortableCounts { catalogReferences: number; customExercises: number; templates: number; activeWorkouts: number; completedWorkouts: number; acceptedRecommendations: number; acceptedProgramRecommendations: number; methodologyStates: number; progressionStates: number; programStates: number; workflowRecovery: number }
+export interface PortableCounts { catalogReferences: number; customExercises: number; templates: number; athleteProfiles: number; activeWorkouts: number; completedWorkouts: number; acceptedRecommendations: number; acceptedProgramRecommendations: number; methodologyStates: number; progressionStates: number; programStates: number; workflowRecovery: number }
 export interface PortableImportPlan { schemaVersion: 1; valid: boolean; dryRun: boolean; mode: PortableImportMode; conflictPolicy: PortableConflictPolicy; counts: PortableCounts; issues: PortableIssue[] }
 export type PortableExportResult = { schemaVersion: 1; outcome: { accepted: PortableDocument } | { rejected: PortableIssue[] } };
 
@@ -444,8 +439,8 @@ export interface ActiveWorkout {
   complete(): Promise<CompletedWorkout>;
 }
 export interface SetResult { reps?: number; load?: MassMeasurement; rpe?: DecimalInput; rir?: DecimalInput; metrics?: readonly Metric[]; status?: "completed" | "partial" | "failed" }
-export interface ProgramOptions { catalog: readonly Exercise[]; methodology: MethodologyRef<unknown>; hostScopeKey: string; athlete?: Athlete; history?: RecommendationRequest["history"]; methodologyState?: MethodologyState; methodologyStateRevision?: string | null }
-export interface RecommendationOptions { asOf?: string; session?: RecommendationRequest["session"]; alternativeLimit?: number; tieBreakSeed?: string }
+export interface ProgramOptions { catalog: readonly Exercise[]; methodology: MethodologyRef<unknown>; hostScopeKey: string; athleteProfile?: AthleteProfile; history?: RecommendationRequest["history"]; methodologyState?: MethodologyState; methodologyStateRevision?: string | null }
+export interface RecommendationOptions { asOf?: string; trainingContext?: TrainingContext; alternativeLimit?: number; tieBreakSeed?: string }
 export interface Program {
   recommend(options?: RecommendationOptions): RecommendationResult;
   startWorkout(result: RecommendationResult, options?: { acceptedRecommendationId?: string }): Promise<ActiveWorkout>;
@@ -468,7 +463,7 @@ export interface RuntimeFacade {
 }
 export interface WorkflowFacade {
   recommend(request: RecommendationRequest): RecommendationResult;
-  recommendFromPersistence(input: Omit<RecommendationRequest, "catalog" | "history" | "methodologyState"> & { hostScopeKey: string }): Promise<RecommendationResult>;
+  recommendFromPersistence(input: Omit<RecommendationRequest, "catalog" | "history" | "methodologyState" | "athleteProfile"> & { hostScopeKey: string; athleteProfileId?: string }): Promise<RecommendationResult>;
   startRecommendation(result: RecommendationResult, input: { catalog: Exercise[]; scope: { hostScopeKey: string; athleteId?: string }; acceptedRecommendationId?: string; methodologyStateRevision?: string; methodologyStateFingerprint?: string }): Promise<ActiveWorkout>;
   startTemplate(template: WorkoutTemplateDocument, input: { catalog: Exercise[]; scope: { hostScopeKey: string; athleteId?: string } }): Promise<ActiveWorkout>;
   reloadActiveWorkout(input: { hostScopeKey: string; workoutId: string; catalog: Exercise[] }): Promise<ActiveWorkout | null>;

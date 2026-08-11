@@ -134,7 +134,16 @@
               "methodologyVersion": { "type": "string", "maxLength": 100 },
               "methodologyConfigVersion": { "type": "integer", "minimum": 0 },
               "methodologyStateRevision": { "type": "string", "maxLength": 200 },
-              "methodologyStateFingerprint": { "type": "string", "maxLength": 200 }
+              "methodologyStateFingerprint": { "type": "string", "maxLength": 200 },
+              "athleteProfileId": { "$ref": "#/$defs/id" },
+              "athleteProfileRevision": { "type": "integer", "minimum": 0 },
+              "athleteProfileFingerprint": { "type": "string", "maxLength": 200 },
+              "trainingLocationId": { "$ref": "#/$defs/id" }
+              ,"effectiveEquipmentIds": { "type": "array", "items": { "$ref": "#/$defs/id" }, "uniqueItems": true }
+              ,"availableMinutes": { "type": "integer", "minimum": 0, "maximum": 65535 }
+              ,"hardMaximumMinutes": { "type": "integer", "minimum": 0, "maximum": 65535 }
+              ,"sessionGoalId": { "$ref": "#/$defs/id" }
+              ,"activeRestrictionIds": { "type": "array", "items": { "$ref": "#/$defs/id" }, "uniqueItems": true }
             }, "additionalProperties": false
           } }
         },

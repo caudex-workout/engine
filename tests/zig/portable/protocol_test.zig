@@ -115,6 +115,30 @@ test "portable semantic validation returns stable timestamp decimal and unit iss
     try std.testing.expect(hasIssue(plan.issues, "portable.unit_unknown"));
 }
 
+test "portable athlete profiles are sorted, counted, and validated" {
+    const profiles = [_]portable.AthleteProfileRecord{
+        .{ .hostScopeKey = "scope-1", .profile = .{ .id = "profile-b", .revision = 2 } },
+        .{ .hostScopeKey = "scope-1", .profile = .{ .id = "profile-a", .revision = 1 } },
+        .{ .hostScopeKey = "scope-2", .profile = .{ .id = "", .schemaVersion = 2 } },
+    };
+    var issues: [8]portable.Issue = undefined;
+    const plan = try portable.planImport(.{
+        .schemaVersion = 1,
+        .mode = .merge,
+        .conflictPolicy = .reject,
+        .document = .{
+            .schemaVersion = 1,
+            .exportedAt = "2026-08-10T14:00:00Z",
+            .athleteProfiles = &profiles,
+        },
+    }, &issues);
+    try std.testing.expect(!plan.valid);
+    try std.testing.expectEqual(@as(usize, 3), plan.counts.athleteProfiles);
+    try std.testing.expect(hasIssue(plan.issues, "portable.order_invalid"));
+    try std.testing.expect(hasIssue(plan.issues, "portable.profile_version_unsupported"));
+    try std.testing.expect(hasIssue(plan.issues, "portable.profile_id_invalid"));
+}
+
 fn hasIssue(issues: []const portable.Issue, code: []const u8) bool {
     for (issues) |issue| if (std.mem.eql(u8, issue.code, code)) return true;
     return false;

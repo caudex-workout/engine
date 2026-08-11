@@ -63,7 +63,7 @@ try {
   IndexedDbPersistenceAdapter,
   INDEXEDDB_SCHEMA_VERSION,
 } from "@caudex-workout/persistence-indexeddb";
-if (INDEXEDDB_SCHEMA_VERSION !== 4 ||
+if (INDEXEDDB_SCHEMA_VERSION !== 5 ||
     typeof IndexedDbPersistenceAdapter !== "function") {
   throw new Error("IndexedDB clean-consumer packaging: runtime exports failed");
 }
@@ -85,7 +85,7 @@ const active: ActiveWorkoutStore = adapter;
 const templates: WorkoutTemplateStore = adapter;
 const recovery: WorkflowRecoveryStore = adapter;
 const portable: PortableDataStore = adapter;
-if (INDEXEDDB_SCHEMA_VERSION !== 4) throw new Error("IndexedDB clean-consumer packaging: schema version mismatch");
+if (INDEXEDDB_SCHEMA_VERSION !== 5) throw new Error("IndexedDB clean-consumer packaging: schema version mismatch");
 void catalog;
 void states;
 void active;

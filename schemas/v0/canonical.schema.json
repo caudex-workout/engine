@@ -224,35 +224,40 @@
       },
       "additionalProperties": false
     },
-    "athlete": {
+    "athleteProfile": {
       "type": "object",
+      "required": ["id"],
       "properties": {
+        "schemaVersion": { "const": 1 },
         "id": { "$ref": "#/$defs/identifier" },
-        "preferences": {
-          "type": "object",
-          "properties": {
-            "preferredExerciseIds": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
-            "dislikedExerciseIds": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
-            "avoidedEquipmentIds": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
-            "muscleEmphasis": { "type": "array", "items": { "$ref": "#/$defs/muscleEmphasis" } }
-          },
-          "additionalProperties": false
-        },
-        "restrictions": {
-          "type": "object",
-          "properties": {
-            "excludedExerciseIds": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
-            "excludedMovementTags": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
-            "equipmentLimitations": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
-            "constraints": { "type": "array", "items": { "$ref": "#/$defs/constraint" } }
-          },
-          "additionalProperties": false
-        },
-        "capabilities": { "$ref": "#/$defs/openObject" },
-        "readiness": { "$ref": "#/$defs/openObject" }
+        "revision": { "type": "integer", "minimum": 0 },
+        "displayName": { "type": "string" },
+        "goals": { "$ref": "#/$defs/goalSet" },
+        "experience": { "$ref": "#/$defs/experience" },
+        "schedule": { "$ref": "#/$defs/schedulePreference" },
+        "duration": { "$ref": "#/$defs/durationPreference" },
+        "units": { "$ref": "#/$defs/unitPreferences" },
+        "exercisePreferences": { "type": "array", "items": { "$ref": "#/$defs/preference" } },
+        "musclePriorities": { "type": "array", "items": { "$ref": "#/$defs/musclePriority" } },
+        "restrictions": { "type": "array", "items": { "$ref": "#/$defs/restriction" } },
+        "locations": { "type": "array", "items": { "$ref": "#/$defs/trainingLocation" } },
+        "capabilityObservations": { "type": "array", "items": { "$ref": "#/$defs/capabilityObservation" } },
+        "metadata": { "$ref": "#/$defs/openObject" }
       },
       "additionalProperties": false
     },
+    "goalSet": { "type": "object", "properties": { "primary": { "$ref": "#/$defs/goal" }, "secondary": { "type": "array", "items": { "$ref": "#/$defs/goal" } }, "bodyCompositionObjective": { "type": "string" } }, "additionalProperties": false },
+    "goal": { "type": "object", "required": ["id"], "properties": { "id": { "$ref": "#/$defs/identifier" }, "weight": { "type": "integer", "minimum": 0, "maximum": 1000 } }, "additionalProperties": false },
+    "experience": { "type": "object", "properties": { "resistanceTraining": { "enum": ["novice", "intermediate", "advanced"] }, "consistentMonths": { "type": "integer", "minimum": 0, "maximum": 65535 }, "technicalLiftFamiliarity": { "enum": ["unfamiliar", "learning", "familiar", "proficient"] }, "exercises": { "type": "array", "items": { "type": "object", "required": ["exerciseId", "familiarity"], "properties": { "exerciseId": { "$ref": "#/$defs/identifier" }, "familiarity": { "enum": ["unfamiliar", "learning", "familiar", "proficient"] } }, "additionalProperties": false } } }, "additionalProperties": false },
+    "schedulePreference": { "type": "object", "properties": { "preferredSessionsPerWeek": { "type": "integer", "minimum": 0, "maximum": 7 }, "minimumSessionsPerWeek": { "type": "integer", "minimum": 0, "maximum": 7 }, "maximumSessionsPerWeek": { "type": "integer", "minimum": 0, "maximum": 7 }, "preferredDays": { "type": "array", "items": { "enum": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] }, "uniqueItems": true }, "cadence": { "enum": ["unspecified", "fixed_weekdays", "rolling"] }, "preferRestBetweenSessions": { "type": "boolean" } }, "additionalProperties": false },
+    "durationPreference": { "type": "object", "properties": { "preferredMinutes": { "type": "integer", "minimum": 0, "maximum": 65535 }, "acceptableMinimumMinutes": { "type": "integer", "minimum": 0, "maximum": 65535 }, "acceptableMaximumMinutes": { "type": "integer", "minimum": 0, "maximum": 65535 }, "hardMaximumMinutes": { "type": "integer", "minimum": 0, "maximum": 65535 } }, "additionalProperties": false },
+    "unitPreferences": { "type": "object", "properties": { "load": { "enum": ["kilograms", "pounds"] }, "bodyweight": { "enum": ["kilograms", "pounds"] }, "distance": { "enum": ["meters", "kilometers", "feet", "miles"] } }, "additionalProperties": false },
+    "capabilityObservation": { "type": "object", "required": ["id", "kind", "observedAt"], "properties": { "id": { "$ref": "#/$defs/identifier" }, "kind": { "enum": ["recent_performance", "estimated_one_rep_max", "assistance_capacity", "exercise_familiarity", "benchmark", "custom"] }, "exerciseId": { "$ref": "#/$defs/identifier" }, "value": { "$ref": "#/$defs/measurement" }, "observedAt": { "$ref": "#/$defs/timestamp" }, "provenance": { "enum": ["athlete_reported", "host_observed", "device_supplied", "imported", "unknown"] }, "customKindId": { "$ref": "#/$defs/identifier" } }, "additionalProperties": false },
+    "readinessObservation": { "type": "object", "required": ["id", "dimension", "value", "scaleMaximum", "observedAt"], "properties": { "id": { "$ref": "#/$defs/identifier" }, "dimension": { "enum": ["overall", "fatigue", "sleep_quality", "pain", "soreness"] }, "subjectId": { "$ref": "#/$defs/identifier" }, "value": { "type": "integer", "minimum": 0, "maximum": 255 }, "scaleMaximum": { "type": "integer", "minimum": 1, "maximum": 255 }, "observedAt": { "$ref": "#/$defs/timestamp" }, "provenance": { "enum": ["athlete_reported", "host_observed", "device_supplied", "imported", "unknown"] } }, "additionalProperties": false },
+    "preference": { "type": "object", "required": ["targetKind", "targetId", "level"], "properties": { "targetKind": { "enum": ["exercise", "exercise_family", "movement_pattern", "equipment_category"] }, "targetId": { "$ref": "#/$defs/identifier" }, "level": { "enum": ["preferred", "deprioritized", "excluded", "required"] } }, "additionalProperties": false },
+    "musclePriority": { "type": "object", "required": ["muscleId", "priority"], "properties": { "muscleId": { "$ref": "#/$defs/identifier" }, "priority": { "enum": ["emphasize", "balanced", "maintain", "deprioritize"] }, "weight": { "type": "integer", "minimum": 0, "maximum": 1000 } }, "additionalProperties": false },
+    "restriction": { "type": "object", "required": ["id", "targetKind", "targetId"], "properties": { "id": { "$ref": "#/$defs/identifier" }, "targetKind": { "enum": ["exercise", "exercise_family", "movement_pattern", "restriction_tag", "equipment"] }, "targetId": { "$ref": "#/$defs/identifier" } }, "additionalProperties": false },
+    "trainingLocation": { "type": "object", "required": ["id"], "properties": { "id": { "$ref": "#/$defs/identifier" }, "name": { "type": "string" }, "equipment": { "type": "array", "items": { "type": "object", "required": ["equipmentId"], "properties": { "equipmentId": { "$ref": "#/$defs/identifier" }, "minimumLoadIncrement": { "$ref": "#/$defs/measurement" } }, "additionalProperties": false } }, "metadata": { "$ref": "#/$defs/openObject" } }, "additionalProperties": false },
     "completedSet": {
       "type": "object",
       "required": ["kind", "actualMetrics", "status"],
@@ -318,19 +323,22 @@
       },
       "additionalProperties": false
     },
-    "session": {
+    "trainingContext": {
       "type": "object",
       "properties": {
         "availableMinutes": { "type": "integer", "minimum": 0 },
-        "availableEquipmentIds": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
-        "goals": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+        "hardMaximumMinutes": { "type": "integer", "minimum": 0 },
+        "locationId": { "$ref": "#/$defs/identifier" },
+        "equipment": { "type": "object", "properties": { "override": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true }, "additions": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true }, "removals": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true } }, "additionalProperties": false },
+        "goals": { "$ref": "#/$defs/goalSet" },
+        "preferences": { "type": "array", "items": { "$ref": "#/$defs/preference" } },
+        "restrictions": { "type": "array", "items": { "$ref": "#/$defs/restriction" } },
         "minExercises": { "type": "integer", "minimum": 0 },
         "maxExercises": { "type": "integer", "minimum": 0 },
         "maxSets": { "type": "integer", "minimum": 0 },
         "excludedExerciseIds": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
         "requiredExerciseIds": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
-        "locationTags": { "type": "array", "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
-        "readiness": { "$ref": "#/$defs/openObject" }
+        "readiness": { "type": "array", "items": { "$ref": "#/$defs/readinessObservation" } }
       },
       "additionalProperties": false
     },
@@ -367,7 +375,7 @@
           "minItems": 1,
           "items": { "$ref": "#/$defs/exercise" }
         },
-        "athlete": { "$ref": "#/$defs/athlete" },
+        "athleteProfile": { "$ref": "#/$defs/athleteProfile" },
         "history": { "$ref": "#/$defs/history" }
       }
     },
@@ -379,7 +387,7 @@
         {
           "type": "object",
           "properties": {
-            "session": { "$ref": "#/$defs/session" },
+            "trainingContext": { "$ref": "#/$defs/trainingContext" },
             "alternativeLimit": { "type": "integer", "minimum": 0, "maximum": 100 },
             "tieBreakSeed": { "type": "string", "minLength": 1 }
           }
@@ -472,7 +480,8 @@
       "properties": {
         "title": { "type": "string" },
         "estimatedDuration": { "$ref": "#/$defs/measurement" },
-        "exercises": { "type": "array", "items": { "$ref": "#/$defs/exerciseRecommendation" } }
+        "exercises": { "type": "array", "items": { "$ref": "#/$defs/exerciseRecommendation" } },
+        "resolvedTrainingContext": { "type": "object" }
       },
       "additionalProperties": false
     },

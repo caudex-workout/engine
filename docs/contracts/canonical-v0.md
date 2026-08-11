@@ -106,7 +106,7 @@ interface RequestBase {
   methodology: MethodologyRef;
   methodologyState?: MethodologyState;
   catalog: Exercise[];
-  athlete?: JsonObject;
+  athleteProfile?: AthleteProfile;
   history?: {
     workouts?: CompletedWorkout[];
     summaries?: JsonObject;
@@ -114,7 +114,7 @@ interface RequestBase {
 }
 
 interface RecommendationRequest extends RequestBase {
-  session?: JsonObject;
+  trainingContext?: TrainingContext;
   alternativeLimit?: number;
   tieBreakSeed?: string;
 }
@@ -206,11 +206,19 @@ meaning and reproducibility of a calculation. Evaluation additionally requires
 the completed workout being evaluated.
 
 Methodology state is optional because methodologies must define initial-state
-behavior. Athlete inputs, history, and session constraints are optional because
+behavior. Athlete profiles, history, and training context are optional because
 a methodology may safely operate without them or return a structured issue when
 it requires missing data. Optional collection fields have empty-array semantics.
 `versionRequirement` is optional so a host can request the installed default;
 the exact resolved version is always recorded in result metadata.
+
+`AthleteProfile` is persistent explicit intent; `TrainingContext` contains only
+facts for this recommendation. When a profile is supplied, the runtime resolves
+location equipment and session deltas and snapshots the decision-relevant
+`resolvedTrainingContext` in the recommendation. Its profile ID, programming
+revision, and fingerprint are provenance, not account/authentication identity.
+The normative field and precedence semantics are documented in
+[`../athlete-profiles-and-training-context.md`](../athlete-profiles-and-training-context.md).
 
 Results require `ok` and metadata for both accepted and rejected calculations.
 The recommendation or evaluation payload is optional because expected

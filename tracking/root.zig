@@ -96,6 +96,15 @@ pub const RecommendationProvenance = struct {
     methodology_config_version: u32,
     methodology_state_revision: ?[]const u8 = null,
     methodology_state_fingerprint: ?[]const u8 = null,
+    athlete_profile_id: ?[]const u8 = null,
+    athlete_profile_revision: ?u64 = null,
+    athlete_profile_fingerprint: ?[]const u8 = null,
+    training_location_id: ?[]const u8 = null,
+    effective_equipment_ids: []const []const u8 = &.{},
+    available_minutes: ?u16 = null,
+    hard_maximum_minutes: ?u16 = null,
+    session_goal_id: ?[]const u8 = null,
+    active_restriction_ids: []const []const u8 = &.{},
 };
 
 pub const TemplateProvenance = struct {

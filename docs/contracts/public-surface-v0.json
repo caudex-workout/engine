@@ -4,6 +4,7 @@
   "zig": {
     "module": "caudex",
     "exports": [
+      "athlete_profile",
       "canonical",
       "canonical_json",
       "diagnostics",
@@ -124,7 +125,8 @@
     "adapters/sqlite/migrations/008_workflow_persistence.sql",
     "adapters/sqlite/migrations/009_accepted_recommendations.sql",
     "adapters/sqlite/migrations/010_tracking_exercise_receipts.sql",
-    "adapters/sqlite/migrations/011_programming_hierarchy.sql"
+    "adapters/sqlite/migrations/011_programming_hierarchy.sql",
+    "adapters/sqlite/migrations/012_athlete_profiles.sql"
   ],
   "methodologyIds": [
     "caudex.double-progression",

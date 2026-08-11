@@ -27,6 +27,13 @@ pub const TemplateRecord = struct {
     template: caudex.canonical.WorkoutTemplate,
 };
 
+/// Host-neutral persistent athlete intent. Account credentials and host-only
+/// presentation data are deliberately outside the portable contract.
+pub const AthleteProfileRecord = struct {
+    hostScopeKey: []const u8,
+    profile: caudex.canonical.AthleteProfile,
+};
+
 pub const ActiveWorkoutRecord = struct {
     hostScopeKey: []const u8,
     athleteId: ?[]const u8 = null,
@@ -98,6 +105,7 @@ pub const Document = struct {
     catalogReferences: []const CatalogReference = &.{},
     customExercises: []const CustomExerciseRecord = &.{},
     templates: []const TemplateRecord = &.{},
+    athleteProfiles: []const AthleteProfileRecord = &.{},
     activeWorkouts: []const ActiveWorkoutRecord = &.{},
     completedWorkouts: []const CompletedWorkoutRecord = &.{},
     acceptedRecommendations: []const AcceptedRecommendationRecord = &.{},
@@ -131,6 +139,7 @@ pub const Counts = struct {
     catalogReferences: usize,
     customExercises: usize,
     templates: usize,
+    athleteProfiles: usize,
     activeWorkouts: usize,
     completedWorkouts: usize,
     acceptedRecommendations: usize,
@@ -211,6 +220,7 @@ pub fn validateDocumentBounds(document: Document) error{RecordLimitExceeded}!voi
         document.catalogReferences.len,
         document.customExercises.len,
         document.templates.len,
+        document.athleteProfiles.len,
         document.activeWorkouts.len,
         document.completedWorkouts.len,
         document.acceptedRecommendations.len,
@@ -230,6 +240,7 @@ fn validateDocument(document: Document, storage: []Issue, count: *usize) error{I
     try validateUniqueAndSorted(CatalogReference, document.catalogReferences, storage, count, "/catalogReferences", catalogOrder);
     try validateUniqueAndSorted(CustomExerciseRecord, document.customExercises, storage, count, "/customExercises", exerciseOrder);
     try validateUniqueAndSorted(TemplateRecord, document.templates, storage, count, "/templates", templateOrder);
+    try validateUniqueAndSorted(AthleteProfileRecord, document.athleteProfiles, storage, count, "/athleteProfiles", athleteProfileOrder);
     try validateUniqueAndSorted(ActiveWorkoutRecord, document.activeWorkouts, storage, count, "/activeWorkouts", activeOrder);
     try validateUniqueAndSorted(CompletedWorkoutRecord, document.completedWorkouts, storage, count, "/completedWorkouts", completedOrder);
     try validateUniqueAndSorted(AcceptedRecommendationRecord, document.acceptedRecommendations, storage, count, "/acceptedRecommendations", acceptedOrder);
@@ -296,6 +307,12 @@ fn validateDocument(document: Document, storage: []Issue, count: *usize) error{I
     for (document.progressionStates) |record| if (tracking.Timestamp.parse(record.updatedAt)) |_| {} else |_| try appendIssue(storage, count, "portable.timestamp_invalid", "/progressionStates", "A progression-state timestamp is invalid.");
     for (document.programStates) |record| if (tracking.Timestamp.parse(record.updatedAt)) |_| {} else |_| try appendIssue(storage, count, "portable.timestamp_invalid", "/programStates", "A program-state timestamp is invalid.");
     for (document.workflowRecovery) |record| if (tracking.Timestamp.parse(record.updatedAt)) |_| {} else |_| try appendIssue(storage, count, "portable.timestamp_invalid", "/workflowRecovery", "A workflow-recovery timestamp is invalid.");
+    for (document.athleteProfiles) |record| {
+        if (record.profile.schemaVersion != 1)
+            try appendIssue(storage, count, "portable.profile_version_unsupported", "/athleteProfiles", "An athlete profile uses an unsupported schema version.");
+        if (record.profile.id.len == 0)
+            try appendIssue(storage, count, "portable.profile_id_invalid", "/athleteProfiles", "An athlete profile must have a stable non-empty ID.");
+    }
 }
 
 fn validateSessionMetrics(session: caudex.canonical.SessionRecommendation, storage: []Issue, count: *usize) error{IssueBufferTooSmall}!void {
@@ -331,6 +348,9 @@ fn exerciseOrder(left: CustomExerciseRecord, right: CustomExerciseRecord) std.ma
 }
 fn templateOrder(left: TemplateRecord, right: TemplateRecord) std.math.Order {
     return scopedOrder(left.hostScopeKey, left.template.id, right.hostScopeKey, right.template.id);
+}
+fn athleteProfileOrder(left: AthleteProfileRecord, right: AthleteProfileRecord) std.math.Order {
+    return scopedOrder(left.hostScopeKey, left.profile.id, right.hostScopeKey, right.profile.id);
 }
 fn activeOrder(left: ActiveWorkoutRecord, right: ActiveWorkoutRecord) std.math.Order {
     const scope_order = std.mem.order(u8, left.hostScopeKey, right.hostScopeKey);
@@ -382,6 +402,7 @@ fn counts(document: Document) Counts {
         .catalogReferences = document.catalogReferences.len,
         .customExercises = document.customExercises.len,
         .templates = document.templates.len,
+        .athleteProfiles = document.athleteProfiles.len,
         .activeWorkouts = document.activeWorkouts.len,
         .completedWorkouts = document.completedWorkouts.len,
         .acceptedRecommendations = document.acceptedRecommendations.len,

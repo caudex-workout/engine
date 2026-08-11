@@ -13,6 +13,7 @@
       "properties": {
         "strategy": { "$ref": "#/$defs/componentRef" },
         "state": { "$ref": "#/$defs/state" },
+        "trainingContext": { "$ref": "#/$defs/programTrainingContext" },
         "exercises": {
           "type": "array", "minItems": 1, "maxItems": 16,
           "items": {
@@ -34,9 +35,9 @@
       }, "additionalProperties": false
     },
     "catalog": { "type": "array", "minItems": 1 },
-    "athlete": { "type": "object" },
+    "athleteProfile": { "$ref": "../../v0/canonical.schema.json#/$defs/athleteProfile" },
     "history": { "type": "object" },
-    "session": { "type": "object" }
+    "trainingContext": { "$ref": "../../v0/canonical.schema.json#/$defs/trainingContext" }
   },
   "additionalProperties": false,
   "$defs": {
@@ -45,6 +46,7 @@
       "properties": { "id": { "type": "string", "minLength": 1 }, "versionRequirement": { "type": "string" }, "configVersion": { "type": "integer", "minimum": 1 }, "config": { "type": "object" } },
       "additionalProperties": false
     },
-    "state": { "type": "object", "required": ["schemaVersion", "data"], "properties": { "schemaVersion": { "type": "integer", "minimum": 1 }, "data": { "type": "object" } }, "additionalProperties": false }
+    "state": { "type": "object", "required": ["schemaVersion", "data"], "properties": { "schemaVersion": { "type": "integer", "minimum": 1 }, "data": { "type": "object" } }, "additionalProperties": false },
+    "programTrainingContext": { "type": "object", "properties": { "goals": { "$ref": "../../v0/canonical.schema.json#/$defs/goalSet" }, "exercisePreferences": { "type": "array", "items": { "$ref": "../../v0/canonical.schema.json#/$defs/preference" } }, "musclePriorities": { "type": "array", "items": { "$ref": "../../v0/canonical.schema.json#/$defs/musclePriority" } }, "restrictions": { "type": "array", "items": { "$ref": "../../v0/canonical.schema.json#/$defs/restriction" } }, "requiredExerciseIds": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true }, "excludedExerciseIds": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true } }, "additionalProperties": false }
   }
 }

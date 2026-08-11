@@ -80,7 +80,7 @@ export function buildRecommendationRequest(
     },
     catalog: [buildExercise()],
     history: { workouts: [] },
-    session: { availableEquipmentIds: ["test-equipment"] },
+    trainingContext: { equipment: { override: ["test-equipment"] } },
     ...overrides,
   };
 }
@@ -177,4 +177,3 @@ function isNode(): boolean {
       ?.versions?.node,
   );
 }
-

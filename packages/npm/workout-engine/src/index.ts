@@ -220,37 +220,148 @@ export interface ProgramRecommendationRequest {
     strategy: ProgramStrategyRef;
     state?: ProgramState;
     exercises: ProgramExerciseSlot[];
+    trainingContext?: ProgramTrainingContext;
   };
   catalog: Exercise[];
-  athlete?: Athlete;
+  athleteProfile?: AthleteProfile;
   history?: { workouts?: CompletedWorkout[]; summaries?: JsonValue };
-  session?: RecommendationRequest["session"];
+  trainingContext?: TrainingContext;
 }
 
-export interface AthletePreferences {
-  preferredExerciseIds?: string[];
-  dislikedExerciseIds?: string[];
-  avoidedEquipmentIds?: string[];
-  muscleEmphasis?: Array<{ muscleId: string; weight: string }>;
+export type GoalId = "hypertrophy" | "strength" | "general-fitness" | "muscular-endurance" | "powerlifting-practice" | "limited-equipment" | "maintenance" | (string & {});
+export interface Goal { id: GoalId; weight?: number }
+export interface GoalSet { primary?: Goal; secondary?: Goal[]; bodyCompositionObjective?: string }
+export type Familiarity = "unfamiliar" | "learning" | "familiar" | "proficient";
+export interface Experience {
+  resistanceTraining?: "novice" | "intermediate" | "advanced";
+  consistentMonths?: number;
+  technicalLiftFamiliarity?: Familiarity;
+  exercises?: Array<{ exerciseId: string; familiarity: Familiarity }>;
+}
+export interface SchedulePreference {
+  preferredSessionsPerWeek?: number;
+  minimumSessionsPerWeek?: number;
+  maximumSessionsPerWeek?: number;
+  preferredDays?: Array<"monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday">;
+  cadence?: "unspecified" | "fixed_weekdays" | "rolling";
+  preferRestBetweenSessions?: boolean;
+}
+export interface DurationPreference { preferredMinutes?: number; acceptableMinimumMinutes?: number; acceptableMaximumMinutes?: number; hardMaximumMinutes?: number }
+export interface UnitPreferences { load?: "kilograms" | "pounds"; bodyweight?: "kilograms" | "pounds"; distance?: "meters" | "kilometers" | "feet" | "miles" }
+export type PreferenceTargetKind = "exercise" | "exercise_family" | "movement_pattern" | "equipment_category";
+export type PreferenceLevel = "preferred" | "deprioritized" | "excluded" | "required";
+export interface ExercisePreference { targetKind: PreferenceTargetKind; targetId: string; level: PreferenceLevel }
+export interface MusclePriority { muscleId: string; priority: "emphasize" | "balanced" | "maintain" | "deprioritize"; weight?: number }
+export interface TrainingRestriction { id: string; targetKind: "exercise" | "exercise_family" | "movement_pattern" | "restriction_tag" | "equipment"; targetId: string }
+export interface EquipmentItem { equipmentId: string; minimumLoadIncrement?: Measurement }
+export interface TrainingLocation { id: string; name?: string; equipment?: EquipmentItem[]; metadata?: JsonValue }
+export interface CapabilityObservation {
+  id: string; kind: "recent_performance" | "estimated_one_rep_max" | "assistance_capacity" | "exercise_familiarity" | "benchmark" | "custom";
+  exerciseId?: string; value?: Measurement; observedAt: string;
+  provenance?: "athlete_reported" | "host_observed" | "device_supplied" | "imported" | "unknown"; customKindId?: string;
+}
+export interface AthleteProfile {
+  schemaVersion?: 1; id: string; revision?: number; displayName?: string; goals?: GoalSet; experience?: Experience;
+  schedule?: SchedulePreference; duration?: DurationPreference; units?: UnitPreferences;
+  exercisePreferences?: ExercisePreference[]; musclePriorities?: MusclePriority[]; restrictions?: TrainingRestriction[];
+  locations?: TrainingLocation[]; capabilityObservations?: CapabilityObservation[]; metadata?: JsonValue;
+}
+export interface ReadinessObservation {
+  id: string; dimension: "overall" | "fatigue" | "sleep_quality" | "pain" | "soreness"; subjectId?: string;
+  value: number; scaleMaximum: number; observedAt: string;
+  provenance?: "athlete_reported" | "host_observed" | "device_supplied" | "imported" | "unknown";
+}
+export interface EquipmentDelta { override?: string[]; additions?: string[]; removals?: string[] }
+export interface TrainingContext {
+  locationId?: string; equipment?: EquipmentDelta; availableMinutes?: number; hardMaximumMinutes?: number; goals?: GoalSet;
+  preferences?: ExercisePreference[]; restrictions?: TrainingRestriction[]; minExercises?: number; maxExercises?: number; maxSets?: number;
+  excludedExerciseIds?: string[]; requiredExerciseIds?: string[]; readiness?: ReadinessObservation[];
+}
+export type ContextSource = "engine_default" | "athlete_profile" | "program" | "location_profile" | "session" | "explicit_request";
+export interface ProgramTrainingContext {
+  goals?: GoalSet; exercisePreferences?: ExercisePreference[]; musclePriorities?: MusclePriority[]; restrictions?: TrainingRestriction[];
+  requiredExerciseIds?: string[]; excludedExerciseIds?: string[];
+}
+export interface ResolvedTrainingContext {
+  schemaVersion: 1; athleteProfileId: string; athleteProfileRevision: number; athleteProfileFingerprint: string;
+  goals: GoalSet; experience: Experience; schedule: SchedulePreference; preferredDuration: DurationPreference;
+  availableMinutes?: number; hardMaximumMinutes?: number; units: UnitPreferences; locationId?: string;
+  availableEquipmentIds: string[];
+  preferences: Array<{ value: ExercisePreference; source: ContextSource }>;
+  restrictions: Array<{ value: TrainingRestriction; source: ContextSource }>;
+  musclePriorities: Array<{ value: MusclePriority; source: ContextSource }>;
+  requiredExercises: Array<{ exerciseId: string; source: ContextSource }>;
+  excludedExercises: Array<{ exerciseId: string; source: ContextSource }>;
+  readiness: ReadinessObservation[]; capabilityObservations: CapabilityObservation[];
 }
 
-export interface AthleteRestrictions {
-  excludedExerciseIds?: string[];
-  excludedMovementTags?: string[];
-  equipmentLimitations?: string[];
-  constraints?: Array<{
-    code: string;
-    subjectId?: string;
-    details?: JsonValue;
-  }>;
+/** Defines explicit host-owned profile state without inventing missing values. */
+export function defineAthleteProfile(profile: AthleteProfile): AthleteProfile {
+  if (!profile.id) throw new TypeError("Athlete profile id is required.");
+  return structuredClone({ schemaVersion: 1, revision: 0, ...profile });
 }
 
-export interface Athlete {
-  id?: string;
-  preferences?: AthletePreferences;
-  restrictions?: AthleteRestrictions;
-  capabilities?: JsonValue;
-  readiness?: JsonValue;
+export interface AthleteProfileDiff { fromRevision: number; toRevision: number; changedFields: string[] }
+export function diffAthleteProfiles(before: AthleteProfile, after: AthleteProfile): AthleteProfileDiff {
+  if (before.id !== after.id) throw new TypeError("Athlete profile IDs must match to compute a diff.");
+  const fields: Array<keyof AthleteProfile> = ["goals", "experience", "schedule", "duration", "units", "exercisePreferences", "musclePriorities", "restrictions", "locations", "capabilityObservations"];
+  return { fromRevision: before.revision ?? 0, toRevision: after.revision ?? 0, changedFields: fields.filter((field) => JSON.stringify(before[field]) !== JSON.stringify(after[field])) };
+}
+
+/** Ergonomic mirror of the engine's field-specific context resolution rules. */
+export function resolveTrainingContext(
+  profileInput: AthleteProfile,
+  session: TrainingContext = {},
+  program: ProgramTrainingContext = {},
+  request: TrainingContext = {},
+): ResolvedTrainingContext {
+  const profile = defineAthleteProfile(profileInput);
+  const locationId = request.locationId ?? session.locationId;
+  const location = locationId === undefined ? undefined : profile.locations?.find((candidate) => candidate.id === locationId);
+  if (locationId !== undefined && !location) throw new TypeError(`Unknown training location: ${locationId}`);
+  for (const layer of [session.equipment, request.equipment]) {
+    for (const id of layer?.additions ?? []) if (layer?.removals?.includes(id)) throw new TypeError(`Equipment is both added and removed: ${id}`);
+  }
+  let equipment = [...(request.equipment?.override ?? session.equipment?.override ?? location?.equipment?.map((item) => item.equipmentId) ?? [])];
+  const applyEquipment = (delta?: EquipmentDelta) => {
+    if (delta?.override) equipment = [...delta.override];
+    equipment = equipment.filter((id) => !delta?.removals?.includes(id));
+    for (const id of delta?.additions ?? []) if (!equipment.includes(id)) equipment.push(id);
+  };
+  applyEquipment(session.equipment); applyEquipment(request.equipment);
+  const sourced = <T>(source: ContextSource, values: readonly T[] | undefined) => (values ?? []).map((value) => ({ value: structuredClone(value), source }));
+  const requiredExercises = [
+    ...(profile.exercisePreferences ?? []).filter((item) => item.targetKind === "exercise" && item.level === "required").map((item) => ({ exerciseId: item.targetId, source: "athlete_profile" as const })),
+    ...(program.requiredExerciseIds ?? []).map((exerciseId) => ({ exerciseId, source: "program" as const })),
+    ...(session.requiredExerciseIds ?? []).map((exerciseId) => ({ exerciseId, source: "session" as const })),
+    ...(request.requiredExerciseIds ?? []).map((exerciseId) => ({ exerciseId, source: "explicit_request" as const })),
+  ];
+  const excludedExercises = [
+    ...(profile.exercisePreferences ?? []).filter((item) => item.targetKind === "exercise" && item.level === "excluded").map((item) => ({ exerciseId: item.targetId, source: "athlete_profile" as const })),
+    ...(program.excludedExerciseIds ?? []).map((exerciseId) => ({ exerciseId, source: "program" as const })),
+    ...(session.excludedExerciseIds ?? []).map((exerciseId) => ({ exerciseId, source: "session" as const })),
+    ...(request.excludedExerciseIds ?? []).map((exerciseId) => ({ exerciseId, source: "explicit_request" as const })),
+  ];
+  for (const required of requiredExercises) if (excludedExercises.some((item) => item.exerciseId === required.exerciseId)) throw new TypeError(`Exercise is both required and excluded: ${required.exerciseId}`);
+  const goals: GoalSet = {
+    primary: request.goals?.primary ?? session.goals?.primary ?? program.goals?.primary ?? profile.goals?.primary,
+    secondary: structuredClone(request.goals?.secondary?.length ? request.goals.secondary : session.goals?.secondary?.length ? session.goals.secondary : program.goals?.secondary?.length ? program.goals.secondary : profile.goals?.secondary ?? []),
+    bodyCompositionObjective: request.goals?.bodyCompositionObjective ?? session.goals?.bodyCompositionObjective ?? program.goals?.bodyCompositionObjective ?? profile.goals?.bodyCompositionObjective,
+  };
+  const revision = profile.revision ?? 0;
+  return {
+    schemaVersion: 1, athleteProfileId: profile.id, athleteProfileRevision: revision,
+    athleteProfileFingerprint: `profile:${profile.id}:${revision}`,
+    goals: structuredClone(goals), experience: structuredClone(profile.experience ?? {}), schedule: structuredClone(profile.schedule ?? {}),
+    preferredDuration: structuredClone(profile.duration ?? {}), availableMinutes: request.availableMinutes ?? session.availableMinutes,
+    hardMaximumMinutes: request.hardMaximumMinutes ?? request.availableMinutes ?? session.hardMaximumMinutes ?? session.availableMinutes ?? profile.duration?.hardMaximumMinutes,
+    units: structuredClone(profile.units ?? {}), locationId, availableEquipmentIds: equipment,
+    preferences: [...sourced("athlete_profile", profile.exercisePreferences), ...sourced("program", program.exercisePreferences), ...sourced("session", session.preferences), ...sourced("explicit_request", request.preferences)],
+    restrictions: [...sourced("athlete_profile", profile.restrictions), ...sourced("program", program.restrictions), ...sourced("session", session.restrictions), ...sourced("explicit_request", request.restrictions)],
+    musclePriorities: [...sourced("athlete_profile", profile.musclePriorities), ...sourced("program", program.musclePriorities)],
+    requiredExercises, excludedExercises, readiness: structuredClone(request.readiness ?? session.readiness ?? []),
+    capabilityObservations: structuredClone(profile.capabilityObservations ?? []),
+  };
 }
 
 export interface RecommendationRequest {
@@ -259,23 +370,12 @@ export interface RecommendationRequest {
   methodology: MethodologyRef<unknown>;
   methodologyState?: MethodologyState;
   catalog: Exercise[];
-  athlete?: Athlete;
+  athleteProfile?: AthleteProfile;
   history?: {
     workouts?: CompletedWorkout[];
     summaries?: JsonValue;
   };
-  session?: {
-    availableMinutes?: number;
-    availableEquipmentIds?: string[];
-    goals?: string[];
-    minExercises?: number;
-    maxExercises?: number;
-    maxSets?: number;
-    excludedExerciseIds?: string[];
-    requiredExerciseIds?: string[];
-    locationTags?: string[];
-    readiness?: JsonValue;
-  };
+  trainingContext?: TrainingContext;
   alternativeLimit?: number;
   tieBreakSeed?: string;
 }
@@ -286,7 +386,7 @@ export interface EvaluationRequest {
   methodology: MethodologyRef<unknown>;
   methodologyState?: MethodologyState;
   catalog: Exercise[];
-  athlete?: Athlete;
+  athleteProfile?: AthleteProfile;
   history?: { workouts?: CompletedWorkout[]; summaries?: JsonValue };
   completedWorkout: CompletedWorkout;
 }
@@ -331,10 +431,12 @@ export interface SessionRecommendation {
     explanationRefs?: string[];
     programming?: ExerciseProgrammingProvenance;
   }>;
+  resolvedTrainingContext?: ResolvedTrainingContext;
   programming?: {
     strategy: ResolvedComponent;
     config: JsonValue;
     inputState?: ProgramState;
+    resolvedTrainingContext?: ResolvedTrainingContext;
   };
 }
 
@@ -408,7 +510,7 @@ export interface ProgramEvaluationRequest {
   asOf: string;
   recommendation: SessionRecommendation;
   catalog: Exercise[];
-  athlete?: Athlete;
+  athleteProfile?: AthleteProfile;
   history?: { workouts?: CompletedWorkout[]; summaries?: JsonValue };
   completedWorkout: CompletedWorkout;
 }
@@ -678,6 +780,7 @@ export interface MethodologyStateAcceptancePersistence {
 }
 
 export interface OrchestrationPersistence {
+  loadAthleteProfile?(key: { hostScopeKey: string; athleteProfileId: string }): Promise<{ profile: AthleteProfile } | null>;
   loadCatalog(input: { hostScopeKey: string; asOf: string }): Promise<readonly Exercise[]>;
   loadHistory(input: { hostScopeKey: string; through: string }): Promise<{
     workouts: readonly CompletedWorkout[];
@@ -716,6 +819,7 @@ export interface PortableCatalogReference {
 }
 export interface PortableCustomExerciseRecord { hostScopeKey: string; exercise: Exercise }
 export interface PortableTemplateRecord { hostScopeKey: string; template: WorkoutTemplateDocument }
+export interface PortableAthleteProfileRecord { hostScopeKey: string; profile: AthleteProfile }
 export interface PortableCompletedWorkoutRecord { hostScopeKey: string; workout: CompletedWorkout }
 export interface PortableAcceptedRecommendationRecord {
   id: string;
@@ -761,6 +865,7 @@ export interface PortableDocument {
   catalogReferences?: PortableCatalogReference[];
   customExercises?: PortableCustomExerciseRecord[];
   templates?: PortableTemplateRecord[];
+  athleteProfiles?: PortableAthleteProfileRecord[];
   activeWorkouts?: ActiveWorkoutRecord[];
   completedWorkouts?: PortableCompletedWorkoutRecord[];
   acceptedRecommendations?: PortableAcceptedRecommendationRecord[];
@@ -789,6 +894,7 @@ export interface PortableCounts {
   catalogReferences: number;
   customExercises: number;
   templates: number;
+  athleteProfiles: number;
   activeWorkouts: number;
   completedWorkouts: number;
   acceptedRecommendations: number;
@@ -842,7 +948,7 @@ export interface ProgramOptions {
   catalog: readonly Exercise[];
   methodology: MethodologyRef<unknown>;
   hostScopeKey: string;
-  athlete?: Athlete;
+  athleteProfile?: AthleteProfile;
   history?: RecommendationRequest["history"];
   methodologyState?: MethodologyState;
   methodologyStateRevision?: string | null;
@@ -850,7 +956,7 @@ export interface ProgramOptions {
 
 export interface RecommendationOptions {
   asOf?: string;
-  session?: RecommendationRequest["session"];
+  trainingContext?: TrainingContext;
   alternativeLimit?: number;
   tieBreakSeed?: string;
 }
@@ -912,10 +1018,32 @@ function invalidProgramRequest(request: ProgramRecommendationRequest): ProgramRe
   return null;
 }
 
+function invalidProfileContext(request: { athleteProfile?: AthleteProfile; trainingContext?: TrainingContext }): ValidationIssue | null {
+  const profile = request.athleteProfile;
+  const context = request.trainingContext;
+  if (profile && !profile.id) return { code: "profile.id_required", path: "/athleteProfile/id", message: "A stable opaque profile ID is required.", severity: "error" };
+  const schedule = profile?.schedule;
+  if ([schedule?.preferredSessionsPerWeek, schedule?.minimumSessionsPerWeek, schedule?.maximumSessionsPerWeek].some((value) => value !== undefined && (!Number.isInteger(value) || value < 0 || value > 7)) ||
+      (schedule?.minimumSessionsPerWeek !== undefined && schedule.maximumSessionsPerWeek !== undefined && schedule.minimumSessionsPerWeek > schedule.maximumSessionsPerWeek))
+    return { code: "profile.frequency_invalid", path: "/athleteProfile/schedule", message: "Weekly frequency bounds must be ordered values from zero through seven.", severity: "error" };
+  const duration = profile?.duration;
+  if (duration?.acceptableMinimumMinutes !== undefined && duration.acceptableMaximumMinutes !== undefined && duration.acceptableMinimumMinutes > duration.acceptableMaximumMinutes)
+    return { code: "profile.duration_invalid", path: "/athleteProfile/duration", message: "Duration constraints are contradictory.", severity: "error" };
+  if (context?.locationId && !profile?.locations?.some((location) => location.id === context.locationId))
+    return { code: "context.location_unknown", path: "/trainingContext/locationId", message: "The selected training-location profile does not exist.", severity: "error" };
+  for (const id of context?.equipment?.additions ?? []) if (context?.equipment?.removals?.includes(id))
+    return { code: "context.equipment_delta_conflict", path: "/trainingContext/equipment", message: "Equipment cannot be both added and removed.", severity: "error" };
+  const persistentExcluded = new Set((profile?.exercisePreferences ?? []).filter((item) => item.targetKind === "exercise" && item.level === "excluded").map((item) => item.targetId));
+  const excluded = new Set([...(context?.excludedExerciseIds ?? []), ...persistentExcluded]);
+  for (const id of context?.requiredExerciseIds ?? []) if (excluded.has(id))
+    return { code: "context.exercise_required_excluded", path: "/trainingContext", message: "An exercise cannot be both required and excluded.", severity: "error" };
+  return null;
+}
+
 export interface WorkflowFacade {
   recommend(request: RecommendationRequest): RecommendationResult;
-  recommendFromPersistence(input: Omit<RecommendationRequest, "catalog" | "history" | "methodologyState"> & {
-    hostScopeKey: string;
+  recommendFromPersistence(input: Omit<RecommendationRequest, "catalog" | "history" | "methodologyState" | "athleteProfile"> & {
+    hostScopeKey: string; athleteProfileId?: string;
   }): Promise<RecommendationResult>;
   startRecommendation(result: RecommendationResult, input: {
     catalog: Exercise[]; scope: { hostScopeKey: string; athleteId?: string };
@@ -1089,9 +1217,9 @@ function createFacade(exports: WasmExports, runtime: number, options: CreateCaud
       trackingRejected: (issues) => new CaudexTrackingRejectedError(issues),
     });
   const runtimeFacade: RuntimeFacade = {
-    recommend: (request) => execute(request, "recommend", true),
+    recommend: (request) => profileIssueResult<RecommendationResult>(request) ?? execute(request, "recommend", true),
     evaluate: (request) => execute(request, "evaluate", true),
-    recommendProgram: (request) => invalidProgramRequest(request) ?? execute(request, "recommendProgram", true),
+    recommendProgram: (request) => profileIssueResult<ProgramRecommendationResult>(request) ?? invalidProgramRequest(request) ?? execute(request, "recommendProgram", true),
     evaluateProgram: (request) => execute(request, "evaluateProgram", true),
     applyTrackingCommand: (request) => execute(request, "applyTrackingCommand", false),
     applyTrackingBatch: (request) => execute(request, "applyTrackingBatch", false),
@@ -1111,7 +1239,7 @@ function createFacade(exports: WasmExports, runtime: number, options: CreateCaud
       });
     },
     recommendSession(request) {
-      return execute<RecommendationRequest, RecommendationResult>(
+      return profileIssueResult<RecommendationResult>(request) ?? execute<RecommendationRequest, RecommendationResult>(
         request,
         "recommend",
         true,
@@ -1125,7 +1253,7 @@ function createFacade(exports: WasmExports, runtime: number, options: CreateCaud
       );
     },
     recommendProgram(request) {
-      return invalidProgramRequest(request) ?? execute<ProgramRecommendationRequest, ProgramRecommendationResult>(request, "recommendProgram", true);
+      return profileIssueResult<ProgramRecommendationResult>(request) ?? invalidProgramRequest(request) ?? execute<ProgramRecommendationRequest, ProgramRecommendationResult>(request, "recommendProgram", true);
     },
     evaluateProgram(request) {
       return execute<ProgramEvaluationRequest, ProgramEvaluationResult>(request, "evaluateProgram", true);
@@ -1198,26 +1326,29 @@ function createFacade(exports: WasmExports, runtime: number, options: CreateCaud
     },
     workflows: {
       recommend(request) {
-        return execute<RecommendationRequest, RecommendationResult>(request, "recommend", true);
+        return profileIssueResult<RecommendationResult>(request) ?? execute<RecommendationRequest, RecommendationResult>(request, "recommend", true);
       },
       async recommendFromPersistence(input) {
         if (!persistence?.loadCatalog || !persistence.loadHistory) {
           throw new CaudexRuntimeError("Catalog and history persistence capabilities are required.");
         }
-        const [catalog, history, stateRecord] = await Promise.all([
+        if (input.athleteProfileId && !persistence.loadAthleteProfile) throw new CaudexRuntimeError("Athlete-profile persistence is required when athleteProfileId is supplied.");
+        const [catalog, history, stateRecord, profileRecord] = await Promise.all([
           persistence.loadCatalog({ hostScopeKey: input.hostScopeKey, asOf: input.asOf }),
           persistence.loadHistory({ hostScopeKey: input.hostScopeKey, through: input.asOf }),
           persistence.loadState?.({
             hostScopeKey: input.hostScopeKey,
             methodologyId: input.methodology.id,
           }) ?? Promise.resolve(null),
+          input.athleteProfileId ? persistence.loadAthleteProfile?.({ hostScopeKey: input.hostScopeKey, athleteProfileId: input.athleteProfileId }) : Promise.resolve(null),
         ]);
-        const { hostScopeKey: _, ...request } = input;
+        const { hostScopeKey: _, athleteProfileId: __, ...request } = input;
         return execute<RecommendationRequest, RecommendationResult>({
           ...request,
           catalog: [...catalog],
           history: { ...history, workouts: [...history.workouts] },
           methodologyState: stateRecord?.state,
+          ...(input.athleteProfileId ? { athleteProfile: profileRecord?.profile } : {}),
         }, "recommend", true);
       },
       async startRecommendation(result, input) {
@@ -1454,4 +1585,12 @@ function invalidResult<
     ],
     metadata,
   } as unknown as Result;
+}
+
+function profileIssueResult<Result extends RecommendationResult | ProgramRecommendationResult>(request: RecommendationRequest | ProgramRecommendationRequest): Result | null {
+  const issue = invalidProfileContext(request);
+  if (!issue) return null;
+  const result = invalidResult<Result>(request, issue.code, issue.message);
+  result.issues = [issue];
+  return result;
 }

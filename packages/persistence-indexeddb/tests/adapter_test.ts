@@ -12,6 +12,22 @@ const scope = {
 };
 
 try {
+  const profile = await adapter.compareAndSetAthleteProfile({
+    key: { hostScopeKey: "athlete-1", athleteProfileId: "profile-1" },
+    expectedRevision: null,
+    nextProfile: { id: "profile-1", goals: { primary: { id: "hypertrophy" } }, locations: [{ id: "home", equipment: [{ equipmentId: "dumbbell" }] }] },
+  });
+  if (profile.profile.revision !== 1 || (await adapter.loadAthleteProfile(profile.key))?.profile.locations?.[0]?.id !== "home") {
+    throw new Error("athlete profile did not round trip with its location profile");
+  }
+  let profileConflict: unknown;
+  try {
+    await adapter.compareAndSetAthleteProfile({
+      key: profile.key, expectedRevision: null, nextProfile: profile.profile,
+    });
+  } catch (error) { profileConflict = error; }
+  if (!(profileConflict instanceof PersistenceRevisionConflictError)) throw new Error("stale athlete profile update was not rejected");
+
   await adapter.replaceCatalog(scope, [
     { id: "squat" },
     { id: "bench-press" },

@@ -36,8 +36,8 @@ const recommendationRequest: RecommendationRequest = {
   methodology,
   catalog,
   history: { workouts: [] },
-  session: {
-    availableEquipmentIds: ["dumbbell", "adjustable-bench"],
+  trainingContext: {
+    equipment: { override: ["dumbbell", "adjustable-bench"] },
   },
 };
 const completedWorkout: CompletedWorkout = {
@@ -90,4 +90,3 @@ try {
 } finally {
   caudex.dispose();
 }
-
