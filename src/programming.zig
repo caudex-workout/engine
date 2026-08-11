@@ -9,6 +9,7 @@
 const std = @import("std");
 const canonical = @import("canonical.zig");
 const double_progression = @import("double_progression.zig");
+const exercise_knowledge = @import("exercise_knowledge.zig");
 const primitives = @import("primitives.zig");
 const rpe = @import("rpe_top_set_backoff.zig");
 const training = @import("training.zig");
@@ -81,6 +82,7 @@ pub const Error = error{
     ExerciseLimitReached,
     ExerciseNotFound,
     EquipmentUnavailable,
+    IncompatibleProgression,
     DuplicateSlotId,
     DuplicateStateId,
     MissingProgressionAssignment,
@@ -139,7 +141,12 @@ pub fn recommendFixedSession(
     };
     for (request.slots, 0..) |slot, index| {
         const exercise = findExercise(request.catalog, slot.exercise_id) orelse return error.ExerciseNotFound;
-        if (!equipmentAvailable(exercise.equipment_ids, request.available_equipment_ids)) return error.EquipmentUnavailable;
+        if (!exercise_knowledge.requiredEquipmentSatisfied(exercise.*, request.available_equipment_ids))
+            return error.EquipmentUnavailable;
+        if (exercise_knowledge.progressionCompatibility(
+            exercise.*,
+            .externally_loadable_repetitions,
+        ) == .incompatible) return error.IncompatibleProgression;
         exercises[index] = switch (slot.progression) {
             .double_progression => |value| try recommendDouble(allocator, request, slot, value, index, &explanations[index + 1]),
             .rpe_top_set_backoff => |value| try recommendRpe(allocator, request, slot, value, index, &explanations[index + 1]),
@@ -448,4 +455,33 @@ test "fixed session rejects duplicate progression state identity" {
         .{ .slot_id = try .parse("slot-b"), .exercise_id = exercises[1].id, .state_id = duplicate, .progression = .{ .rpe_top_set_backoff = .{ .config = testRpeConfig() } } },
     };
     try std.testing.expectError(error.DuplicateStateId, recommendFixedSession(std.testing.allocator, .{ .as_of = try .parse("2026-08-10T12:00:00Z"), .catalog = .{ .exercises = &exercises }, .slots = &slots }));
+}
+
+test "fixed session rejects explicit duration-only progression mismatch" {
+    const exercise = training.Exercise{
+        .id = try .parse("plank"),
+        .knowledge = .{
+            .loadingMode = .duration,
+            .trackingDimensions = &.{.{ .metricCode = "duration" }},
+            .progressionCapabilities = .{
+                .externalLoad = false,
+                .repetitions = false,
+                .duration = true,
+            },
+        },
+    };
+    const slots = [_]ExerciseSlot{.{
+        .slot_id = try .parse("plank-slot"),
+        .exercise_id = exercise.id,
+        .state_id = try .parse("plank-lane"),
+        .progression = .{ .double_progression = .{ .config = testDoubleConfig() } },
+    }};
+    try std.testing.expectError(
+        error.IncompatibleProgression,
+        recommendFixedSession(std.testing.allocator, .{
+            .as_of = try .parse("2026-08-10T12:00:00Z"),
+            .catalog = .{ .exercises = &.{exercise} },
+            .slots = &slots,
+        }),
+    );
 }

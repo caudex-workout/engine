@@ -73,6 +73,8 @@ import {
   type RecommendationRequest,
 } from "@caudex-workout/engine";
 
+// A minimal host-owned catalog is enough for the established engine contract.
+// Add optional structured knowledge only when a feature needs an explicit fact.
 const sampleCatalog = [{
   id: "incline-dumbbell-press",
   name: "Incline Dumbbell Press",
@@ -125,6 +127,12 @@ This produces an `incline-dumbbell-press` recommendation and a structured
 [`examples/typescript-node/quickstart.ts`](examples/typescript-node/quickstart.ts).
 It is compiled and executed against the packed npm artifact by
 `zig build test-docs-quickstart`.
+
+Catalogs remain host-owned. The engine consumes a compact, replayable exercise
+projection, while display content, source records, and other rich catalog data
+remain in the host or optional catalog package. See the [exercise knowledge
+guide](docs/catalog/exercise-knowledge.md) before adding structured exercise
+facts or curated relationships.
 
 The package is published to the public npm registry. To validate the same flow
 locally from this checkout, run `zig build package-npm`, then pack

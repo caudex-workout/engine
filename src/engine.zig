@@ -2,6 +2,7 @@ const std = @import("std");
 const canonical = @import("canonical.zig");
 const diagnostics = @import("diagnostics.zig");
 const double_progression_contract = @import("double_progression.zig");
+const exercise_knowledge = @import("exercise_knowledge.zig");
 const methodology = @import("methodology.zig");
 const primitives = @import("primitives.zig");
 const training = @import("training.zig");
@@ -323,10 +324,14 @@ pub fn recommendSession(
     }
     if (issues.items().len != 0) return error.InvalidRequest;
     for (request.catalog.exercises) |exercise| {
-        if (!equipmentAvailable(
-            exercise.equipment_ids,
+        if (!exercise_knowledge.requiredEquipmentSatisfied(
+            exercise,
             request.available_equipment_ids,
         )) return error.InvalidRequest;
+        if (exercise_knowledge.progressionCompatibility(
+            exercise,
+            .externally_loadable_repetitions,
+        ) == .incompatible) return error.InvalidRequest;
     }
 
     output.explanation_len = 0;
@@ -457,6 +462,12 @@ fn fingerprintRequest(request: RecommendationRequest, out: *[64]u8) void {
             hash.update(alias);
             hash.update("\x00");
         }
+        // Preserve v0 fingerprints for minimal legacy exercises. Rich inputs
+        // add a domain separator and their explicit replayable knowledge.
+        if (exercise.knowledge) |knowledge| {
+            hash.update("caudex:exercise-knowledge:v1\x00");
+            fingerprintKnowledge(&hash, knowledge);
+        }
     }
     for (request.available_equipment_ids) |equipment| {
         hash.update(equipment.bytes);
@@ -465,6 +476,52 @@ fn fingerprintRequest(request: RecommendationRequest, out: *[64]u8) void {
     updatePresence(&hash, request.max_working_sets != null);
     if (request.max_working_sets) |limit| updateU64(&hash, limit);
     finishHex(&hash, out);
+}
+
+fn fingerprintKnowledge(hash: *std.crypto.hash.sha2.Sha256, knowledge: canonical.ExerciseKnowledge) void {
+    updateU64(hash, knowledge.schemaVersion);
+    updatePresence(hash, knowledge.familyId != null);
+    if (knowledge.familyId) |family| hash.update(family);
+    for (knowledge.movementPatterns) |value| {
+        hash.update(value);
+        hash.update("\x00");
+    }
+    for (knowledge.equipmentRequirements) |value| {
+        hash.update(value.equipmentId);
+        if (value.equipmentFamilyId) |family| hash.update(family);
+        hash.update(@tagName(value.requirement));
+        hash.update(@tagName(value.role));
+        if (value.alternativeGroup) |group| hash.update(group);
+        hash.update("\x00");
+    }
+    for (knowledge.trackingDimensions) |value| {
+        hash.update(value.metricCode);
+        hash.update(@tagName(value.requirement));
+        hash.update(@tagName(value.scope));
+    }
+    if (knowledge.progressionCapabilities) |value| {
+        const capabilities = [_]?bool{
+            value.externalLoad, value.repetitions, value.percentageOneRepMax,
+            value.effortTarget, value.amrap,       value.failureTraining,
+            value.duration,     value.distance,    value.assistanceReduction,
+        };
+        for (capabilities) |capability| {
+            updatePresence(hash, capability != null);
+            if (capability) |known| hash.update(if (known) "\x01" else "\x00");
+        }
+    }
+    for (knowledge.restrictionTags) |value| {
+        hash.update(value);
+        hash.update("\x00");
+    }
+    for (knowledge.relationships.substituteIds) |value| {
+        hash.update(value);
+        hash.update("\x00");
+    }
+    for (knowledge.relationships.sharedProgressionStateIds) |value| {
+        hash.update(value);
+        hash.update("\x00");
+    }
 }
 
 fn fingerprintHistory(

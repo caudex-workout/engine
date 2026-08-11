@@ -7,6 +7,23 @@ and releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Optional, replayable exercise-knowledge snapshots with normalized movement,
+  multi-equipment, laterality, tracking, progression-capability, restriction,
+  provenance, family, variant, substitute, and distinct progression-state
+  relationship semantics across Zig, canonical JSON, npm, and the CLI.
+- A versioned Caudex-curated enrichment layer for the optional first-party
+  exercise catalog, with deterministic validation, coverage diagnostics, rich
+  search/filtering, relationship discovery, and engine projection APIs.
+
+### Changed
+
+- Equipment and movement filtering now prefer structured exercise knowledge,
+  and fixed-session progression assignment rejects explicitly incompatible
+  duration-only or otherwise non-load-and-repetition exercises while leaving
+  partial/minimal custom catalogs backward compatible.
+
 ## [0.1.0] - 2026-08-08
 
 ### Added

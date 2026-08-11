@@ -37,6 +37,92 @@ export interface MuscleContribution {
   weight?: string;
 }
 
+export type KnowledgeAuthority =
+  | "source_provided"
+  | "caudex_curated"
+  | "mechanically_derived"
+  | "host_provided"
+  | "unknown";
+
+export type KnowledgeConfidence = "low" | "moderate" | "high" | "unknown";
+
+export interface KnowledgeEvidence {
+  authority: KnowledgeAuthority;
+  sourceId?: string;
+  version?: string;
+  confidence?: KnowledgeConfidence;
+}
+
+export interface EquipmentRequirement {
+  equipmentId: string;
+  equipmentFamilyId?: string;
+  requirement?: "required" | "optional" | "one_of";
+  role?: "load_bearing" | "support" | "setup" | "other";
+  alternativeGroup?: string;
+}
+
+export interface TrackingDimension {
+  metricCode: string;
+  requirement?: "required" | "optional";
+  scope?: "total" | "per_side" | "per_hand" | "left_right_independent";
+}
+
+export interface ProgressionCapabilities {
+  externalLoad?: boolean;
+  repetitions?: boolean;
+  percentageOneRepMax?: boolean;
+  effortTarget?: boolean;
+  amrap?: boolean;
+  failureTraining?: boolean;
+  duration?: boolean;
+  distance?: boolean;
+  assistanceReduction?: boolean;
+}
+
+export interface ExerciseRelationships {
+  variantOf?: string;
+  variantIds?: string[];
+  substituteIds?: string[];
+  similarExerciseIds?: string[];
+  sharedProgressionStateIds?: string[];
+}
+
+export interface ExerciseVariantDimension {
+  dimension: string;
+  value: string;
+}
+
+export interface ExerciseFatigue {
+  localMuscular?: "low" | "moderate" | "high" | "unknown";
+  axial?: "low" | "moderate" | "high" | "unknown";
+  systemic?: "low" | "moderate" | "high" | "unknown";
+  grip?: "low" | "moderate" | "high" | "unknown";
+  cardiorespiratory?: "low" | "moderate" | "high" | "unknown";
+  technical?: "low" | "moderate" | "high" | "unknown";
+}
+
+/** Compact, replayable programming facts; instructions and media stay catalog-side. */
+export interface ExerciseKnowledge {
+  schemaVersion?: 1;
+  familyId?: string;
+  variantDimensions?: ExerciseVariantDimension[];
+  movementPatterns?: string[];
+  structuralType?: "compound" | "isolation" | "isometric" | "locomotor" | "conditioning" | "mobility" | "other";
+  laterality?: "bilateral" | "unilateral" | "alternating" | "independent_bilateral" | "not_applicable" | "unknown";
+  repetitionSemantics?: "total" | "per_side" | "alternating_total" | "left_right_independent" | "not_applicable" | "unknown";
+  equipmentRequirements?: EquipmentRequirement[];
+  trackingDimensions?: TrackingDimension[];
+  loadingMode?: "external_load" | "bodyweight" | "bodyweight_plus_load" | "assisted_bodyweight" | "repetitions_only" | "duration" | "distance" | "load_duration" | "distance_duration" | "machine_load" | "other";
+  progressionCapabilities?: ProgressionCapabilities;
+  restrictionTags?: string[];
+  relationships?: ExerciseRelationships;
+  skillLevel?: "beginner_friendly" | "intermediate" | "advanced_technical" | "highly_technical" | "unknown";
+  stabilityDemand?: "externally_stabilized" | "supported" | "free" | "highly_unstable" | "unknown";
+  setupBurden?: "trivial" | "low" | "moderate" | "high" | "unknown";
+  fatigue?: ExerciseFatigue;
+  evidence?: KnowledgeEvidence[];
+}
+
 export interface Exercise {
   id: string;
   name?: string;
@@ -46,6 +132,7 @@ export interface Exercise {
   unilateral?: boolean;
   aliases?: string[];
   attributes?: JsonValue;
+  knowledge?: ExerciseKnowledge;
 }
 
 export interface CompletedSet {
@@ -816,6 +903,8 @@ function invalidProgramRequest(request: ProgramRecommendationRequest): ProgramRe
     const method = slot.progression.methodology;
     if (method.id !== "caudex.double-progression" && method.id !== "caudex.rpe-top-set-backoff") return reject("progression.unknown", `/program/exercises/${index}/progression/methodology/id`, "The requested exercise progression method is not compiled into this runtime.");
     if (method.configVersion !== 1 || ![undefined, "0.1.0", "^0.1.0"].includes(method.versionRequirement)) return reject("progression.unsupported_version", `/program/exercises/${index}/progression/methodology`, "The requested exercise progression version is unsupported.");
+    const capabilities = request.catalog.find((exercise) => exercise.id === slot.exerciseId)?.knowledge?.progressionCapabilities;
+    if (capabilities?.externalLoad === false || capabilities?.repetitions === false) return reject("exercise.rejected.incompatible_progression", `/program/exercises/${index}`, "The exercise explicitly does not support the external-load and repetition progression required by this slot.");
     const stateData = slot.progression.state?.data as Record<string, unknown> | undefined;
     const first = Array.isArray(stateData?.exercises) ? stateData.exercises[0] as Record<string, unknown> | undefined : undefined;
     if ((method.id === "caudex.double-progression" && first?.estimatedOneRepMax !== undefined) || (method.id === "caudex.rpe-top-set-backoff" && first?.load !== undefined)) return reject("progression.state_mismatch", `/program/exercises/${index}/progression/state`, "The supplied state belongs to a different progression implementation.");

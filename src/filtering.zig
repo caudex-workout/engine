@@ -2,6 +2,7 @@ const std = @import("std");
 const canonical = @import("canonical.zig");
 const primitives = @import("primitives.zig");
 const training = @import("training.zig");
+const exercise_knowledge = @import("exercise_knowledge.zig");
 
 pub const MissingDurationPolicy = enum {
     allow,
@@ -98,7 +99,7 @@ pub fn filter(
         var exclusion_count: usize = 0;
         var excluded_for_time = false;
 
-        if (!allIdsPresent(exercise.equipment_ids, constraints.available_equipment_ids)) {
+        if (!exercise_knowledge.requiredEquipmentSatisfied(exercise.*, constraints.available_equipment_ids)) {
             try appendExclusion(
                 buffers,
                 &explanation_len,
@@ -131,10 +132,7 @@ pub fn filter(
             );
             exclusion_count += 1;
         }
-        if (anyIdPresent(
-            exercise.movement_tags,
-            constraints.host_restrictions.excluded_movement_tags,
-        )) {
+        if (anyMovementPresent(exercise.*, constraints.host_restrictions.excluded_movement_tags)) {
             try appendExclusion(
                 buffers,
                 &explanation_len,
@@ -144,10 +142,7 @@ pub fn filter(
             );
             exclusion_count += 1;
         }
-        if (anyIdPresent(
-            exercise.equipment_ids,
-            constraints.host_restrictions.equipment_limitations,
-        )) {
+        if (anyEquipmentPresent(exercise.*, constraints.host_restrictions.equipment_limitations)) {
             try appendExclusion(
                 buffers,
                 &explanation_len,
@@ -157,10 +152,7 @@ pub fn filter(
             );
             exclusion_count += 1;
         }
-        if (!allIdsPresent(
-            constraints.methodology_required_tags,
-            exercise.movement_tags,
-        )) {
+        if (!allMovementsPresent(exercise.*, constraints.methodology_required_tags)) {
             try appendExclusion(
                 buffers,
                 &explanation_len,
@@ -259,6 +251,38 @@ pub fn filter(
         .explanations = buffers.explanations[0..explanation_len],
         .issues = buffers.issues[0..issue_len],
     };
+}
+
+fn anyMovementPresent(exercise: training.Exercise, values: []const primitives.Id) bool {
+    if (exercise.knowledge) |knowledge| if (knowledge.movementPatterns.len != 0) {
+        for (knowledge.movementPatterns) |pattern| for (values) |value| {
+            if (std.mem.eql(u8, pattern, value.bytes)) return true;
+        };
+        return false;
+    };
+    return anyIdPresent(exercise.movement_tags, values);
+}
+
+fn allMovementsPresent(exercise: training.Exercise, required: []const primitives.Id) bool {
+    if (exercise.knowledge) |knowledge| if (knowledge.movementPatterns.len != 0) {
+        for (required) |required_id| {
+            for (knowledge.movementPatterns) |pattern| {
+                if (std.mem.eql(u8, pattern, required_id.bytes)) break;
+            } else return false;
+        }
+        return true;
+    };
+    return allIdsPresent(required, exercise.movement_tags);
+}
+
+fn anyEquipmentPresent(exercise: training.Exercise, values: []const primitives.Id) bool {
+    if (exercise.knowledge) |knowledge| if (knowledge.equipmentRequirements.len != 0) {
+        for (knowledge.equipmentRequirements) |requirement| for (values) |value| {
+            if (std.mem.eql(u8, requirement.equipmentId, value.bytes)) return true;
+        };
+        return false;
+    };
+    return anyIdPresent(exercise.equipment_ids, values);
 }
 
 fn appendExclusion(
@@ -496,6 +520,42 @@ test "hard constraints exclude candidates with structured explanations" {
         try std.testing.expect(actual.subject.?.exerciseId != null);
         try std.testing.expectEqual(@as(usize, 1), actual.evidence.len);
     }
+}
+
+test "structured equipment and movement knowledge override legacy projections" {
+    const dumbbell = try primitives.Id.parse("dumbbell");
+    const bench = try primitives.Id.parse("adjustable-bench");
+    const horizontal_push = try primitives.Id.parse("horizontal-push");
+    const requirements = [_]canonical.EquipmentRequirement{
+        .{ .equipmentId = "dumbbell", .role = .load_bearing },
+        .{ .equipmentId = "adjustable-bench", .role = .support },
+    };
+    const exercise = training.Exercise{
+        .id = try .parse("incline-dumbbell-press"),
+        .equipment_ids = &.{dumbbell},
+        .knowledge = .{
+            .equipmentRequirements = &requirements,
+            .movementPatterns = &.{"horizontal-push"},
+        },
+    };
+    const candidates = [_]Candidate{.{ .exercise = &exercise }};
+    var missing_output: TestOutput = .{};
+    const missing = try filter(&candidates, .{
+        .available_equipment_ids = &.{dumbbell},
+        .methodology_required_tags = &.{horizontal_push},
+    }, missing_output.buffers());
+    try std.testing.expectEqual(@as(usize, 0), missing.eligible_indices.len);
+    try std.testing.expectEqualStrings(
+        "exercise.excluded.equipment_unavailable",
+        missing.explanations[0].code,
+    );
+
+    var complete_output: TestOutput = .{};
+    const complete = try filter(&candidates, .{
+        .available_equipment_ids = &.{ dumbbell, bench },
+        .methodology_required_tags = &.{horizontal_push},
+    }, complete_output.buffers());
+    try std.testing.expectEqualSlices(usize, &.{0}, complete.eligible_indices);
 }
 
 test "required conflicts produce actionable issues and selection explanation" {

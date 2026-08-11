@@ -625,7 +625,7 @@ fn writeCatalogQuery(allocator: std.mem.Allocator, stdout: *std.Io.Writer, setti
 
 fn writeManagedExercises(allocator: std.mem.Allocator, stdout: *std.Io.Writer, settings: output.Settings, kind: []const u8, command_id: ?[]const u8, disposition: ?[]const u8, values: []const tracking.ManagedExercise) !void {
     const infos = try allocator.alloc(output.ExerciseInfo, values.len);
-    for (values, 0..) |value, index| infos[index] = .{ .id = value.exercise.id, .name = value.exercise.name, .aliases = value.exercise.aliases, .equipmentIds = value.exercise.equipmentIds, .movementTags = value.exercise.movementTags, .unilateral = value.exercise.unilateral, .revision = value.revision, .availability = @tagName(value.availability), .updatedAt = value.updated_at.bytes };
+    for (values, 0..) |value, index| infos[index] = .{ .id = value.exercise.id, .name = value.exercise.name, .aliases = value.exercise.aliases, .equipmentIds = value.exercise.equipmentIds, .movementTags = value.exercise.movementTags, .unilateral = value.exercise.unilateral, .knowledge = value.exercise.knowledge, .revision = value.revision, .availability = @tagName(value.availability), .updatedAt = value.updated_at.bytes };
     try output.writeExercises(stdout, settings, kind, command_id, disposition, infos);
 }
 

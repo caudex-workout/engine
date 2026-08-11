@@ -17,3 +17,9 @@ per-record provenance. Images and upstream image paths/URLs are intentionally
 excluded because their individual provenance was not sufficiently verified for
 first-party redistribution. Exercise IDs do not depend on image choices, so a
 separately licensed media package can be added later.
+
+Representative records include a typed, versioned `knowledge` projection.
+Use `projectKnowledge`, `projectCapabilities`,
+`supportsProgressionCapability`, and `relationships` to consume it. Taxonomy
+refs retain source values/IDs and expose Caudex-owned `normalizedId` values;
+search and core projection use those normalized IDs.

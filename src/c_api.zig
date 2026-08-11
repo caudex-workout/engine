@@ -1166,9 +1166,29 @@ fn translateCatalog(
             .movement_tags = try translateIds(allocator, input.movementTags),
             .unilateral = input.unilateral,
             .aliases = input.aliases,
+            .muscle_contributions = try translateMuscles(allocator, input.muscleContributions),
+            .knowledge = input.knowledge,
         };
     }
     return .{ .exercises = exercises };
+}
+
+fn translateMuscles(
+    allocator: std.mem.Allocator,
+    source: []const canonical.MuscleContribution,
+) ExecuteError![]const training.MuscleContribution {
+    const values = allocator.alloc(training.MuscleContribution, source.len) catch return error.OutOfMemory;
+    for (source, values) |input, *output| output.* = .{
+        .muscle_id = primitives.Id.parse(input.muscleId) catch return error.InvalidRequest,
+        .role = switch (input.role) {
+            .primary => .primary,
+            .secondary => .secondary,
+            .stabilizer => .stabilizer,
+            .custom => .custom,
+        },
+        .weight = if (input.weight) |weight| primitives.Decimal.parse(weight) catch return error.InvalidRequest else null,
+    };
+    return values;
 }
 
 fn translateIds(

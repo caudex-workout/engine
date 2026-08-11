@@ -1015,6 +1015,29 @@ fn validCanonicalExercise(exercise: caudex.canonical.Exercise) bool {
         for (exercise.muscleContributions[0..index]) |prior| if (std.mem.eql(u8, prior.muscleId, contribution.muscleId)) return false;
         if (contribution.weight) |weight| _ = Decimal.parse(weight) catch return false;
     }
+    if (exercise.knowledge) |knowledge| {
+        if (knowledge.schemaVersion != 1) return false;
+        for (knowledge.movementPatterns, 0..) |value, index| if (!validUniqueId(knowledge.movementPatterns, value, index)) return false;
+        for (knowledge.restrictionTags, 0..) |value, index| if (!validUniqueId(knowledge.restrictionTags, value, index)) return false;
+        for (knowledge.equipmentRequirements, 0..) |requirement, index| {
+            if (Id.parse(requirement.equipmentId) catch null == null) return false;
+            if (requirement.equipmentFamilyId) |family| if (Id.parse(family) catch null == null) return false;
+            if (requirement.requirement == .one_of and requirement.alternativeGroup == null) return false;
+            for (knowledge.equipmentRequirements[0..index]) |prior| {
+                if (std.mem.eql(u8, prior.equipmentId, requirement.equipmentId) and
+                    prior.requirement == requirement.requirement and
+                    std.mem.eql(u8, prior.alternativeGroup orelse "", requirement.alternativeGroup orelse "")) return false;
+            }
+        }
+        for (knowledge.trackingDimensions, 0..) |dimension, index| {
+            if (Id.parse(dimension.metricCode) catch null == null) return false;
+            for (knowledge.trackingDimensions[0..index]) |prior| if (std.mem.eql(u8, prior.metricCode, dimension.metricCode)) return false;
+        }
+        if (knowledge.progressionCapabilities) |capabilities| {
+            if (capabilities.percentageOneRepMax == true and capabilities.externalLoad == false) return false;
+            if (capabilities.assistanceReduction == true and knowledge.loadingMode != .assisted_bodyweight) return false;
+        }
+    }
     return true;
 }
 

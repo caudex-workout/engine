@@ -1,5 +1,6 @@
 const std = @import("std");
 const primitives = @import("primitives.zig");
+const canonical = @import("canonical.zig");
 
 pub const Id = primitives.Id;
 pub const Decimal = primitives.Decimal;
@@ -28,6 +29,23 @@ pub const Exercise = struct {
     muscle_contributions: []const MuscleContribution = &.{},
     unilateral: ?bool = null,
     aliases: []const []const u8 = &.{},
+    knowledge: ?canonical.ExerciseKnowledge = null,
+
+    pub fn requiredEquipmentIds(self: Exercise, storage: [][]const u8) error{OutputTooSmall}![]const []const u8 {
+        const knowledge = self.knowledge orelse {
+            if (storage.len < self.equipment_ids.len) return error.OutputTooSmall;
+            for (self.equipment_ids, storage) |id, *output| output.* = id.bytes;
+            return storage[0..self.equipment_ids.len];
+        };
+        var count: usize = 0;
+        for (knowledge.equipmentRequirements) |requirement| {
+            if (requirement.requirement != .required) continue;
+            if (count == storage.len) return error.OutputTooSmall;
+            storage[count] = requirement.equipmentId;
+            count += 1;
+        }
+        return storage[0..count];
+    }
 };
 
 /// A borrowed view of the host-supplied exercise catalog.
@@ -93,15 +111,19 @@ pub const MissingExerciseReference = struct {
     exercise_index: usize,
 };
 
+pub const InvalidExerciseKnowledge = struct { exercise_index: usize };
+
 /// Structured expected outcomes from catalog/history validation.
 pub const ValidationIssue = union(enum) {
     duplicate_exercise_id: DuplicateExerciseId,
     missing_exercise_reference: MissingExerciseReference,
+    invalid_exercise_knowledge: InvalidExerciseKnowledge,
 
     pub fn code(self: ValidationIssue) []const u8 {
         return switch (self) {
             .duplicate_exercise_id => "catalog.duplicate_exercise_id",
             .missing_exercise_reference => "history.exercise_reference_missing",
+            .invalid_exercise_knowledge => "exercise.knowledge_invalid",
         };
     }
 };
@@ -133,6 +155,11 @@ pub fn validate(
                 break;
             }
         }
+        if (!validKnowledge(exercise)) try appendIssue(
+            issue_storage,
+            &issue_count,
+            .{ .invalid_exercise_knowledge = .{ .exercise_index = duplicate_index } },
+        );
     }
 
     for (history.workouts, 0..) |workout, workout_index| {
@@ -151,6 +178,35 @@ pub fn validate(
     }
 
     return issue_storage[0..issue_count];
+}
+
+fn validKnowledge(exercise: Exercise) bool {
+    const knowledge = exercise.knowledge orelse return true;
+    if (knowledge.schemaVersion != 1) return false;
+    for (knowledge.equipmentRequirements, 0..) |requirement, index| {
+        if (Id.parse(requirement.equipmentId) catch null == null) return false;
+        if (requirement.equipmentFamilyId) |family| if (Id.parse(family) catch null == null) return false;
+        for (knowledge.equipmentRequirements[0..index]) |prior| {
+            if (std.mem.eql(u8, prior.equipmentId, requirement.equipmentId) and
+                prior.requirement == requirement.requirement and
+                std.mem.eql(u8, prior.alternativeGroup orelse "", requirement.alternativeGroup orelse ""))
+                return false;
+        }
+        if (requirement.requirement == .one_of and requirement.alternativeGroup == null) return false;
+    }
+    for (knowledge.trackingDimensions, 0..) |dimension, index| {
+        if (Id.parse(dimension.metricCode) catch null == null) return false;
+        for (knowledge.trackingDimensions[0..index]) |prior| {
+            if (std.mem.eql(u8, prior.metricCode, dimension.metricCode)) return false;
+        }
+    }
+    if (knowledge.progressionCapabilities) |capabilities| {
+        if (capabilities.percentageOneRepMax == true and capabilities.externalLoad == false) return false;
+        if (capabilities.assistanceReduction == true and knowledge.loadingMode != .assisted_bodyweight) return false;
+    }
+    if (knowledge.laterality == .unilateral and knowledge.repetitionSemantics == .left_right_independent)
+        return false;
+    return true;
 }
 
 fn appendIssue(

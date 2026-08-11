@@ -6,7 +6,7 @@ test "embedded catalog loads, searches, and projects deterministically" {
     defer parsed.deinit();
     try std.testing.expectEqual(@as(usize, 873), parsed.value.records.len);
     try std.testing.expect(!parsed.value.mediaIncluded);
-    try std.testing.expectEqualStrings("bc747f833ab3e31e2cad8e45ade4d42c12dfd73fbba86192a4dd87f201cbda3c", parsed.value.fingerprint);
+    try std.testing.expectEqualStrings("1489c44273ece313784ef6322a9953bc695d368ef0415743ab988396cb195c8c", parsed.value.fingerprint);
     var results: [10]*const catalog.Record = undefined;
     const found = try catalog.search(parsed.value.records, .{ .text = "incline dumbbell curl", .max_results = results.len }, &results);
     try std.testing.expect(found.len != 0);
@@ -15,6 +15,11 @@ test "embedded catalog loads, searches, and projects deterministically" {
     const projected = try catalog.project(found[0].*, .{ .equipment_ids = &equipment, .muscle_contributions = &muscles });
     try std.testing.expectEqualStrings(found[0].id, projected.id);
     try std.testing.expect(projected.muscleContributions.len != 0);
+    const knowledge = catalog.projectKnowledge(found[0].*);
+    try std.testing.expect(knowledge == null or knowledge.?.evidence.len != 0);
+    var enriched_results: [10]*const catalog.Record = undefined;
+    const enriched = try catalog.search(parsed.value.records, .{ .family_id = "horizontal-press", .tracking_metric = "load", .max_results = enriched_results.len }, &enriched_results);
+    try std.testing.expect(enriched.len != 0);
 }
 
 test "host overrides replace by stable ID and reject duplicates" {

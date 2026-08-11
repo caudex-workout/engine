@@ -23,6 +23,88 @@ pub const MuscleContribution = struct {
     weight: ?[]const u8 = null,
 };
 
+pub const KnowledgeAuthority = enum {
+    source_provided,
+    caudex_curated,
+    mechanically_derived,
+    host_provided,
+    unknown,
+};
+
+pub const KnowledgeEvidence = struct {
+    authority: KnowledgeAuthority,
+    sourceId: ?[]const u8 = null,
+    version: ?[]const u8 = null,
+    confidence: enum { low, moderate, high, unknown } = .unknown,
+};
+
+pub const EquipmentRequirement = struct {
+    equipmentId: []const u8,
+    equipmentFamilyId: ?[]const u8 = null,
+    requirement: enum { required, optional, one_of } = .required,
+    role: enum { load_bearing, support, setup, other } = .other,
+    alternativeGroup: ?[]const u8 = null,
+};
+
+pub const TrackingDimension = struct {
+    metricCode: []const u8,
+    requirement: enum { required, optional } = .required,
+    scope: enum { total, per_side, per_hand, left_right_independent } = .total,
+};
+
+pub const ProgressionCapabilities = struct {
+    externalLoad: ?bool = null,
+    repetitions: ?bool = null,
+    percentageOneRepMax: ?bool = null,
+    effortTarget: ?bool = null,
+    amrap: ?bool = null,
+    failureTraining: ?bool = null,
+    duration: ?bool = null,
+    distance: ?bool = null,
+    assistanceReduction: ?bool = null,
+};
+
+pub const ExerciseRelationships = struct {
+    variantOf: ?[]const u8 = null,
+    variantIds: []const []const u8 = &.{},
+    substituteIds: []const []const u8 = &.{},
+    similarExerciseIds: []const []const u8 = &.{},
+    sharedProgressionStateIds: []const []const u8 = &.{},
+};
+
+/// The compact, replayable projection of programming-relevant exercise facts.
+/// Catalog-only content such as instructions and media deliberately stays out.
+pub const ExerciseKnowledge = struct {
+    schemaVersion: u32 = 1,
+    familyId: ?[]const u8 = null,
+    variantDimensions: []const struct {
+        dimension: []const u8,
+        value: []const u8,
+    } = &.{},
+    movementPatterns: []const []const u8 = &.{},
+    structuralType: ?enum { compound, isolation, isometric, locomotor, conditioning, mobility, other } = null,
+    laterality: ?enum { bilateral, unilateral, alternating, independent_bilateral, not_applicable, unknown } = null,
+    repetitionSemantics: ?enum { total, per_side, alternating_total, left_right_independent, not_applicable, unknown } = null,
+    equipmentRequirements: []const EquipmentRequirement = &.{},
+    trackingDimensions: []const TrackingDimension = &.{},
+    loadingMode: ?enum { external_load, bodyweight, bodyweight_plus_load, assisted_bodyweight, repetitions_only, duration, distance, load_duration, distance_duration, machine_load, other } = null,
+    progressionCapabilities: ?ProgressionCapabilities = null,
+    restrictionTags: []const []const u8 = &.{},
+    relationships: ExerciseRelationships = .{},
+    skillLevel: ?enum { beginner_friendly, intermediate, advanced_technical, highly_technical, unknown } = null,
+    stabilityDemand: ?enum { externally_stabilized, supported, free, highly_unstable, unknown } = null,
+    setupBurden: ?enum { trivial, low, moderate, high, unknown } = null,
+    fatigue: ?struct {
+        localMuscular: ?enum { low, moderate, high, unknown } = null,
+        axial: ?enum { low, moderate, high, unknown } = null,
+        systemic: ?enum { low, moderate, high, unknown } = null,
+        grip: ?enum { low, moderate, high, unknown } = null,
+        cardiorespiratory: ?enum { low, moderate, high, unknown } = null,
+        technical: ?enum { low, moderate, high, unknown } = null,
+    } = null,
+    evidence: []const KnowledgeEvidence = &.{},
+};
+
 pub const Exercise = struct {
     id: []const u8,
     name: ?[]const u8 = null,
@@ -32,6 +114,9 @@ pub const Exercise = struct {
     unilateral: ?bool = null,
     aliases: []const []const u8 = &.{},
     attributes: ?std.json.Value = null,
+    /// Authoritative when present. Legacy fields remain a compatibility
+    /// projection and are consulted only for concepts absent from knowledge.
+    knowledge: ?ExerciseKnowledge = null,
 };
 
 pub const AthletePreferences = struct {

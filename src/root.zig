@@ -19,6 +19,7 @@ pub const discovery = @import("discovery.zig");
 pub const double_progression = @import("double_progression.zig");
 pub const duration = @import("duration.zig");
 pub const engine = @import("engine.zig");
+pub const exercise_knowledge = @import("exercise_knowledge.zig");
 pub const filtering = @import("filtering.zig");
 pub const history = @import("history.zig");
 pub const load_math = @import("load_math.zig");

@@ -64,6 +64,7 @@ pub const ExerciseInfo = struct {
     equipmentIds: []const []const u8,
     movementTags: []const []const u8,
     unilateral: ?bool,
+    knowledge: ?@import("caudex").canonical.ExerciseKnowledge = null,
     revision: u64,
     availability: []const u8,
     updatedAt: []const u8,

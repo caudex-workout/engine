@@ -22,17 +22,18 @@ fn addBundledSqlite(b: *std.Build, module: *std.Build.Module) void {
 fn repositoryTestAssets(b: *std.Build) *std.Build.Module {
     const files = b.addWriteFiles();
     const paths = [_][]const u8{
-        "src/root.zig",                                                   "src/canonical.zig",                                             "src/canonical_json.zig",                                          "src/diagnostics.zig",
-        "src/discovery.zig",                                              "src/double_progression.zig",                                    "src/duration.zig",                                                "src/engine.zig",
-        "src/filtering.zig",                                              "src/history.zig",                                               "src/load_math.zig",                                               "src/methodology.zig",
-        "src/ordering.zig",                                               "src/primitives.zig",                                            "src/programming.zig",                                             "src/rpe_top_set_backoff.zig",
-        "src/training.zig",                                               "tracking/root.zig",                                             "workflows/root.zig",                                              "packages/npm/workout-engine/package.json",
-        "adapters/sqlite/migrations/001_initial.sql",                     "fixtures/requests/recommendation.json",                         "fixtures/requests/evaluation.json",                               "fixtures/results/diagnostics.json",
-        "fixtures/results/recommendation-no-history.json",                "fixtures/methodologies/double-progression-config-v1.json",      "fixtures/methodologies/double-progression-state-v1.json",         "fixtures/methodologies/rpe-top-set-backoff-config-v1.json",
-        "fixtures/methodologies/rpe-top-set-backoff-state-v1.json",       "fixtures/methodologies/double-progression-conformance-v1.json", "fixtures/tracking/start-workout-v1.json",                         "fixtures/tracking/snapshot-v1.json",
-        "fixtures/tracking/rejected-batch-v1.json",                       "fixtures/templates/squat-day-v1.json",                          "fixtures/portable/export-v1.json",                                "schemas/v0/canonical.schema.json",
-        "schemas/v0/recommendation-request.schema.json",                  "schemas/v0/evaluation-request.schema.json",                     "schemas/v0/recommendation-result.schema.json",                    "schemas/v0/evaluation-result.schema.json",
-        "schemas/methodologies/double-progression-config-v1.schema.json", "schemas/methodologies/double-progression-state-v1.schema.json", "schemas/methodologies/rpe-top-set-backoff-config-v1.schema.json", "schemas/methodologies/rpe-top-set-backoff-state-v1.schema.json",
+        "src/root.zig",                                                   "src/canonical.zig",                                              "src/canonical_json.zig",                                        "src/diagnostics.zig",
+        "src/discovery.zig",                                              "src/double_progression.zig",                                     "src/duration.zig",                                              "src/engine.zig",
+        "src/exercise_knowledge.zig",                                     "src/filtering.zig",                                              "src/history.zig",                                               "src/load_math.zig",
+        "src/methodology.zig",                                            "src/ordering.zig",                                               "src/primitives.zig",                                            "src/programming.zig",
+        "src/rpe_top_set_backoff.zig",                                    "src/training.zig",                                               "tracking/root.zig",                                             "workflows/root.zig",
+        "packages/npm/workout-engine/package.json",                       "adapters/sqlite/migrations/001_initial.sql",                     "fixtures/requests/recommendation.json",                         "fixtures/requests/evaluation.json",
+        "fixtures/results/diagnostics.json",                              "fixtures/results/recommendation-no-history.json",                "fixtures/methodologies/double-progression-config-v1.json",      "fixtures/methodologies/double-progression-state-v1.json",
+        "fixtures/methodologies/rpe-top-set-backoff-config-v1.json",      "fixtures/methodologies/rpe-top-set-backoff-state-v1.json",       "fixtures/methodologies/double-progression-conformance-v1.json", "fixtures/tracking/start-workout-v1.json",
+        "fixtures/tracking/snapshot-v1.json",                             "fixtures/tracking/rejected-batch-v1.json",                       "fixtures/templates/squat-day-v1.json",                          "fixtures/portable/export-v1.json",
+        "schemas/v0/canonical.schema.json",                               "schemas/v0/recommendation-request.schema.json",                  "schemas/v0/evaluation-request.schema.json",                     "schemas/v0/recommendation-result.schema.json",
+        "schemas/v0/evaluation-result.schema.json",                       "schemas/methodologies/double-progression-config-v1.schema.json", "schemas/methodologies/double-progression-state-v1.schema.json", "schemas/methodologies/rpe-top-set-backoff-config-v1.schema.json",
+        "schemas/methodologies/rpe-top-set-backoff-state-v1.schema.json",
     };
     for (paths) |path| _ = files.addCopyFile(b.path(path), path);
     const source = files.add("root.zig",
@@ -44,6 +45,7 @@ fn repositoryTestAssets(b: *std.Build) *std.Build.Module {
         \\pub const src_double_progression = @embedFile("src/double_progression.zig");
         \\pub const src_duration = @embedFile("src/duration.zig");
         \\pub const src_engine = @embedFile("src/engine.zig");
+        \\pub const src_exercise_knowledge = @embedFile("src/exercise_knowledge.zig");
         \\pub const src_filtering = @embedFile("src/filtering.zig");
         \\pub const src_history = @embedFile("src/history.zig");
         \\pub const src_load_math = @embedFile("src/load_math.zig");

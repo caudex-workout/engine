@@ -15,6 +15,7 @@ import {
   type WorkflowRecoveryRecord,
   type PortableDocument,
   type JsonValue,
+  type Exercise,
   type ProgramRecommendationRequest,
 } from "../packages/npm/workout-engine/src/index.ts";
 
@@ -321,6 +322,32 @@ const mixedRequest: ProgramRecommendationRequest = {
   },
   catalog: [{ id: "leg-extension" }, { id: "bench-press" }],
 };
+const richExercise = {
+  id: "rich-squat",
+  knowledge: {
+    schemaVersion: 1,
+    familyId: "squat",
+    variantDimensions: [{ dimension: "bar-position", value: "high-bar" }],
+    movementPatterns: ["squat"],
+    structuralType: "compound",
+    laterality: "bilateral",
+    repetitionSemantics: "total",
+    equipmentRequirements: [{ equipmentId: "barbell", role: "load_bearing" }],
+    trackingDimensions: [{ metricCode: "repetitions" }],
+    loadingMode: "external_load",
+    progressionCapabilities: { externalLoad: true, repetitions: true },
+    restrictionTags: ["requires-rack"],
+    relationships: { substituteIds: ["front-squat"] },
+    skillLevel: "intermediate",
+    stabilityDemand: "free",
+    setupBurden: "moderate",
+    fatigue: { axial: "high", technical: "moderate" },
+    evidence: [{ authority: "caudex_curated", confidence: "high" }],
+  },
+} satisfies Exercise;
+if (richExercise.knowledge?.relationships?.substituteIds?.[0] !== "front-squat") {
+  throw new Error("exercise knowledge types did not preserve rich relationships");
+}
 const mixed = caudex.recommendProgram(mixedRequest);
 if (!mixed.ok || mixed.recommendation.exercises.length !== 2 || mixed.recommendation.exercises[0]?.programming?.progression.id !== "caudex.double-progression" || mixed.recommendation.exercises[1]?.programming?.progression.id !== "caudex.rpe-top-set-backoff") {
   throw new Error("mixed program recommendation did not retain per-exercise progression provenance");
@@ -375,6 +402,16 @@ const wrongVersion = caudex.recommendProgram({
 });
 if (wrongVersion.ok || wrongVersion.issues[0]?.code !== "progression.unsupported_version") {
   throw new Error("progression version mismatch did not return a structured issue");
+}
+const incompatibleProgression = caudex.recommendProgram({
+  ...mixedRequest,
+  catalog: [{
+    ...mixedRequest.catalog[0]!,
+    knowledge: { progressionCapabilities: { externalLoad: false } },
+  }, mixedRequest.catalog[1]!],
+});
+if (incompatibleProgression.ok || incompatibleProgression.issues[0]?.code !== "exercise.rejected.incompatible_progression" || incompatibleProgression.issues[0]?.path !== "/program/exercises/0") {
+  throw new Error("explicitly incompatible exercise knowledge did not reject the progression slot");
 }
 
 const invalid = caudex.recommendSession({

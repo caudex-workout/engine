@@ -64,6 +64,116 @@
       },
       "additionalProperties": false
     },
+    "knowledgeAuthority": {
+      "enum": ["source_provided", "caudex_curated", "mechanically_derived", "host_provided", "unknown"]
+    },
+    "knowledgeConfidence": {
+      "enum": ["low", "moderate", "high", "unknown"]
+    },
+    "knowledgeEvidence": {
+      "type": "object",
+      "required": ["authority"],
+      "properties": {
+        "authority": { "$ref": "#/$defs/knowledgeAuthority" },
+        "sourceId": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "version": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "confidence": { "$ref": "#/$defs/knowledgeConfidence" }
+      },
+      "additionalProperties": false
+    },
+    "equipmentRequirement": {
+      "type": "object",
+      "required": ["equipmentId"],
+      "properties": {
+        "equipmentId": { "$ref": "#/$defs/identifier" },
+        "equipmentFamilyId": { "$ref": "#/$defs/identifier" },
+        "requirement": { "enum": ["required", "optional", "one_of"] },
+        "role": { "enum": ["load_bearing", "support", "setup", "other"] },
+        "alternativeGroup": { "$ref": "#/$defs/identifier" }
+      },
+      "additionalProperties": false
+    },
+    "trackingDimension": {
+      "type": "object",
+      "required": ["metricCode"],
+      "properties": {
+        "metricCode": { "$ref": "#/$defs/identifier" },
+        "requirement": { "enum": ["required", "optional"] },
+        "scope": { "enum": ["total", "per_side", "per_hand", "left_right_independent"] }
+      },
+      "additionalProperties": false
+    },
+    "progressionCapabilities": {
+      "type": "object",
+      "properties": {
+        "externalLoad": { "type": "boolean" },
+        "repetitions": { "type": "boolean" },
+        "percentageOneRepMax": { "type": "boolean" },
+        "effortTarget": { "type": "boolean" },
+        "amrap": { "type": "boolean" },
+        "failureTraining": { "type": "boolean" },
+        "duration": { "type": "boolean" },
+        "distance": { "type": "boolean" },
+        "assistanceReduction": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "exerciseRelationships": {
+      "type": "object",
+      "properties": {
+        "variantOf": { "$ref": "#/$defs/identifier" },
+        "variantIds": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+        "substituteIds": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+        "similarExerciseIds": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+        "sharedProgressionStateIds": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true }
+      },
+      "additionalProperties": false
+    },
+    "exerciseVariantDimension": {
+      "type": "object",
+      "required": ["dimension", "value"],
+      "properties": {
+        "dimension": { "$ref": "#/$defs/identifier" },
+        "value": { "$ref": "#/$defs/identifier" }
+      },
+      "additionalProperties": false
+    },
+    "exerciseFatigue": {
+      "type": "object",
+      "properties": {
+        "localMuscular": { "enum": ["low", "moderate", "high", "unknown"] },
+        "axial": { "enum": ["low", "moderate", "high", "unknown"] },
+        "systemic": { "enum": ["low", "moderate", "high", "unknown"] },
+        "grip": { "enum": ["low", "moderate", "high", "unknown"] },
+        "cardiorespiratory": { "enum": ["low", "moderate", "high", "unknown"] },
+        "technical": { "enum": ["low", "moderate", "high", "unknown"] }
+      },
+      "additionalProperties": false
+    },
+    "exerciseKnowledge": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "familyId": { "$ref": "#/$defs/identifier" },
+        "variantDimensions": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/exerciseVariantDimension" }, "uniqueItems": true },
+        "movementPatterns": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+        "structuralType": { "enum": ["compound", "isolation", "isometric", "locomotor", "conditioning", "mobility", "other"] },
+        "laterality": { "enum": ["bilateral", "unilateral", "alternating", "independent_bilateral", "not_applicable", "unknown"] },
+        "repetitionSemantics": { "enum": ["total", "per_side", "alternating_total", "left_right_independent", "not_applicable", "unknown"] },
+        "equipmentRequirements": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/equipmentRequirement" } },
+        "trackingDimensions": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/trackingDimension" } },
+        "loadingMode": { "enum": ["external_load", "bodyweight", "bodyweight_plus_load", "assisted_bodyweight", "repetitions_only", "duration", "distance", "load_duration", "distance_duration", "machine_load", "other"] },
+        "progressionCapabilities": { "$ref": "#/$defs/progressionCapabilities" },
+        "restrictionTags": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/identifier" }, "uniqueItems": true },
+        "relationships": { "$ref": "#/$defs/exerciseRelationships" },
+        "skillLevel": { "enum": ["beginner_friendly", "intermediate", "advanced_technical", "highly_technical", "unknown"] },
+        "stabilityDemand": { "enum": ["externally_stabilized", "supported", "free", "highly_unstable", "unknown"] },
+        "setupBurden": { "enum": ["trivial", "low", "moderate", "high", "unknown"] },
+        "fatigue": { "$ref": "#/$defs/exerciseFatigue" },
+        "evidence": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/knowledgeEvidence" } }
+      },
+      "additionalProperties": false
+    },
     "exercise": {
       "type": "object",
       "required": ["id"],
@@ -90,7 +200,8 @@
           "items": { "type": "string" },
           "uniqueItems": true
         },
-        "attributes": { "$ref": "#/$defs/openObject" }
+        "attributes": { "$ref": "#/$defs/openObject" },
+        "knowledge": { "$ref": "#/$defs/exerciseKnowledge" }
       },
       "additionalProperties": false
     },

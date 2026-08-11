@@ -11,18 +11,20 @@ try {
   const valid = Buffer.from(JSON.stringify([base]));
   const output = join(temporary, "catalog.json");
   await writeFile(join(temporary, "schema.json"), schema);
-  await writeFixture(valid);
-  run(output);
+    await writeFixture(valid);
+    run(output);
   const generated = JSON.parse(await readFile(output, "utf8"));
   if (generated.records[0].equipment !== null || generated.records[0].force !== null) throw new Error("null upstream fields were not preserved");
 
   await writeFixture(Buffer.from(JSON.stringify([base, base])));
   expectFailure(output, "duplicate upstream ID");
-  await writeFixture(Buffer.from(JSON.stringify([exercise("Collision_A", null), exercise("collision-a", null)])));
-  expectFailure(output, "normalized upstream ID collision");
+    await writeFixture(Buffer.from(JSON.stringify([exercise("Collision_A", null), exercise("collision-a", null)])));
+    expectFailure(output, "normalized upstream ID collision");
+    await writeFixture(valid, [{ exerciseId: "free-exercise-db:missing", knowledge: {} }]);
+    expectFailure(output, "enrichment references missing exercise ID");
   console.log("caudex exercise catalog generator edge cases passed");
 
-  async function writeFixture(data) {
+  async function writeFixture(data, entries = []) {
     await writeFile(join(temporary, "source.json"), data);
     await writeFile(join(temporary, "manifest.json"), JSON.stringify({
       upstreamRepository: "https://example.invalid/catalog",
@@ -32,6 +34,18 @@ try {
       upstreamDataSha256: sha256(data),
       upstreamSchemaSha256: sha256(schema),
       normalizedOutputFingerprint: "pending",
+    }));
+    const source = JSON.parse(data);
+    const baseRecords = source.map((record) => ({
+      id: `free-exercise-db:${record.id}`, upstreamId: record.id, name: record.name, aliases: [record.id],
+      force: record.force, difficulty: record.level, mechanic: record.mechanic, equipment: record.equipment === null ? null : taxonomy(record.equipment, "equipment"),
+      primaryMuscles: record.primaryMuscles.map((value) => taxonomy(value, "muscle")), secondaryMuscles: record.secondaryMuscles.map((value) => taxonomy(value, "muscle")),
+      instructions: record.instructions, category: record.category, movementPatterns: [],
+      source: { dataset: "free-exercise-db", upstreamRepository: "https://example.invalid/catalog", upstreamCommit: "0000000000000000000000000000000000000000", upstreamId: record.id, license: "Unlicense" },
+    })).sort((left, right) => left.id.localeCompare(right.id, "en"));
+    await writeFile(join(temporary, "enrichment.json"), JSON.stringify({
+      schemaVersion: 1, catalogId: "caudex.free-exercise-db", baseVersion: "0000000000000000000000000000000000000000", baseFingerprint: sha256(Buffer.from(JSON.stringify(baseRecords))), version: "test-1",
+      source: { dataset: "test", license: "MIT" }, entries,
     }));
   }
 
@@ -49,6 +63,7 @@ try {
       "--source", join(temporary, "source.json"),
       "--schema", join(temporary, "schema.json"),
       "--manifest", join(temporary, "manifest.json"),
+      "--enrichment", join(temporary, "enrichment.json"),
       "--output", destination,
     ], { encoding: "utf8" });
   }
@@ -58,5 +73,9 @@ try {
 
 function exercise(id, equipment) {
   return { id, name: id, force: null, level: "beginner", mechanic: null, equipment, primaryMuscles: ["biceps"], secondaryMuscles: [], instructions: [""], category: "strength", images: ["excluded.jpg"] };
+}
+function taxonomy(value, kind) {
+  const normalized = kind === "muscle" ? value : value === "body only" ? "bodyweight" : value;
+  return { sourceValue: value, sourceId: `free-exercise-db.${kind}:${value.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase()}`, normalizedId: `caudex.${kind}:${normalized}` };
 }
 function sha256(value) { return createHash("sha256").update(value).digest("hex"); }
