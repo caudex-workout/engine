@@ -24,6 +24,8 @@ pub const MuscleContribution = struct {
 pub const Exercise = struct {
     id: Id,
     name: ?[]const u8 = null,
+    /// Stable host taxonomy used by planning allowlists and requirements.
+    family_ids: []const Id = &.{},
     equipment_ids: []const Id = &.{},
     movement_tags: []const Id = &.{},
     muscle_contributions: []const MuscleContribution = &.{},

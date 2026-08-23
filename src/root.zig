@@ -26,13 +26,19 @@ pub const history = @import("history.zig");
 pub const load_math = @import("load_math.zig");
 pub const methodology = @import("methodology.zig");
 pub const ordering = @import("ordering.zig");
+pub const planning = @import("planning/root.zig");
 pub const primitives = @import("primitives.zig");
 pub const programming = @import("programming.zig");
 pub const program_planning = @import("program_planning.zig");
 pub const rpe_top_set_backoff = @import("rpe_top_set_backoff.zig");
 pub const training = @import("training.zig");
+pub const progression = @import("progression/root.zig");
+pub const programs = @import("programs/root.zig");
 
 test "library test target is wired" {
     _ = athlete_profile;
+    _ = planning;
+    _ = progression;
+    _ = programs;
     try std.testing.expect(true);
 }

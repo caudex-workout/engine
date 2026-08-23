@@ -1200,10 +1200,7 @@ test "session cap equal to prescription is a no-op" {
         .{ .max_working_sets = 3 },
     );
     try std.testing.expectEqual(@as(u16, 3), recommendation.working_sets);
-    try std.testing.expectEqualStrings(
-        "double-progression.initial-prescription",
-        recommendation.session_explanation.rule_id,
-    );
+    try std.testing.expect(recommendation.session_explanation == null);
 }
 
 test "successful sets advance repetitions then load" {

@@ -28,6 +28,28 @@ methodology identifiers follow the compatibility rules in
   own the facade handle and must call `dispose()`; the CLI owns temporary
   adapter resources for one invocation.
 
+## Session-planning kernel bounds
+
+The direct Zig session planner has a separate, explicit resource contract. A
+`PlanningProblem` accepts at most 16 slots, 512 catalog exercises, 64 typed
+objectives, and 1,024 duration estimates. A solve retains 1–32 candidates per
+slot (default 8) and evaluates at most `beam_width` complete assignments
+(default 256; `u16` caps the configured value at 65,535). Its caller-owned
+workspace holds the candidate, ordering, reason, result, and violation buffers
+needed for those bounds. `planning.FixedWorkspace` is sized for the maximum;
+`planning.Workspace.init` visibly allocates an exact bounded workspace, and
+`solve` itself does not allocate.
+
+These bounds produce distinct outcomes. `infeasible` is a proved
+hard-constraint contradiction; `search_exhausted` means bounded candidate
+retention or search prevented a conclusion and must not be presented as
+infeasibility. `InvalidProblem`, `InvalidOptions`, `ProblemLimitExceeded`, and
+workspace/storage failures are boundary errors, not a partial or accepted
+plan. The planner protocol is currently direct Zig only; existing C,
+WASM/npm, portable, persistence, canonical-engine, and methodology contracts
+remain historical compatibility surfaces pending an explicit versioned
+migration.
+
 ## Initial benchmark budgets
 
 The CLI benchmark is a regression guardrail, not a marketing claim. Initial

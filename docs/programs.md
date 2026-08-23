@@ -2,14 +2,23 @@
 
 Program planning lets a host describe reusable training structure and resolve
 one intended session at a time without making Caudex own a calendar or stored
-program. It extends the [programming hierarchy](programming-hierarchy.md): a
-program plans *which* ordered slots belong in an occurrence, while the
-assigned progression method prescribes and evaluates each slot.
+program. It extends the [programming hierarchy](programming-hierarchy.md): the
+lifecycle resolves a `PlannedSessionIntent`; a strategy expresses the slots and
+their lanes; the shared planner resolves the session; and progression
+prescribes and evaluates each selected lane.
 
-The typed Zig API is authoritative. Its canonical snapshot types are also the
-contract carried across C, WASM/npm, and the portable protocol. This guide uses
-the public names and lifecycle; the abbreviated Zig is schematic so it can
-explain the value flow without duplicating every language binding signature.
+The typed Zig lifecycle API and its current v0.1 protocol snapshots are
+authoritative for the released contract. The session-planning kernel described
+here is currently a direct-Zig surface; it is not yet carried by the released
+C, WASM/npm, or portable records. This guide uses public names and a schematic
+value flow rather than duplicating every binding signature.
+
+The v0.1 lifecycle `program_planning.PlannedSessionIntent` and the direct-Zig
+`programs.intent.PlannedSessionIntent` consumed by `planning.buildProblem` are
+not interchangeable protocol records. The latter is the kernel's new strategy
+output. Until a versioned migration adds an explicit conversion, the planner
+portion of the diagram below describes the architecture and direct Zig path,
+not a newly available end-to-end v0.1 binding workflow.
 
 ## The planning model
 
@@ -21,6 +30,10 @@ ProgramDefinition --instantiate--> ProgramInstance + ProgramState
       +-----------------resolvePlannedSession-+
                                                v
                                   PlannedSessionIntent
+                                               |
+                              build PlanningProblem -> solve
+                                               |
+                                  ResolvedSessionPlan -> prescribe
                                                |
                                   recommend / track / evaluate
                                                |
@@ -40,7 +53,7 @@ The values in that diagram are deliberately distinct:
 | `ProgramState` | The accepted dynamic planning position for that instance. It is input to a calculation, never hidden engine state. |
 | `SessionRole` | A stable reusable session identity, such as `upper-a`; schedules refer to roles. |
 | `SessionOccurrence` | One explicit occurrence of a role in an instance/sequence. It can be planned or previewed without being completed. |
-| `PlannedSessionIntent` | The immutable result of resolving one occurrence: applicable phase, role, ordered slots, and planning provenance. |
+| `PlannedSessionIntent` | The immutable result of resolving one occurrence: applicable phase, role, slots, and planning provenance. The released lifecycle intent and the kernel strategy intent are distinct transitional values. |
 | `ProgramStateProposal` | A proposed successor to the supplied state after explicit evidence. Only the host can accept/persist it. |
 
 Do not use a display name or a bare exercise ID in place of any of these stable
@@ -146,12 +159,25 @@ const intent = try programs.resolvePlannedSession(allocator, .{
 defer intent.deinit();
 ```
 
-Use the resulting `PlannedSessionIntent` to build the program recommendation.
-The recommendation keeps the phase, role, occurrence, ordered slot, strategy,
-progression, resolved-context, and catalog provenance that affected it. Feed
-that accepted recommendation into the normal active-workout and evaluation
-workflow; do not rebuild routing from current definition data or bare exercise
-IDs.
+For new direct-Zig session selection, a program strategy produces the kernel
+`programs.intent.PlannedSessionIntent`; use it to build a `PlanningProblem`
+from the same explicit context and catalog snapshot. `solve` first resolves all
+fixed and adaptive slots into a `ResolvedSessionPlan`; only then does the
+programming layer prescribe each selected progression lane. The direct Zig
+`PlannedRecommendation` keeps the full borrowed resolved plan beside the owned
+prescription so planner, occurrence, slot, score, reason, and progression-lane
+provenance are not lost at that crossing. A host accepting this result must
+persist both parts. The existing canonical/C/WASM/npm program representation
+does not yet encode the planner half; it remains a transitional protocol
+surface and must not be presented as planner-conformant. Do not rebuild routing
+from current definition data or bare exercise IDs.
+
+The solver returns one of `resolved`, `infeasible`, or `search_exhausted`.
+`infeasible` means a hard-constraint contradiction was proved; it is not a
+generic rejection. `search_exhausted` means the configured candidate or search
+bound prevented a conclusion, so it must never be represented as proof that no
+workout exists. See [Programming hierarchy](programming-hierarchy.md#bounded-solver-outcomes)
+for the direct-Zig bounds and workspace ownership rules.
 
 The following timeline illustrates a rolling plan without implying a calendar
 implementation:
@@ -214,6 +240,10 @@ Keep these values with an accepted planning decision:
 - occurrence, role, phase, and stable ordered-slot identities;
 - selected program strategy and each progression method's ID, version,
   configuration version, configuration, and input state;
+- normalized planning-problem fingerprint, planner ID/version, configured
+  candidate/search bounds, tie-break policy, and explored-state count;
+- resolved-session-plan slots, optional omissions and reasons, and the
+  planner's selection/order rationale;
 - resolved training-context/profile provenance and exact catalog projection;
 - accepted recommendation, completed-workout evidence, and proposal/acceptance
   provenance.
@@ -241,5 +271,17 @@ workout template or a planned occurrence into an accepted/active workout.
 
 For profile/context precedence, see [athlete profiles and training
 context](athlete-profiles-and-training-context.md). For slot and progression
-routing, see [programming hierarchy](programming-hierarchy.md). The full
-architectural decision is [ADR-0010](adr/ADR-0010-deterministic-program-planning.md).
+routing, see [programming hierarchy](programming-hierarchy.md). ADR-0011 now
+governs the session-planning kernel; it supersedes the fixed-session and
+generic-methodology portions of [ADR-0010](adr/ADR-0010-deterministic-program-planning.md),
+not its lifecycle guarantees.
+
+## Protocol migration status
+
+The v0.1 C, WASM/npm, portable, persistence, canonical engine, and generic
+methodology records remain released compatibility surfaces. They currently
+retain their historical fixed-session or single-methodology contracts. Do not
+encode a `PlanningProblem`, planner outcome, or progression lane by
+overloading one of those existing records. A future protocol migration must be
+explicitly versioned and preserve historical methodology records rather than
+reinterpreting them as lanes.

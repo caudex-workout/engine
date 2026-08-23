@@ -26,6 +26,8 @@ fn repositoryTestAssets(b: *std.Build) *std.Build.Module {
         "src/discovery.zig",                                               "src/double_progression.zig",                                     "src/duration.zig",                                              "src/engine.zig",                                                 "src/exercise_knowledge.zig",
         "src/filtering.zig",                                               "src/history.zig",                                                "src/load_math.zig",                                             "src/methodology.zig",                                            "src/ordering.zig",
         "src/primitives.zig",                                              "src/programming.zig",                                            "src/program_planning.zig",                                      "src/rpe_top_set_backoff.zig",                                    "src/training.zig",
+        "src/planning/root.zig",                                           "src/planning/problem.zig",                                       "src/planning/build.zig",                                        "src/planning/solver.zig",                                        "src/programs/root.zig",
+        "src/programs/intent.zig",                                         "src/programs/hypertrophy.zig",                                   "src/programs/definition.zig",                                   "src/programs/lifecycle.zig",                                     "src/progression/root.zig",
         "tracking/root.zig",                                               "workflows/root.zig",                                             "packages/npm/workout-engine/package.json",                      "adapters/sqlite/migrations/001_initial.sql",                     "fixtures/requests/recommendation.json",
         "fixtures/requests/evaluation.json",                               "fixtures/results/diagnostics.json",                              "fixtures/results/recommendation-no-history.json",               "fixtures/methodologies/double-progression-config-v1.json",       "fixtures/methodologies/double-progression-state-v1.json",
         "fixtures/methodologies/rpe-top-set-backoff-config-v1.json",       "fixtures/methodologies/rpe-top-set-backoff-state-v1.json",       "fixtures/methodologies/double-progression-conformance-v1.json", "fixtures/tracking/start-workout-v1.json",                        "fixtures/tracking/snapshot-v1.json",
@@ -55,6 +57,16 @@ fn repositoryTestAssets(b: *std.Build) *std.Build.Module {
         \\pub const src_program_planning = @embedFile("src/program_planning.zig");
         \\pub const src_rpe_top_set_backoff = @embedFile("src/rpe_top_set_backoff.zig");
         \\pub const src_training = @embedFile("src/training.zig");
+        \\pub const src_planning_root = @embedFile("src/planning/root.zig");
+        \\pub const src_planning_problem = @embedFile("src/planning/problem.zig");
+        \\pub const src_planning_build = @embedFile("src/planning/build.zig");
+        \\pub const src_planning_solver = @embedFile("src/planning/solver.zig");
+        \\pub const src_programs_root = @embedFile("src/programs/root.zig");
+        \\pub const src_programs_intent = @embedFile("src/programs/intent.zig");
+        \\pub const src_programs_hypertrophy = @embedFile("src/programs/hypertrophy.zig");
+        \\pub const src_programs_definition = @embedFile("src/programs/definition.zig");
+        \\pub const src_programs_lifecycle = @embedFile("src/programs/lifecycle.zig");
+        \\pub const src_progression_root = @embedFile("src/progression/root.zig");
         \\pub const tracking_root = @embedFile("tracking/root.zig");
         \\pub const workflows_root = @embedFile("workflows/root.zig");
         \\pub const manifest = @embedFile("packages/npm/workout-engine/package.json");

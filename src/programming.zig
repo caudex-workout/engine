@@ -11,6 +11,9 @@ const canonical = @import("canonical.zig");
 const double_progression = @import("double_progression.zig");
 const exercise_knowledge = @import("exercise_knowledge.zig");
 const primitives = @import("primitives.zig");
+const planning = @import("planning/root.zig");
+const problem_builder = @import("planning/build.zig");
+const progression = @import("progression/root.zig");
 const rpe = @import("rpe_top_set_backoff.zig");
 const training = @import("training.zig");
 
@@ -19,23 +22,7 @@ pub const fixed_session_version = "0.1.0";
 pub const fixed_session_config_version: u32 = 1;
 pub const max_exercises: usize = 16;
 
-pub const Method = union(enum) {
-    double_progression: struct {
-        config: double_progression.Config,
-        state: ?double_progression.State = null,
-    },
-    rpe_top_set_backoff: struct {
-        config: rpe.Config,
-        state: ?rpe.State = null,
-    },
-
-    pub fn id(self: Method) []const u8 {
-        return switch (self) {
-            .double_progression => double_progression.methodology_id,
-            .rpe_top_set_backoff => rpe.methodology_id,
-        };
-    }
-};
+pub const Method = progression.Method;
 
 pub const ExerciseSlot = struct {
     slot_id: primitives.Id,
@@ -121,6 +108,68 @@ pub const OwnedEvaluation = struct {
     }
 };
 
+/// Programming-level result from the shared exercise-resolution pipeline.
+/// Planning failures remain expected domain values rather than generic errors.
+pub const PlannedRecommendation = struct {
+    /// Borrowed planner output; valid while the supplied workspace is valid
+    /// and has not been reused.
+    plan: planning.ResolvedSessionPlan,
+    prescription: OwnedRecommendation,
+};
+
+pub const PlannedRecommendationResult = union(enum) {
+    resolved: PlannedRecommendation,
+    infeasible: planning.problem.InfeasiblePlan,
+    search_exhausted: planning.problem.SearchExhausted,
+};
+
+pub const PlannedRecommendationError = Error || planning.solver.SolveError ||
+    planning.solver.ValidationError;
+pub const PlanningSessionContext = problem_builder.SessionContext;
+pub const PlanningExercisePreference = problem_builder.ExercisePreference;
+pub const PlanningBuildStorage = problem_builder.Storage;
+pub const buildPlanningProblem = problem_builder.build;
+
+/// Resolves the complete session before prescribing each selected progression
+/// lane. Fixed and adaptive slots therefore share exactly one planning path.
+pub fn recommendPlannedSession(
+    backing_allocator: std.mem.Allocator,
+    problem: planning.PlanningProblem,
+    options: planning.SolveOptions,
+    workspace: *planning.Workspace,
+    history: training.HistorySnapshot,
+) PlannedRecommendationError!PlannedRecommendationResult {
+    const solved = try planning.solve(problem, options, workspace);
+    switch (solved) {
+        .infeasible => |failure| return .{ .infeasible = failure },
+        .search_exhausted => |failure| return .{ .search_exhausted = failure },
+        .resolved => |plan| {
+            try planning.validateResolvedPlan(problem, plan);
+            // This temporary crossing is explicit and bounded. The progression
+            // capability receives only already-selected exercises and lanes.
+            const slots = backing_allocator.alloc(ExerciseSlot, plan.slots.len) catch
+                return error.OutOfMemory;
+            defer backing_allocator.free(slots);
+            for (plan.slots, slots) |planned_slot, *slot| slot.* = .{
+                .slot_id = planned_slot.slot_id,
+                .exercise_id = planned_slot.exercise_id,
+                .state_id = planned_slot.progression.state_id,
+                .progression = planned_slot.progression.method,
+            };
+            return .{ .resolved = .{
+                .plan = plan,
+                .prescription = try recommendFixedSession(backing_allocator, .{
+                    .as_of = problem.as_of,
+                    .catalog = problem.catalog,
+                    .history = history,
+                    .available_equipment_ids = problem.constraints.available_equipment_ids,
+                    .slots = slots,
+                }),
+            } };
+        },
+    }
+}
+
 pub fn recommendFixedSession(
     backing_allocator: std.mem.Allocator,
     request: RecommendationRequest,
@@ -145,7 +194,7 @@ pub fn recommendFixedSession(
             return error.EquipmentUnavailable;
         if (exercise_knowledge.progressionCompatibility(
             exercise.*,
-            .externally_loadable_repetitions,
+            slot.progression.requirement(),
         ) == .incompatible) return error.IncompatibleProgression;
         exercises[index] = switch (slot.progression) {
             .double_progression => |value| try recommendDouble(allocator, request, slot, value, index, &explanations[index + 1]),
@@ -445,6 +494,52 @@ test "fixed session composes and evaluates two progression methods with isolated
     try std.testing.expectEqualStrings("block-1-primary", evaluation.evaluation.state_proposals[1].state_id.bytes);
     try std.testing.expectEqualStrings(rpe.methodology_id, evaluation.evaluation.state_proposals[1].method_id);
     try std.testing.expect(evaluation.evaluation.next_program_state == null);
+}
+
+test "planned recommendation resolves fixed work through shared planner before prescription" {
+    const exercise = training.Exercise{ .id = try .parse("bench-press") };
+    const planned_slots = [_]planning.problem.Slot{.{
+        .id = try .parse("primary-slot"),
+        .selection = .{ .fixed = exercise.id },
+        .progression = .{
+            .state_id = try .parse("primary-lane"),
+            .method = .{ .double_progression = .{ .config = testDoubleConfig() } },
+        },
+    }};
+    const problem: planning.PlanningProblem = .{
+        .origin = .{
+            .definition_id = try .parse("program"),
+            .definition_version = 1,
+            .definition_fingerprint = "definition-fingerprint",
+            .instance_id = try .parse("instance"),
+            .occurrence_id = try .parse("occurrence"),
+            .block_id = try .parse("block"),
+            .role_id = try .parse("role"),
+            .planning_state_revision = 2,
+            .strategy = .fixed,
+        },
+        .as_of = try .parse("2026-08-10T12:00:00Z"),
+        .catalog = .{ .exercises = &.{exercise} },
+        .slots = &planned_slots,
+    };
+    var workspace = try planning.Workspace.init(std.testing.allocator, problem, .{});
+    defer workspace.deinit();
+
+    const result = try recommendPlannedSession(std.testing.allocator, problem, .{}, &workspace, .{});
+    var recommendation = switch (result) {
+        .resolved => |value| value.prescription,
+        else => return error.TestUnexpectedResult,
+    };
+    defer recommendation.deinit();
+    try std.testing.expectEqual(@as(usize, 1), recommendation.recommendation.exercises.len);
+    try std.testing.expectEqualStrings(
+        "bench-press",
+        recommendation.recommendation.exercises[0].exerciseId,
+    );
+    try std.testing.expectEqualStrings(
+        "primary-lane",
+        recommendation.recommendation.exercises[0].programming.?.stateId,
+    );
 }
 
 test "fixed session rejects duplicate progression state identity" {
