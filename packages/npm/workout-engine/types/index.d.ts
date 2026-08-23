@@ -99,6 +99,30 @@ export interface ProgramRecommendationRequest {
   program: { strategy: ProgramStrategyRef; state?: ProgramStrategyState; exercises: ProgramExerciseSlot[]; trainingContext?: ProgramTrainingContext };
   catalog: Exercise[]; athleteProfile?: AthleteProfile; history?: { workouts?: CompletedWorkout[]; summaries?: JsonValue }; trainingContext?: TrainingContext;
 }
+export type CompositionSlotPresence = "required" | "optional";
+export type CompositionSelection =
+  | { fixed: { exerciseId: string } }
+  | { dynamic: { exerciseIds?: string[]; familyIds?: string[]; muscleIds?: string[]; movementPatternIds?: string[]; equipmentIds?: string[]; excludedExerciseIds?: string[] } };
+export interface CompositionSlot<TConfig = JsonValue> { id: string; presence?: CompositionSlotPresence; selection: CompositionSelection; progression: ProgressionAssignment<TConfig>; priorityTier?: number; beforeSlotIds?: string[]; afterSlotIds?: string[] }
+export interface CompositionIntent { definitionId: string; definitionVersion: number; definitionFingerprint: string; instanceId: string; occurrenceId: string; blockId: string; roleId: string; planningStateRevision: number; strategy?: "fixed" | "adaptive_hypertrophy"; slots: CompositionSlot[] }
+export interface CompositionConstraints { availableEquipmentIds?: string[]; requiredExerciseIds?: string[]; excludedExerciseIds?: string[]; excludedFamilyIds?: string[]; excludedMovementPatternIds?: string[]; excludedRestrictionTagIds?: string[]; excludedEquipmentIds?: string[]; minimumExercises?: number; maximumExercises?: number; availableMinutes?: number; hardMaximumMinutes?: number; targetDurationMinutes?: number; unknownDurationPolicy?: "allow" | "reject" }
+export interface CompositionDurationEstimate { slotId: string; exerciseId: string; minutes: number }
+export interface CompositionRequest { schemaVersion?: 1; asOf: string; intent: CompositionIntent; catalog: Exercise[]; constraints?: CompositionConstraints; durationEstimates?: CompositionDurationEstimate[]; history?: { workouts?: CompletedWorkout[]; summaries?: JsonValue }; preferences?: ExercisePreference[]; musclePriorities?: MusclePriority[]; candidateLimitPerSlot?: number; beamWidth?: number }
+export interface CompositionScore { program: number; training: number; preference: number }
+export interface CompositionAlternative { exerciseId: string; localRank: number; estimatedDurationMinutes?: number; score: CompositionScore; rankedLowerBecause: "lower_score" | "deterministic_tie_break" | "global_assignment_tradeoff" }
+export interface CompositionSelectionMetadata { slotId: string; exerciseId: string; position: number; selectionKind: "fixed" | "optimized"; eligibleCandidateCount?: number; localRank?: number; estimatedDurationMinutes?: number; score: CompositionScore; alternatives?: CompositionAlternative[] }
+export interface CompositionOmission { slotId: string; reason: "optimizer_tradeoff" | "no_eligible_candidate" }
+export interface CompositionDecisionReason { code: string; subjectKind: "session" | "slot" | "exercise" | "selection"; slotId?: string; exerciseId?: string; contribution: CompositionScore }
+export interface CompositionIntentOrigin { definitionId: string; definitionVersion: number; definitionFingerprint: string; instanceId: string; occurrenceId: string; blockId: string; roleId: string; planningStateRevision: number; strategy: "fixed" | "adaptive_hypertrophy" }
+export interface CompositionPlan { problemFingerprint: string; exercises: SessionRecommendation["exercises"]; omittedSlotIds?: string[]; estimatedDurationMinutes?: number; requiredSlotCount: number; targetSlotCount: number; optionalSlotCount: number; composedSlotCount: number; omittedOptionalSlotCount: number; selectionMetadata?: CompositionSelectionMetadata[]; omittedReasons?: CompositionOmission[]; decisionReasons?: CompositionDecisionReason[]; intentOrigin: CompositionIntentOrigin }
+export interface CompositionMetadata { engineVersion: string; schemaVersion: number; composer: ResolvedComponent; inputFingerprint: string; resultFingerprint: string }
+export interface CompositionSuccess { plan: CompositionPlan; recommendation: SessionRecommendation; explanations?: Explanation[]; metadata: CompositionMetadata }
+export type CompositionResult =
+  | { successful: CompositionSuccess }
+  | { constrained: CompositionSuccess }
+  | { unsatisfiable: { problemFingerprint: string; violations: JsonValue[] } }
+  | { invalid: { code: string } }
+  | { searchExhausted: { problemFingerprint: string; exploredStateCount: number } };
 
 export type GoalId = "hypertrophy" | "strength" | "general-fitness" | "muscular-endurance" | "powerlifting-practice" | "limited-equipment" | "maintenance" | (string & {});
 export interface Goal { id: GoalId; weight?: number }
@@ -460,6 +484,7 @@ export interface Program {
 }
 export interface RuntimeFacade {
   recommend(request: RecommendationRequest): RecommendationResult;
+  composeSession(request: CompositionRequest): CompositionResult;
   evaluate(request: EvaluationRequest): EvaluationResult;
   recommendProgram(request: ProgramRecommendationRequest): ProgramRecommendationResult;
   evaluateProgram(request: ProgramEvaluationRequest): ProgramEvaluationResult;
@@ -484,7 +509,9 @@ export interface Caudex {
   readonly runtime: RuntimeFacade;
   createProgram(options: ProgramOptions): Program;
   recommendSession(request: RecommendationRequest): RecommendationResult;
+  composeSession(request: CompositionRequest): CompositionResult;
   evaluatePerformance(request: EvaluationRequest): EvaluationResult;
+  startComposedWorkout(result: CompositionResult, input: { catalog: Exercise[]; scope: { hostScopeKey: string; athleteId?: string }; acceptedRecommendationId?: string }): Promise<ActiveWorkout>;
   recommendProgram(request: ProgramRecommendationRequest): ProgramRecommendationResult;
   evaluateProgram(request: ProgramEvaluationRequest): ProgramEvaluationResult;
   startProgramWorkout(result: ProgramRecommendationResult, input: { catalog: Exercise[]; scope: { hostScopeKey: string; athleteId?: string }; acceptedRecommendationId?: string }): Promise<ActiveWorkout>;

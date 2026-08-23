@@ -10,6 +10,11 @@ const methodology = caudex.methodology;
 const primitives = caudex.primitives;
 const programming = caudex.programming;
 const program_planning = caudex.program_planning;
+const session_composer = caudex.session_composer;
+const planning_model = caudex.planning.problem;
+const planning = caudex.planning;
+const planning_build = caudex.planning.build;
+const program_intent = caudex.programs.intent;
 const rpe_top_set_backoff = caudex.rpe_top_set_backoff;
 const training = caudex.training;
 const tracking = @import("caudex_tracking");
@@ -122,6 +127,7 @@ const Operation = enum {
     listCapabilities,
     exportPortable,
     validatePortableImport,
+    composeSession,
     validateProgramDefinition,
     instantiateProgram,
     resolvePlannedSession,
@@ -159,6 +165,7 @@ fn executeDispatch(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) Exec
         .listCapabilities => executeListCapabilities(runtime, writer.buffered(), out),
         .exportPortable => executePortableExport(runtime, writer.buffered(), out),
         .validatePortableImport => executePortableImportValidation(runtime, writer.buffered(), out),
+        .composeSession => executeComposeSession(runtime, writer.buffered(), out),
         .validateProgramDefinition => executeProgramDefinitionValidation(runtime, writer.buffered(), out),
         .instantiateProgram => executeProgramInstantiation(runtime, writer.buffered(), out),
         .resolvePlannedSession => executePlannedSessionResolution(runtime, writer.buffered(), out),
@@ -334,6 +341,300 @@ fn executePlannedSessionResolution(
             .trainingContext = training_context,
         },
     }, out);
+}
+
+fn executeComposeSession(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) ExecuteError!void {
+    const request = try canonical_json.decodeValue(canonical.CompositionRequest, runtime.allocator(), input, .{ .max_collection_items = 100_000 });
+    defer request.deinit();
+    if (request.value.schemaVersion != 1) return error.UnsupportedVersion;
+    var arena = std.heap.ArenaAllocator.init(runtime.allocator());
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const source = request.value;
+    const intent = source.intent;
+    const slots = allocator.alloc(program_intent.Slot, intent.slots.len) catch return error.OutOfMemory;
+    for (intent.slots, slots) |input_slot, *slot| {
+        const selection: planning_model.Selection = switch (input_slot.selection) {
+            .fixed => |value| .{ .fixed = primitives.Id.parse(value.exerciseId) catch return error.InvalidRequest },
+            .dynamic => |value| .{ .adaptive = .{
+                .universe = if (value.exerciseIds.len != 0 or value.familyIds.len != 0) .{ .allowlist = .{
+                    .exercise_ids = try translateIds(allocator, value.exerciseIds),
+                    .family_ids = try translateIds(allocator, value.familyIds),
+                } } else .catalog,
+                .requirements = .{
+                    .muscles = .{ .ids = try translateIds(allocator, value.muscleIds), .mode = .any },
+                    .movement_patterns = .{ .ids = try translateIds(allocator, value.movementPatternIds), .mode = .any },
+                    .equipment = .{ .ids = try translateIds(allocator, value.equipmentIds), .mode = .any },
+                    .excluded_exercise_ids = try translateIds(allocator, value.excludedExerciseIds),
+                },
+            } },
+        };
+        const before = try translateIds(allocator, input_slot.beforeSlotIds);
+        const after = try translateIds(allocator, input_slot.afterSlotIds);
+        slot.* = .{
+            .id = primitives.Id.parse(input_slot.id) catch return error.InvalidRequest,
+            .presence = @enumFromInt(@intFromEnum(input_slot.presence)),
+            .selection = selection,
+            .progression = .{ .state_id = primitives.Id.parse(input_slot.progression.stateId) catch return error.InvalidRequest, .method = try translateProgression(allocator, input_slot.progression) },
+            .ordering = .{ .priority_tier = input_slot.priorityTier, .before_slot_ids = before, .after_slot_ids = after },
+        };
+    }
+    const catalog = try translateCatalog(allocator, source.catalog);
+    const constraints = source.constraints;
+    const planning_constraints = planning_model.SessionConstraints{
+        .available_equipment_ids = try translateIds(allocator, constraints.availableEquipmentIds),
+        .required_exercise_ids = try translateIds(allocator, constraints.requiredExerciseIds),
+        .excluded_exercise_ids = try translateIds(allocator, constraints.excludedExerciseIds),
+        .excluded_family_ids = try translateIds(allocator, constraints.excludedFamilyIds),
+        .excluded_movement_pattern_ids = try translateIds(allocator, constraints.excludedMovementPatternIds),
+        .excluded_restriction_tag_ids = try translateIds(allocator, constraints.excludedRestrictionTagIds),
+        .excluded_equipment_ids = try translateIds(allocator, constraints.excludedEquipmentIds),
+        .minimum_exercises = constraints.minimumExercises,
+        .maximum_exercises = constraints.maximumExercises,
+        .hard_maximum_minutes = if (constraints.availableMinutes) |available|
+            if (constraints.hardMaximumMinutes) |hard| @min(available, hard) else available
+        else
+            constraints.hardMaximumMinutes,
+        .unknown_duration_policy = @enumFromInt(@intFromEnum(constraints.unknownDurationPolicy)),
+    };
+    const estimates = allocator.alloc(planning_model.DurationEstimate, source.durationEstimates.len) catch return error.OutOfMemory;
+    for (source.durationEstimates, estimates) |input_estimate, *estimate| estimate.* = .{
+        .slot_id = primitives.Id.parse(input_estimate.slotId) catch return error.InvalidRequest,
+        .exercise_id = primitives.Id.parse(input_estimate.exerciseId) catch return error.InvalidRequest,
+        .minutes = input_estimate.minutes,
+    };
+    const intent_domain = program_intent.PlannedSessionIntent{
+        .definition_id = primitives.Id.parse(intent.definitionId) catch return error.InvalidRequest,
+        .definition_version = intent.definitionVersion,
+        .definition_fingerprint = intent.definitionFingerprint,
+        .instance_id = primitives.Id.parse(intent.instanceId) catch return error.InvalidRequest,
+        .occurrence_id = primitives.Id.parse(intent.occurrenceId) catch return error.InvalidRequest,
+        .block_id = primitives.Id.parse(intent.blockId) catch return error.InvalidRequest,
+        .role_id = primitives.Id.parse(intent.roleId) catch return error.InvalidRequest,
+        .planning_state_revision = intent.planningStateRevision,
+        .strategy = @enumFromInt(@intFromEnum(intent.strategy)),
+        .slots = slots,
+    };
+    const preferences = allocator.alloc(planning_build.ExercisePreference, source.preferences.len) catch return error.OutOfMemory;
+    for (source.preferences, preferences) |preference, *translated| translated.* = .{
+        .target = switch (preference.targetKind) {
+            .exercise => .{ .exercise = primitives.Id.parse(preference.targetId) catch return error.InvalidRequest },
+            .exercise_family => .{ .family = primitives.Id.parse(preference.targetId) catch return error.InvalidRequest },
+            else => return error.InvalidRequest,
+        },
+        .direction = if (preference.level == .deprioritized or preference.level == .excluded) .avoid else .prefer,
+        .weight = switch (preference.level) {
+            .required => 200,
+            .preferred, .excluded => 100,
+            .deprioritized => 25,
+        },
+    };
+    const muscle_priorities = allocator.alloc(
+        caudex.programs.hypertrophy.MusclePriority,
+        source.musclePriorities.len,
+    ) catch return error.OutOfMemory;
+    for (source.musclePriorities, muscle_priorities) |priority, *translated| translated.* = .{
+        .muscle_id = primitives.Id.parse(priority.muscleId) catch return error.InvalidRequest,
+        .weight = priority.weight orelse switch (priority.priority) {
+            .emphasize => 100,
+            .balanced => 50,
+            .maintain => 25,
+            .deprioritize => 1,
+        },
+    };
+    const as_of = primitives.Timestamp.parse(source.asOf) catch return error.InvalidRequest;
+    const objective_storage = allocator.alloc(planning_model.Objective, planning.solver.max_objectives) catch return error.OutOfMemory;
+    const duration_storage = allocator.alloc(planning_model.DurationEstimate, planning.solver.max_duration_estimates) catch return error.OutOfMemory;
+    var problem = planning_build.build(intent_domain, .{ .as_of = as_of, .catalog = catalog, .constraints = planning_constraints, .exercise_preferences = preferences, .muscle_priorities = muscle_priorities, .target_duration_minutes = constraints.targetDurationMinutes }, null, .{ .objectives = objective_storage, .duration_estimates = duration_storage }) catch |err| {
+        return encodeOwned(runtime, canonical.CompositionResult{
+            .invalid = .{ .code = @errorName(err) },
+        }, out);
+    };
+    problem.duration_estimates = estimates;
+    const solve_options = planning.SolveOptions{
+        .candidate_limit_per_slot = source.candidateLimitPerSlot,
+        .beam_width = source.beamWidth,
+    };
+    var workspace = planning.Workspace.init(allocator, problem, solve_options) catch |err| {
+        if (err == error.OutOfMemory) return error.OutOfMemory;
+        return encodeOwned(runtime, canonical.CompositionResult{
+            .invalid = .{ .code = @errorName(err) },
+        }, out);
+    };
+    defer workspace.deinit();
+    const history = try translateHistory(allocator, source.history);
+    var result = session_composer.compose(
+        allocator,
+        problem,
+        solve_options,
+        &workspace,
+        history,
+    ) catch return error.OutOfMemory;
+    defer result.deinit();
+    var input_fingerprint: [64]u8 = undefined;
+    fingerprintBytes(
+        "caudex:session-composition-request:v1\x00",
+        input,
+        &input_fingerprint,
+    );
+    switch (result) {
+        .invalid => |failure| return encodeOwned(runtime, canonical.CompositionResult{ .invalid = .{ .code = failure.code } }, out),
+        .unsatisfiable => |failure| {
+            const violations = allocator.alloc(std.json.Value, failure.failure.violations.len) catch return error.OutOfMemory;
+            for (failure.failure.violations, violations) |violation, *wire| wire.* = try valueToJson(allocator, violation);
+            return encodeOwned(runtime, canonical.CompositionResult{ .unsatisfiable = .{ .problemFingerprint = failure.failure.problem_fingerprint, .violations = violations } }, out);
+        },
+        .search_exhausted => |failure| return encodeOwned(runtime, canonical.CompositionResult{ .searchExhausted = .{ .problemFingerprint = failure.failure.problem_fingerprint, .exploredStateCount = failure.failure.explored_state_count } }, out),
+        .successful, .constrained => |*session| {
+            const omitted = allocator.alloc([]const u8, session.plan.omitted_slots.len) catch return error.OutOfMemory;
+            for (session.plan.omitted_slots, omitted) |item, *id| id.* = item.slot_id.bytes;
+            const selection_metadata = allocator.alloc(
+                canonical.CompositionSelectionMetadata,
+                session.plan.slots.len,
+            ) catch return error.OutOfMemory;
+            for (session.plan.slots, selection_metadata) |item, *wire| {
+                const alternatives = allocator.alloc(
+                    canonical.CompositionAlternative,
+                    item.alternatives.len,
+                ) catch return error.OutOfMemory;
+                for (item.alternatives, alternatives) |alternative, *alternative_wire| {
+                    alternative_wire.* = .{
+                        .exerciseId = alternative.exercise_id.bytes,
+                        .localRank = alternative.local_rank,
+                        .estimatedDurationMinutes = alternative.estimated_duration_minutes,
+                        .score = compositionScore(alternative.score),
+                        .rankedLowerBecause = @enumFromInt(@intFromEnum(
+                            alternative.ranked_lower_because,
+                        )),
+                    };
+                }
+                wire.* = .{
+                    .slotId = item.slot_id.bytes,
+                    .exerciseId = item.exercise_id.bytes,
+                    .position = item.position,
+                    .selectionKind = switch (item.selection_source) {
+                        .fixed => .fixed,
+                        .optimized => .optimized,
+                    },
+                    .eligibleCandidateCount = switch (item.selection_source) {
+                        .fixed => null,
+                        .optimized => |source_value| source_value.eligible_candidate_count,
+                    },
+                    .localRank = switch (item.selection_source) {
+                        .fixed => null,
+                        .optimized => |source_value| source_value.local_rank,
+                    },
+                    .estimatedDurationMinutes = item.estimated_duration_minutes,
+                    .score = compositionScore(item.score),
+                    .alternatives = alternatives,
+                };
+            }
+            const omitted_reasons = allocator.alloc(
+                canonical.CompositionOmission,
+                session.plan.omitted_slots.len,
+            ) catch return error.OutOfMemory;
+            for (session.plan.omitted_slots, omitted_reasons) |item, *wire| wire.* = .{
+                .slotId = item.slot_id.bytes,
+                .reason = @enumFromInt(@intFromEnum(item.reason)),
+            };
+            const decision_reasons = allocator.alloc(
+                canonical.CompositionDecisionReason,
+                session.plan.reasons.len,
+            ) catch return error.OutOfMemory;
+            for (session.plan.reasons, decision_reasons) |item, *wire| {
+                wire.* = .{
+                    .code = item.code.stableCode(),
+                    .subjectKind = switch (item.subject) {
+                        .session => .session,
+                        .slot => .slot,
+                        .exercise => .exercise,
+                        .selection => .selection,
+                    },
+                    .slotId = switch (item.subject) {
+                        .slot => |id| id.bytes,
+                        .selection => |subject| subject.slot_id.bytes,
+                        else => null,
+                    },
+                    .exerciseId = switch (item.subject) {
+                        .exercise => |id| id.bytes,
+                        .selection => |subject| subject.exercise_id.bytes,
+                        else => null,
+                    },
+                    .contribution = compositionScore(item.contribution),
+                };
+            }
+            const source_origin = session.plan.origin;
+            const origin = canonical.CompositionIntentOrigin{
+                .definitionId = source_origin.definition_id.bytes,
+                .definitionVersion = source_origin.definition_version,
+                .definitionFingerprint = source_origin.definition_fingerprint,
+                .instanceId = source_origin.instance_id.bytes,
+                .occurrenceId = source_origin.occurrence_id.bytes,
+                .blockId = source_origin.block_id.bytes,
+                .roleId = source_origin.role_id.bytes,
+                .planningStateRevision = source_origin.planning_state_revision,
+                .strategy = @enumFromInt(@intFromEnum(source_origin.strategy)),
+            };
+            const plan = canonical.CompositionPlan{
+                .problemFingerprint = session.plan.problem_fingerprint,
+                .exercises = session.prescription.recommendation.exercises,
+                .omittedSlotIds = omitted,
+                .estimatedDurationMinutes = session.plan.metrics.estimated_duration_minutes,
+                .requiredSlotCount = session.plan.workload.required_slot_count,
+                .targetSlotCount = session.plan.workload.target_slot_count,
+                .optionalSlotCount = session.plan.workload.optional_slot_count,
+                .composedSlotCount = session.plan.workload.composed_slot_count,
+                .omittedOptionalSlotCount = session.plan.workload.omitted_optional_slot_count,
+                .selectionMetadata = selection_metadata,
+                .omittedReasons = omitted_reasons,
+                .decisionReasons = decision_reasons,
+                .intentOrigin = origin,
+            };
+            const result_bytes = std.json.Stringify.valueAlloc(
+                allocator,
+                .{
+                    .plan = plan,
+                    .recommendation = session.prescription.recommendation,
+                    .explanations = session.prescription.explanations,
+                },
+                .{ .emit_null_optional_fields = false },
+            ) catch return error.OutOfMemory;
+            var result_fingerprint: [64]u8 = undefined;
+            fingerprintBytes(
+                "caudex:session-composition-result:v1\x00",
+                result_bytes,
+                &result_fingerprint,
+            );
+            const success = canonical.CompositionSuccess{
+                .plan = plan,
+                .recommendation = session.prescription.recommendation,
+                .explanations = session.prescription.explanations,
+                .metadata = .{
+                    .engineVersion = engine.engine_version,
+                    .composer = .{
+                        .id = planning_model.planner_id,
+                        .version = "1",
+                        .configVersion = planning_model.schema_version,
+                    },
+                    .inputFingerprint = &input_fingerprint,
+                    .resultFingerprint = &result_fingerprint,
+                },
+            };
+            return encodeOwned(runtime, switch (result) {
+                .successful => canonical.CompositionResult{ .successful = success },
+                .constrained => canonical.CompositionResult{ .constrained = success },
+                else => unreachable,
+            }, out);
+        },
+    }
+}
+
+fn compositionScore(score: planning_model.ScoreVector) canonical.CompositionScore {
+    return .{
+        .program = score.program,
+        .training = score.training,
+        .preference = score.preference,
+    };
 }
 
 fn executeProgramAdvancement(

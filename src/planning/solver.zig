@@ -5,6 +5,7 @@ const std = @import("std");
 const primitives = @import("../primitives.zig");
 const training = @import("../training.zig");
 const exercise_knowledge = @import("../exercise_knowledge.zig");
+const exercise_selection = @import("../exercise_selection.zig");
 const progression = @import("../progression/root.zig");
 const model = @import("problem.zig");
 
@@ -55,6 +56,7 @@ pub const Workspace = struct {
     current: []?usize,
     best: []?usize,
     resolved_slots: []model.ResolvedSlot,
+    alternatives: []model.CandidateAlternative,
     omitted_slots: []model.OmittedSlot,
     reasons: []model.DecisionReason,
     reason_refs: []u16,
@@ -93,6 +95,8 @@ pub const Workspace = struct {
         errdefer allocator.free(result.best);
         result.resolved_slots = try allocator.alloc(model.ResolvedSlot, problem.slots.len);
         errdefer allocator.free(result.resolved_slots);
+        result.alternatives = try allocator.alloc(model.CandidateAlternative, candidate_capacity);
+        errdefer allocator.free(result.alternatives);
         result.omitted_slots = try allocator.alloc(model.OmittedSlot, problem.slots.len);
         errdefer allocator.free(result.omitted_slots);
         result.reasons = try allocator.alloc(model.DecisionReason, problem.slots.len + 1);
@@ -122,6 +126,7 @@ pub const Workspace = struct {
         self.allocator.free(self.current);
         self.allocator.free(self.best);
         self.allocator.free(self.resolved_slots);
+        self.allocator.free(self.alternatives);
         self.allocator.free(self.omitted_slots);
         self.allocator.free(self.reasons);
         self.allocator.free(self.reason_refs);
@@ -143,6 +148,7 @@ pub const FixedWorkspace = struct {
     current: [max_slots]?usize = undefined,
     best: [max_slots]?usize = undefined,
     resolved_slots: [max_slots]model.ResolvedSlot = undefined,
+    alternatives: [max_slots * max_retained_candidates_per_slot]model.CandidateAlternative = undefined,
     omitted_slots: [max_slots]model.OmittedSlot = undefined,
     reasons: [max_slots + 1]model.DecisionReason = undefined,
     reason_refs: [max_slots]u16 = undefined,
@@ -172,6 +178,7 @@ pub const FixedWorkspace = struct {
             .current = self.current[0..problem.slots.len],
             .best = self.best[0..problem.slots.len],
             .resolved_slots = self.resolved_slots[0..problem.slots.len],
+            .alternatives = self.alternatives[0..candidate_count],
             .omitted_slots = self.omitted_slots[0..problem.slots.len],
             .reasons = self.reasons[0 .. problem.slots.len + 1],
             .reason_refs = self.reason_refs[0..problem.slots.len],
@@ -394,6 +401,7 @@ fn workspaceFits(workspace: *Workspace, problem: model.PlanningProblem, options:
         workspace.candidates.len >= candidates and workspace.digits.len >= slots and
         workspace.current.len >= slots and workspace.best.len >= slots and
         workspace.resolved_slots.len >= slots and workspace.omitted_slots.len >= slots and
+        workspace.alternatives.len >= candidates and
         workspace.reasons.len >= slots + 1 and workspace.reason_refs.len >= slots and
         workspace.order_indices.len >= slots and workspace.in_degrees.len >= slots and
         workspace.violations.len >= slots + max_constraint_ids + 4;
@@ -512,14 +520,16 @@ fn candidateEligible(problem: model.PlanningProblem, slot: model.Slot, exercise:
     if (containsId(constraints.excluded_exercise_ids, exercise.id) or
         hasAnyFamily(exercise, constraints.excluded_family_ids) or
         hasAnyMovement(exercise, constraints.excluded_movement_pattern_ids) or
-        hasAnyRestriction(exercise, constraints.excluded_restriction_tag_ids) or
-        hasAnyEquipment(exercise, constraints.excluded_equipment_ids) or
-        !exercise_knowledge.requiredEquipmentSatisfied(exercise, constraints.available_equipment_ids))
+        hasAnyEquipment(exercise, constraints.excluded_equipment_ids))
         return false;
-    if (exercise_knowledge.progressionCompatibility(
-        exercise,
-        slot.progression.method.requirement(),
-    ) == .incompatible) return false;
+    // The standalone selector owns shared exercise-local hard eligibility;
+    // the planner adds slot-universe and whole-session constraints around it.
+    if (exercise_selection.eligibility(exercise, .{
+        .progression_requirement = slot.progression.method.requirement(),
+    }, .{
+        .available_equipment_ids = constraints.available_equipment_ids,
+        .excluded_restriction_ids = constraints.excluded_restriction_tag_ids,
+    }) != null) return false;
     if (durationFor(problem, slot.id, exercise.id) == null and
         constraints.unknown_duration_policy == .reject) return false;
     return true;
@@ -755,6 +765,12 @@ fn assignmentScore(
         const candidate = candidates[candidate_index];
         count += 1;
         try addVector(&score, candidate.local_score);
+        if (slot.presence == .optional) {
+            // Lower tiers order earlier and represent higher program priority.
+            // Rewarding retained optional slots in the program score ensures
+            // hard-budget reductions keep the most important coherent work.
+            try addScore(&score.program, @as(u64, 256) - slot.ordering.priority_tier);
+        }
         const exercise = problem.catalog.exercises[candidate.exercise_index];
         if (durationFor(problem, slot.id, exercise.id)) |minutes|
             duration = std.math.add(u32, duration, minutes) catch return error.ScoreOverflow
@@ -984,9 +1000,11 @@ fn buildResolvedPlan(
     }
     var reason_count: usize = 0;
     var reason_ref_count: usize = 0;
+    var alternative_count: usize = 0;
     for (workspace.order_indices[0..selected_count], 0..) |slot_index, position| {
         const slot = problem.slots[slot_index];
-        const candidate = workspace.candidates[workspace.best[slot_index].?];
+        const selected_candidate_index = workspace.best[slot_index].?;
+        const candidate = workspace.candidates[selected_candidate_index];
         const exercise = problem.catalog.exercises[candidate.exercise_index];
         workspace.reasons[reason_count] = .{
             .code = if (slot.selection == .fixed) .fixed_exercise_selected else .optimized_exercise_selected,
@@ -994,6 +1012,27 @@ fn buildResolvedPlan(
             .contribution = candidate.local_score,
         };
         workspace.reason_refs[reason_ref_count] = @intCast(reason_count);
+        const alternatives_start = alternative_count;
+        const range = workspace.ranges[slot_index];
+        for (workspace.candidates[range.offset .. range.offset + range.retained_count], range.offset..) |alternative, candidate_index| {
+            if (candidate_index == selected_candidate_index) continue;
+            const alternative_exercise = problem.catalog.exercises[alternative.exercise_index];
+            workspace.alternatives[alternative_count] = .{
+                .exercise_id = alternative_exercise.id,
+                .local_rank = alternative.local_rank,
+                .estimated_duration_minutes = durationFor(problem, slot.id, alternative_exercise.id),
+                .score = alternative.local_score,
+                .ranked_lower_because = switch (model.ScoreVector.order(
+                    alternative.local_score,
+                    candidate.local_score,
+                )) {
+                    .lt => .lower_score,
+                    .eq => .deterministic_tie_break,
+                    .gt => .global_assignment_tradeoff,
+                },
+            };
+            alternative_count += 1;
+        }
         workspace.resolved_slots[position] = .{
             .slot_id = slot.id,
             .exercise_id = exercise.id,
@@ -1009,6 +1048,7 @@ fn buildResolvedPlan(
             .estimated_duration_minutes = durationFor(problem, slot.id, exercise.id),
             .score = candidate.local_score,
             .reason_refs = workspace.reason_refs[reason_ref_count .. reason_ref_count + 1],
+            .alternatives = workspace.alternatives[alternatives_start..alternative_count],
         };
         reason_count += 1;
         reason_ref_count += 1;
@@ -1042,6 +1082,10 @@ fn buildResolvedPlan(
         workspace.best,
         workspace.order_indices[0..selected_count],
     );
+    var required_slot_count: usize = 0;
+    for (problem.slots) |slot| if (slot.presence == .required) {
+        required_slot_count += 1;
+    };
     return .{
         .origin = problem.origin,
         .planner = provenance(options, explored),
@@ -1050,6 +1094,13 @@ fn buildResolvedPlan(
         .omitted_slots = workspace.omitted_slots[0..omitted_count],
         .score = score,
         .metrics = metrics,
+        .workload = .{
+            .required_slot_count = @intCast(required_slot_count),
+            .target_slot_count = @intCast(problem.slots.len),
+            .optional_slot_count = @intCast(problem.slots.len - required_slot_count),
+            .composed_slot_count = @intCast(selected_count),
+            .omitted_optional_slot_count = @intCast(omitted_count),
+        },
         .reasons = workspace.reasons[0..reason_count],
     };
 }
@@ -1442,6 +1493,11 @@ test "fixed and adaptive slots share the planner and preserve lanes" {
     try std.testing.expectEqual(@as(usize, 2), plan.slots.len);
     try std.testing.expectEqual(model.SelectionSource.fixed, plan.slots[0].selection_source);
     try std.testing.expectEqualStrings("primary-lane", plan.slots[0].progression.state_id.bytes);
+    try std.testing.expectEqual(@as(u8, 2), plan.workload.required_slot_count);
+    try std.testing.expectEqual(@as(u8, 2), plan.workload.target_slot_count);
+    try std.testing.expectEqual(@as(u8, 2), plan.workload.composed_slot_count);
+    try std.testing.expectEqual(@as(usize, 1), plan.slots[1].alternatives.len);
+    try std.testing.expectEqualStrings("goblet-squat", plan.slots[1].alternatives[0].exercise_id.bytes);
     try validateResolvedPlan(problem, plan);
 }
 
@@ -1463,6 +1519,7 @@ test "global search avoids the locally preferred greedy dead end" {
     const plan = (try solve(problem, .{ .beam_width = 16 }, &workspace)).resolved;
     try std.testing.expectEqualStrings("b", findResolved(plan.slots, testId("flex")).?.exercise_id.bytes);
     try std.testing.expectEqualStrings("a", findResolved(plan.slots, testId("fixed")).?.exercise_id.bytes);
+    try std.testing.expectEqual(@as(usize, 1), findResolved(plan.slots, testId("flex")).?.alternatives.len);
 }
 
 test "optional work is explicitly omitted to satisfy hard duration" {
@@ -1483,6 +1540,9 @@ test "optional work is explicitly omitted to satisfy hard duration" {
     const plan = (try solve(problem, .{}, &workspace)).resolved;
     try std.testing.expectEqual(@as(usize, 1), plan.slots.len);
     try std.testing.expectEqualStrings("accessory-slot", plan.omitted_slots[0].slot_id.bytes);
+    try std.testing.expectEqual(@as(u8, 1), plan.workload.required_slot_count);
+    try std.testing.expectEqual(@as(u8, 2), plan.workload.target_slot_count);
+    try std.testing.expectEqual(@as(u8, 1), plan.workload.omitted_optional_slot_count);
     try validateResolvedPlan(problem, plan);
 }
 

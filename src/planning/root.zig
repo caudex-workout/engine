@@ -5,6 +5,7 @@
 
 pub const problem = @import("problem.zig");
 pub const solver = @import("solver.zig");
+pub const build = @import("build.zig");
 
 pub const PlanningProblem = problem.PlanningProblem;
 pub const SolveOptions = problem.SolveOptions;
@@ -19,4 +20,5 @@ pub const validateResolvedPlan = solver.validateResolvedPlan;
 test {
     _ = problem;
     _ = solver;
+    _ = build;
 }

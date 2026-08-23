@@ -5,7 +5,7 @@ const assets = @import("repository_test_assets");
 test "public root exports are intentional" {
     const declarations = std.meta.declarations(caudex);
 
-    try std.testing.expectEqual(@as(usize, 22), declarations.len);
+    try std.testing.expectEqual(@as(usize, 24), declarations.len);
     try std.testing.expectEqualStrings("canonical", declarations[0].name);
     try std.testing.expectEqualStrings("canonical_json", declarations[1].name);
     try std.testing.expectEqualStrings("athlete_profile", declarations[2].name);
@@ -15,29 +15,32 @@ test "public root exports are intentional" {
     try std.testing.expectEqualStrings("duration", declarations[6].name);
     try std.testing.expectEqualStrings("engine", declarations[7].name);
     try std.testing.expectEqualStrings("exercise_knowledge", declarations[8].name);
-    try std.testing.expectEqualStrings("filtering", declarations[9].name);
-    try std.testing.expectEqualStrings("history", declarations[10].name);
-    try std.testing.expectEqualStrings("load_math", declarations[11].name);
-    try std.testing.expectEqualStrings("methodology", declarations[12].name);
-    try std.testing.expectEqualStrings("ordering", declarations[13].name);
-    try std.testing.expectEqualStrings("planning", declarations[14].name);
-    try std.testing.expectEqualStrings("primitives", declarations[15].name);
-    try std.testing.expectEqualStrings("programming", declarations[16].name);
-    try std.testing.expectEqualStrings("program_planning", declarations[17].name);
-    try std.testing.expectEqualStrings("rpe_top_set_backoff", declarations[18].name);
-    try std.testing.expectEqualStrings("training", declarations[19].name);
-    try std.testing.expectEqualStrings("progression", declarations[20].name);
-    try std.testing.expectEqualStrings("programs", declarations[21].name);
+    try std.testing.expectEqualStrings("exercise_selection", declarations[9].name);
+    try std.testing.expectEqualStrings("filtering", declarations[10].name);
+    try std.testing.expectEqualStrings("history", declarations[11].name);
+    try std.testing.expectEqualStrings("load_math", declarations[12].name);
+    try std.testing.expectEqualStrings("methodology", declarations[13].name);
+    try std.testing.expectEqualStrings("ordering", declarations[14].name);
+    try std.testing.expectEqualStrings("planning", declarations[15].name);
+    try std.testing.expectEqualStrings("primitives", declarations[16].name);
+    try std.testing.expectEqualStrings("programming", declarations[17].name);
+    try std.testing.expectEqualStrings("program_planning", declarations[18].name);
+    try std.testing.expectEqualStrings("session_composer", declarations[19].name);
+    try std.testing.expectEqualStrings("rpe_top_set_backoff", declarations[20].name);
+    try std.testing.expectEqualStrings("training", declarations[21].name);
+    try std.testing.expectEqualStrings("progression", declarations[22].name);
+    try std.testing.expectEqualStrings("programs", declarations[23].name);
 }
 
 test "core source has no forbidden effect or dependency imports" {
     const sources = .{
-        assets.src_root,                 assets.src_athlete_profile,     assets.src_canonical,           assets.src_canonical_json,   assets.src_diagnostics,
-        assets.src_discovery,            assets.src_double_progression,  assets.src_duration,            assets.src_engine,           assets.src_exercise_knowledge,
-        assets.src_filtering,            assets.src_history,             assets.src_load_math,           assets.src_methodology,      assets.src_ordering,
-        assets.src_primitives,           assets.src_program_planning,    assets.src_rpe_top_set_backoff, assets.src_training,         assets.src_planning_root,
-        assets.src_planning_problem,     assets.src_planning_build,      assets.src_planning_solver,     assets.src_programs_root,    assets.src_programs_intent,
-        assets.src_programs_hypertrophy, assets.src_programs_definition, assets.src_programs_lifecycle,  assets.src_progression_root,
+        assets.src_root,               assets.src_athlete_profile,    assets.src_canonical,            assets.src_canonical_json,      assets.src_diagnostics,
+        assets.src_discovery,          assets.src_double_progression, assets.src_duration,             assets.src_engine,              assets.src_exercise_knowledge,
+        assets.src_exercise_selection, assets.src_filtering,          assets.src_history,              assets.src_load_math,           assets.src_methodology,
+        assets.src_ordering,           assets.src_primitives,         assets.src_program_planning,     assets.src_session_composer,    assets.src_rpe_top_set_backoff,
+        assets.src_training,           assets.src_planning_root,      assets.src_planning_problem,     assets.src_planning_build,      assets.src_planning_solver,
+        assets.src_programs_root,      assets.src_programs_intent,    assets.src_programs_hypertrophy, assets.src_programs_definition, assets.src_programs_lifecycle,
+        assets.src_progression_root,
     };
     const forbidden = .{
         "std.fs",

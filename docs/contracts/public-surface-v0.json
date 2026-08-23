@@ -13,6 +13,7 @@
       "duration",
       "engine",
       "exercise_knowledge",
+      "exercise_selection",
       "filtering",
       "history",
       "load_math",
@@ -25,6 +26,7 @@
       "programs",
       "progression",
       "rpe_top_set_backoff",
+      "session_composer",
       "training"
     ]
   },

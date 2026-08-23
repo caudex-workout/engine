@@ -89,13 +89,79 @@ const initialRequest = {
   },
   history: { workouts: [] },
   trainingContext: {
-    locationId: "home",
+    locationId: "gym",
     availableMinutes: 35,
-    equipment: { removals: ["pull-up-bar"] },
+    equipment: { removals: ["cable-stack"] },
     restrictions: [{ id: "today-no-overhead", targetKind: "movement_pattern", targetId: "overhead-push" }],
     maxExercises: 4,
   },
   alternativeLimit: 1,
+};
+
+// A complete-session request exercises the canonical composer independently
+// from the single-methodology editor above. Temporary time/equipment changes
+// stay in constraints and do not mutate the program intent.
+const compositionRequest = {
+  schemaVersion: 1,
+  asOf: initialRequest.asOf,
+  intent: {
+    definitionId: "browser:upper",
+    definitionVersion: 1,
+    definitionFingerprint: "browser-fixture",
+    instanceId: "browser:instance",
+    occurrenceId: "browser:occurrence",
+    blockId: "browser:block",
+    roleId: "upper",
+    planningStateRevision: 1,
+    strategy: "fixed",
+    slots: [
+      ["press-focus", ["bench-press"], "rpe-top-set-backoff", "required", 0, true],
+      ["press-accessory", ["flat-dumbbell-press", "incline-dumbbell-press", "machine-chest-press"], "double-progression", "required", 1],
+      ["row", ["chest-supported-row", "one-arm-dumbbell-row", "seated-cable-row"], "double-progression", "required", 1],
+      ["lateral-raise", ["cable-lateral-raise", "dumbbell-lateral-raise"], "double-progression", "optional", 2],
+    ].map(([slotId, exerciseIds, method, presence, priorityTier, fixed], index) => ({
+      id: `slot-${index + 1}:${slotId}`,
+      presence,
+      selection: fixed
+        ? { fixed: { exerciseId: exerciseIds[0] } }
+        : { dynamic: { exerciseIds } },
+      progression: {
+        stateId: `browser:${slotId}:state`,
+        methodology: method === "rpe-top-set-backoff"
+          ? methodologyReferences["rpe-top-set-backoff"]()
+          : methodologyReferences["double-progression"](),
+      },
+      priorityTier,
+    })),
+  },
+  catalog: [
+    { id: "bench-press", name: "Bench Press", equipmentIds: ["barbell", "adjustable-bench"] },
+    { id: "incline-dumbbell-press", name: "Incline Dumbbell Press", equipmentIds: ["dumbbell", "adjustable-bench"] },
+    { id: "flat-dumbbell-press", name: "Flat Dumbbell Press", equipmentIds: ["dumbbell", "adjustable-bench"] },
+    { id: "machine-chest-press", name: "Machine Chest Press", equipmentIds: ["chest-press-machine"] },
+    { id: "chest-supported-row", name: "Chest-Supported Row", equipmentIds: ["dumbbell", "adjustable-bench"] },
+    { id: "one-arm-dumbbell-row", name: "One-Arm Dumbbell Row", equipmentIds: ["dumbbell", "adjustable-bench"] },
+    { id: "seated-cable-row", name: "Seated Cable Row", equipmentIds: ["cable-stack"] },
+    { id: "cable-lateral-raise", name: "Cable Lateral Raise", equipmentIds: ["cable-stack"] },
+    { id: "dumbbell-lateral-raise", name: "Dumbbell Lateral Raise", equipmentIds: ["dumbbell"] },
+  ],
+  constraints: {
+    availableEquipmentIds: ["barbell", "dumbbell", "adjustable-bench", "cable-stack", "chest-press-machine"],
+    hardMaximumMinutes: 45,
+    targetDurationMinutes: 43,
+    maximumExercises: 4,
+  },
+  durationEstimates: [
+    { slotId: "slot-1:press-focus", exerciseId: "bench-press", minutes: 14 },
+    { slotId: "slot-2:press-accessory", exerciseId: "incline-dumbbell-press", minutes: 10 },
+    { slotId: "slot-2:press-accessory", exerciseId: "flat-dumbbell-press", minutes: 10 },
+    { slotId: "slot-2:press-accessory", exerciseId: "machine-chest-press", minutes: 9 },
+    { slotId: "slot-3:row", exerciseId: "chest-supported-row", minutes: 10 },
+    { slotId: "slot-3:row", exerciseId: "one-arm-dumbbell-row", minutes: 10 },
+    { slotId: "slot-3:row", exerciseId: "seated-cable-row", minutes: 10 },
+    { slotId: "slot-4:lateral-raise", exerciseId: "cable-lateral-raise", minutes: 7 },
+    { slotId: "slot-4:lateral-raise", exerciseId: "dumbbell-lateral-raise", minutes: 6 },
+  ],
 };
 
 elements["request-editor"].value = formatJson(initialRequest);
@@ -238,11 +304,53 @@ function runRecommendation() {
       return;
     }
     renderRecommendation(result);
+    renderCompositionDemo();
     document.body.dataset.status = "passed";
     setActionStatus("Recommendation calculated locally.");
   } catch (error) {
     renderFailure(error);
   }
+}
+
+function renderCompositionDemo() {
+  const edited = JSON.parse(elements["request-editor"].value);
+  const today = edited.trainingContext ?? {};
+  const location = edited.athleteProfile?.locations?.find((item) => item.id === today.locationId);
+  const equipment = new Set(today.equipment?.override ?? location?.equipment?.map((item) => item.equipmentId) ?? []);
+  for (const id of today.equipment?.additions ?? []) equipment.add(id);
+  for (const id of today.equipment?.removals ?? []) equipment.delete(id);
+  const result = caudex.composeSession({
+    ...compositionRequest,
+    constraints: {
+      ...compositionRequest.constraints,
+      availableMinutes: today.availableMinutes,
+      availableEquipmentIds: [...equipment],
+      excludedExerciseIds: today.excludedExerciseIds,
+      maximumExercises: today.maxExercises,
+    },
+    preferences: today.preferences,
+  });
+  const recommendation = JSON.parse(elements.output.textContent);
+  elements.output.textContent = formatJson({ ...recommendation, composition: result });
+  const outcome = result.successful ?? result.constrained;
+  if (!outcome) {
+    setActionStatus(`Session composition returned ${Object.keys(result)[0]}.`, true);
+    return;
+  }
+  const exercises = outcome.recommendation.exercises ?? [];
+  const alternativeCount = (outcome.plan.selectionMetadata ?? [])
+    .reduce((count, slot) => count + (slot.alternatives?.length ?? 0), 0);
+  const omitted = (outcome.plan.omittedReasons ?? [])
+    .map((item) => `${item.slotId}: ${item.reason}`);
+  elements["result-summary"].replaceChildren(
+    element("p", `${Object.hasOwn(result, "constrained") ? "Constrained" : "Complete"} session · ${outcome.plan.estimatedDurationMinutes ?? "unknown"} min estimate`),
+    ...exercises.map((exercise) => element("div", displayName(exercise.exerciseId), "exercise-name")),
+    element("p", `${alternativeCount} viable slot alternatives · ${outcome.plan.decisionReasons?.length ?? 0} structured planning reasons`),
+    ...omitted.map((reason) => element("p", `Omitted ${reason}`)),
+    metricList(exercises.flatMap((exercise) => exercise.sets.flatMap((set) => set.targetMetrics ?? []))),
+  );
+  renderExplanations(outcome.explanations ?? []);
+  setActionStatus("Complete multi-exercise session composed locally.");
 }
 
 function renderRecommendation(result) {

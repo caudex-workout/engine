@@ -183,6 +183,23 @@ pub const SelectionSource = union(enum) {
     },
 };
 
+/// A bounded slot-local alternative from the same selector pass. Alternatives
+/// are not independently composed sessions and therefore cannot imply that a
+/// globally different assignment would retain the same aggregate score.
+pub const CandidateAlternative = struct {
+    pub const RankReason = enum {
+        lower_score,
+        deterministic_tie_break,
+        global_assignment_tradeoff,
+    };
+
+    exercise_id: Id,
+    local_rank: u16,
+    estimated_duration_minutes: ?u16,
+    score: ScoreVector,
+    ranked_lower_because: RankReason,
+};
+
 pub const ResolvedSlot = struct {
     slot_id: Id,
     exercise_id: Id,
@@ -192,6 +209,7 @@ pub const ResolvedSlot = struct {
     estimated_duration_minutes: ?u16,
     score: ScoreVector,
     reason_refs: []const u16,
+    alternatives: []const CandidateAlternative,
 };
 
 pub const OmissionReason = enum { optimizer_tradeoff, no_eligible_candidate };
@@ -208,6 +226,17 @@ pub const PlanMetrics = struct {
     equipment_transition_count: u8,
 };
 
+/// Slot-count workload preserves the distinction between what the program
+/// requested and what today's constrained plan retained. Exercise-local set
+/// and load decisions remain owned by progression methods.
+pub const WorkloadSummary = struct {
+    required_slot_count: u8,
+    target_slot_count: u8,
+    optional_slot_count: u8,
+    composed_slot_count: u8,
+    omitted_optional_slot_count: u8,
+};
+
 pub const ResolvedSessionPlan = struct {
     schema_version: u32 = schema_version,
     origin: Origin,
@@ -217,6 +246,7 @@ pub const ResolvedSessionPlan = struct {
     omitted_slots: []const OmittedSlot,
     score: ScoreVector,
     metrics: PlanMetrics,
+    workload: WorkloadSummary,
     reasons: []const DecisionReason,
 };
 

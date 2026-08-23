@@ -17,6 +17,7 @@ import {
   type JsonValue,
   type Exercise,
   type ProgramRecommendationRequest,
+  type CompositionRequest,
 } from "../packages/npm/workout-engine/src/index.ts";
 
 const [wasmPath, fixturePath, portableFixturePath] = process.argv.slice(2);
@@ -326,6 +327,59 @@ const rpeConfig = {
   exertionPolicy: { tolerance: "0.5", onOvershoot: "decrease_estimate", onUndershoot: "increase_estimate", estimateAdjustmentPercentage: "2.5" },
   estimationFormula: "epley",
 } satisfies JsonValue;
+const compositionRequest: CompositionRequest = {
+  asOf: request.asOf,
+  intent: {
+    definitionId: "upper-program", definitionVersion: 1, definitionFingerprint: "upper-v1",
+    instanceId: "upper-instance", occurrenceId: "upper-occurrence", blockId: "main", roleId: "upper",
+    planningStateRevision: 3, strategy: "adaptive_hypertrophy",
+    slots: [
+      { id: "bench", selection: { fixed: { exerciseId: "bench-press" } }, progression: { stateId: "bench-lane", methodology: { id: "caudex.rpe-top-set-backoff", configVersion: 1, config: rpeConfig } } },
+      { id: "press", selection: { dynamic: { exerciseIds: ["incline-dumbbell-press", "machine-press"] } }, progression: { stateId: "press-lane", methodology: { id: "caudex.double-progression", configVersion: 1, config: doubleConfig } } },
+      { id: "row", selection: { dynamic: { exerciseIds: ["chest-supported-row", "cable-row"] } }, progression: { stateId: "row-lane", methodology: { id: "caudex.double-progression", configVersion: 1, config: doubleConfig } } },
+      { id: "delts", presence: "optional", priorityTier: 2, selection: { dynamic: { exerciseIds: ["cable-lateral-raise", "dumbbell-lateral-raise"] } }, progression: { stateId: "delts-lane", methodology: { id: "caudex.double-progression", configVersion: 1, config: doubleConfig } } },
+    ],
+  },
+  catalog: [
+    { id: "bench-press", equipmentIds: ["barbell", "bench"] },
+    { id: "incline-dumbbell-press", equipmentIds: ["dumbbell", "bench"] },
+    { id: "machine-press", equipmentIds: ["machine"] },
+    { id: "chest-supported-row", equipmentIds: ["dumbbell", "bench"] },
+    { id: "cable-row", equipmentIds: ["cable"] },
+    { id: "cable-lateral-raise", equipmentIds: ["cable"] },
+    { id: "dumbbell-lateral-raise", equipmentIds: ["dumbbell"] },
+  ],
+  constraints: { availableEquipmentIds: ["barbell", "bench", "dumbbell", "cable", "machine"], hardMaximumMinutes: 45 },
+  durationEstimates: [
+    ["bench", "bench-press", 14], ["press", "incline-dumbbell-press", 11], ["press", "machine-press", 9],
+    ["row", "chest-supported-row", 11], ["row", "cable-row", 10], ["delts", "cable-lateral-raise", 7],
+    ["delts", "dumbbell-lateral-raise", 6],
+  ].map(([slotId, exerciseId, minutes]) => ({ slotId: String(slotId), exerciseId: String(exerciseId), minutes: Number(minutes) })),
+};
+const composed = caudex.composeSession(compositionRequest);
+const completeComposition = "successful" in composed ? composed.successful : null;
+if (!completeComposition || completeComposition.recommendation.exercises.length !== 4 ||
+    !completeComposition.plan.selectionMetadata?.some((slot) => (slot.alternatives?.length ?? 0) > 0)) {
+  throw new Error("complete composition did not retain mixed prescriptions and bounded alternatives");
+}
+const activeComposition = await caudex.startComposedWorkout(composed, {
+  catalog: compositionRequest.catalog,
+  scope: { hostScopeKey: "scope-composition" },
+  acceptedRecommendationId: "accepted-composition",
+});
+if (activeComposition.workout.exercises?.length !== 4) {
+  throw new Error("composed recommendation did not enter the active-workout lifecycle");
+}
+const replayedComposition = caudex.runtime.composeSession(structuredClone(compositionRequest));
+if (JSON.stringify(replayedComposition) !== JSON.stringify(composed)) throw new Error("composition was not deterministic across public aliases");
+const shortComposition = caudex.composeSession({ ...compositionRequest, constraints: { ...compositionRequest.constraints, hardMaximumMinutes: 36 } });
+if (!("constrained" in shortComposition) || shortComposition.constrained.plan.omittedOptionalSlotCount !== 1) {
+  throw new Error("short session did not explicitly reduce optional workload");
+}
+const unavailableRequired = caudex.composeSession({ ...compositionRequest, constraints: { ...compositionRequest.constraints, excludedExerciseIds: ["bench-press"] } });
+if (!("unsatisfiable" in unavailableRequired) || unavailableRequired.unsatisfiable.violations.length === 0) {
+  throw new Error("unavailable required exercise did not produce a structured hard conflict");
+}
 const mixedRequest: ProgramRecommendationRequest = {
   schemaVersion: 1,
   asOf: request.asOf,

@@ -86,6 +86,7 @@ missing exports, and runtime creation failures throw
 initialization that prevent safe execution throw `CaudexRuntimeError`.
 
 The deterministic low-level `Caudex` value exposes `recommendSession()`,
+`composeSession()`,
 `evaluatePerformance()`, `applyTrackingCommand()`, `applyTrackingBatch()`,
 `instantiateRecommendation()`, `instantiateTemplate()`,
 `completeForEvaluation()`, `exportPortable()`, `validatePortableImport()`, and
@@ -97,6 +98,15 @@ command IDs, revisions, and timestamps. Accepted and rejected command results
 both return the appropriate resulting snapshot, while transport failures throw
 `CaudexRuntimeError`. Linear-memory addresses, allocation functions, result
 descriptors, and runtime handles remain private to the loader.
+
+`composeSession()` accepts a resolved multi-slot program intent, catalog,
+history, and today's temporary equipment and duration constraints. Its tagged
+result distinguishes `successful`, `constrained`, `unsatisfiable`, `invalid`,
+and `searchExhausted` outcomes. Successful results retain per-slot alternatives,
+omitted-work reasons, workload counts, planner provenance, and the complete
+mixed-progression recommendation.
+Pass either successful variant to `startComposedWorkout()` to instantiate the
+complete recommendation through the ordinary active-workout lifecycle.
 
 The v0.1 npm evaluation boundary supports double progression. Requests for
 other methodology implementations return the same structured unsupported

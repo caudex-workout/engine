@@ -653,6 +653,155 @@ pub const ProgramRecommendationRequest = struct {
     trainingContext: TrainingContext = .{},
 };
 
+/// Explicit, replayable input to the bounded whole-session planner.  This is
+/// intentionally a data-only boundary; hosts may construct it from a
+/// resolved program occurrence without exposing planner implementation types.
+pub const CompositionSlot = struct {
+    id: []const u8,
+    presence: enum { required, optional } = .required,
+    selection: union(enum) {
+        fixed: struct { exerciseId: []const u8 },
+        dynamic: struct {
+            exerciseIds: []const []const u8 = &.{},
+            familyIds: []const []const u8 = &.{},
+            muscleIds: []const []const u8 = &.{},
+            movementPatternIds: []const []const u8 = &.{},
+            equipmentIds: []const []const u8 = &.{},
+            excludedExerciseIds: []const []const u8 = &.{},
+        },
+    },
+    progression: ProgressionAssignment,
+    priorityTier: u8 = 0,
+    beforeSlotIds: []const []const u8 = &.{},
+    afterSlotIds: []const []const u8 = &.{},
+};
+
+pub const CompositionIntent = struct {
+    definitionId: []const u8,
+    definitionVersion: u32,
+    definitionFingerprint: []const u8,
+    instanceId: []const u8,
+    occurrenceId: []const u8,
+    blockId: []const u8,
+    roleId: []const u8,
+    planningStateRevision: u64,
+    strategy: enum { fixed, adaptive_hypertrophy } = .fixed,
+    slots: []const CompositionSlot,
+};
+
+pub const CompositionConstraints = struct {
+    availableEquipmentIds: []const []const u8 = &.{},
+    requiredExerciseIds: []const []const u8 = &.{},
+    excludedExerciseIds: []const []const u8 = &.{},
+    excludedFamilyIds: []const []const u8 = &.{},
+    excludedMovementPatternIds: []const []const u8 = &.{},
+    excludedRestrictionTagIds: []const []const u8 = &.{},
+    excludedEquipmentIds: []const []const u8 = &.{},
+    minimumExercises: ?u8 = null,
+    maximumExercises: ?u8 = null,
+    availableMinutes: ?u16 = null,
+    hardMaximumMinutes: ?u16 = null,
+    targetDurationMinutes: ?u16 = null,
+    unknownDurationPolicy: enum { allow, reject } = .allow,
+};
+
+pub const CompositionDurationEstimate = struct { slotId: []const u8, exerciseId: []const u8, minutes: u16 };
+pub const CompositionRequest = struct {
+    schemaVersion: u32 = 1,
+    asOf: []const u8,
+    intent: CompositionIntent,
+    catalog: []const Exercise,
+    constraints: CompositionConstraints = .{},
+    durationEstimates: []const CompositionDurationEstimate = &.{},
+    history: HistorySnapshot = .{},
+    preferences: []const Preference = &.{},
+    musclePriorities: []const MusclePriority = &.{},
+    candidateLimitPerSlot: u8 = 8,
+    beamWidth: u16 = 256,
+};
+
+pub const CompositionScore = struct { program: i64, training: i64, preference: i64 };
+pub const CompositionAlternative = struct {
+    exerciseId: []const u8,
+    localRank: u16,
+    estimatedDurationMinutes: ?u16 = null,
+    score: CompositionScore,
+    rankedLowerBecause: enum { lower_score, deterministic_tie_break, global_assignment_tradeoff },
+};
+pub const CompositionSelectionMetadata = struct {
+    slotId: []const u8,
+    exerciseId: []const u8,
+    position: u8,
+    selectionKind: enum { fixed, optimized },
+    eligibleCandidateCount: ?u16 = null,
+    localRank: ?u16 = null,
+    estimatedDurationMinutes: ?u16 = null,
+    score: CompositionScore,
+    alternatives: []const CompositionAlternative = &.{},
+};
+pub const CompositionOmission = struct {
+    slotId: []const u8,
+    reason: enum { optimizer_tradeoff, no_eligible_candidate },
+};
+pub const CompositionDecisionReason = struct {
+    code: []const u8,
+    subjectKind: enum { session, slot, exercise, selection },
+    slotId: ?[]const u8 = null,
+    exerciseId: ?[]const u8 = null,
+    contribution: CompositionScore,
+};
+pub const CompositionIntentOrigin = struct {
+    definitionId: []const u8,
+    definitionVersion: u32,
+    definitionFingerprint: []const u8,
+    instanceId: []const u8,
+    occurrenceId: []const u8,
+    blockId: []const u8,
+    roleId: []const u8,
+    planningStateRevision: u64,
+    strategy: enum { fixed, adaptive_hypertrophy },
+};
+
+pub const CompositionPlan = struct {
+    problemFingerprint: []const u8,
+    exercises: []const ExerciseRecommendation,
+    omittedSlotIds: []const []const u8 = &.{},
+    estimatedDurationMinutes: ?u32 = null,
+    requiredSlotCount: u8,
+    targetSlotCount: u8,
+    optionalSlotCount: u8,
+    composedSlotCount: u8,
+    omittedOptionalSlotCount: u8,
+    selectionMetadata: []const CompositionSelectionMetadata = &.{},
+    omittedReasons: []const CompositionOmission = &.{},
+    decisionReasons: []const CompositionDecisionReason = &.{},
+    intentOrigin: CompositionIntentOrigin,
+};
+pub const CompositionMetadata = struct {
+    engineVersion: []const u8,
+    schemaVersion: u32 = 1,
+    composer: ResolvedComponent,
+    inputFingerprint: []const u8,
+    resultFingerprint: []const u8,
+};
+pub const CompositionSuccess = struct {
+    plan: CompositionPlan,
+    recommendation: SessionRecommendation,
+    explanations: []const Explanation = &.{},
+    metadata: CompositionMetadata,
+};
+pub const CompositionConstrained = CompositionSuccess;
+pub const CompositionUnsatisfiable = struct { problemFingerprint: []const u8, violations: []const std.json.Value };
+pub const CompositionInvalid = struct { code: []const u8 };
+pub const CompositionSearchExhausted = struct { problemFingerprint: []const u8, exploredStateCount: u32 };
+pub const CompositionResult = union(enum) {
+    successful: CompositionSuccess,
+    constrained: CompositionConstrained,
+    unsatisfiable: CompositionUnsatisfiable,
+    invalid: CompositionInvalid,
+    searchExhausted: CompositionSearchExhausted,
+};
+
 pub const RecommendationRequest = struct {
     schemaVersion: u32,
     asOf: []const u8,

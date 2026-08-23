@@ -2,11 +2,17 @@
 
 This static playground imports only `@caudex-workout/engine`. It provides an
 editable canonical request, switches between the double-progression and RPE
-top-set/backoff methodology factories, renders the recommendation and its
-structured explanation trace, and copies or downloads the current fixture. It
+top-set/backoff methodology factories, and also composes a four-exercise
+session using fixed and mixed-progression slots. It renders the recommendation,
+structured explanation trace, duration estimate, and selected alternatives, and copies or downloads the current fixture. It
 requires no application backend or runtime network service.
 
 Both selectors execute their first-party methodology in the packaged runtime.
+The session composer uses the same public `caudex.composeSession` operation as
+other consumers: changing its temporary equipment or time constraints changes
+the composed plan while leaving the intent snapshot untouched. Its output can
+be passed to the existing recommendation/active-workout lifecycle after the
+host accepts it.
 
 The program-planning lab below the recommendation workspace uses the package's
 actual `programs` presets, `instantiateProgram`, `resolveNextSession`,
@@ -19,8 +25,8 @@ is the separate host decision that advances the accepted state.
 The default request also demonstrates the separation between a persistent
 athlete profile and today's training context. The profile holds durable intent
 such as hypertrophy, experience, usual duration, preferences, priorities, and
-reusable home/gym equipment profiles. Today's context selects home, limits the
-session to 35 minutes, removes the pull-up bar, and adds a temporary overhead
+reusable home/gym equipment profiles. Today's context selects the gym, limits
+the session to 35 minutes, removes the cable stack, and adds a temporary overhead
 restriction. The resulting recommendation carries an inspectable resolved
 context snapshot, so editing the profile for a later workout does not rewrite
 the earlier request. See

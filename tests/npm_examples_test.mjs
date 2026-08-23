@@ -153,12 +153,17 @@ if (document.body.dataset.status !== "passed") {
   throw new Error(elements.output.textContent);
 }
 const initial = JSON.parse(elements.output.textContent);
+const composed = initial.composition?.successful ?? initial.composition?.constrained;
 if (
   initial.recommendation?.exercises?.[0]?.exerciseId !==
     "incline-dumbbell-press" ||
-  elements.explanations.children.length === 0
+  elements.explanations.children.length === 0 ||
+  composed?.recommendation?.exercises?.length !== 3 ||
+  !initial.composition?.constrained ||
+  !composed.plan?.selectionMetadata?.some((slot) => slot.alternatives?.length > 0) ||
+  composed.plan?.targetSlotCount !== 4
 ) {
-  throw new Error("playground did not render its recommendation and explanations");
+  throw new Error("playground did not render its recommendation, composition alternatives, and explanations: " + JSON.stringify(initial));
 }
 const initialProgram = JSON.parse(elements["program-output"].textContent);
 if (

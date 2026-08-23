@@ -19,6 +19,8 @@ pub const SessionContext = struct {
     /// User preferences remain distinct from an adaptive slot's inline
     /// preferred set, which belongs to the program-correctness tier.
     exercise_preferences: []const ExercisePreference = &.{},
+    muscle_priorities: []const hypertrophy.MusclePriority = &.{},
+    target_duration_minutes: ?u16 = null,
 };
 
 pub const ExercisePreference = struct {
@@ -89,13 +91,26 @@ pub fn build(
                 maximum;
         }
     }
-
     var objective_count_written: usize = 0;
     for (context.exercise_preferences) |preference| {
         storage.objectives[objective_count_written] = .{ .exercise_preference = .{
             .target = preference.target,
             .direction = preference.direction,
             .weight = preference.weight,
+        } };
+        objective_count_written += 1;
+    }
+    for (context.muscle_priorities) |priority| {
+        storage.objectives[objective_count_written] = .{ .muscle_priority = .{
+            .muscle_id = priority.muscle_id,
+            .weight = priority.weight,
+        } };
+        objective_count_written += 1;
+    }
+    if (context.target_duration_minutes) |minutes| {
+        storage.objectives[objective_count_written] = .{ .target_duration = .{
+            .minutes = minutes,
+            .weight = target_duration_weight,
         } };
         objective_count_written += 1;
     }
@@ -115,6 +130,18 @@ pub fn build(
             objective_count_written += 1;
         }
     }
+    storage.objectives[objective_count_written] = .{ .avoid_exercise_reuse = .{
+        .weight = default_avoid_exercise_reuse_weight,
+    } };
+    objective_count_written += 1;
+    storage.objectives[objective_count_written] = .{ .movement_variety = .{
+        .weight = default_movement_variety_weight,
+    } };
+    objective_count_written += 1;
+    storage.objectives[objective_count_written] = .{ .minimize_equipment_transitions = .{
+        .weight = default_equipment_transition_weight,
+    } };
+    objective_count_written += 1;
 
     var duration_count_written: usize = 0;
     if (policy) |value| for (value.duration_estimates) |estimate| {
@@ -153,9 +180,17 @@ pub fn build(
 /// training-quality objective, never a feasibility rule or a caller-tunable
 /// substitute for the hard duration cap.
 pub const target_duration_weight: u16 = 1;
+pub const default_avoid_exercise_reuse_weight: u16 = 100;
+pub const default_movement_variety_weight: u16 = 10;
+pub const default_equipment_transition_weight: u16 = 1;
 
 fn requiredObjectiveCount(context: SessionContext, policy: ?hypertrophy.SessionPolicy) BuildError!usize {
-    var count = context.exercise_preferences.len;
+    var count = std.math.add(usize, context.exercise_preferences.len, context.muscle_priorities.len) catch
+        return error.TooManyObjectives;
+    count = std.math.add(usize, count, 3) catch
+        return error.TooManyObjectives;
+    if (context.target_duration_minutes != null)
+        count = std.math.add(usize, count, 1) catch return error.TooManyObjectives;
     if (policy) |value| {
         try validatePolicy(value);
         count = std.math.add(usize, count, value.muscle_priorities.len) catch
@@ -186,6 +221,14 @@ fn validateContext(context: SessionContext) BuildError!void {
     try validateConstraints(context.constraints);
     for (context.exercise_preferences) |preference| {
         if (preference.weight == 0) return error.InvalidExercisePreferenceWeight;
+    }
+    if (context.muscle_priorities.len > hypertrophy.max_muscle_priorities)
+        return error.TooManyMusclePriorities;
+    for (context.muscle_priorities, 0..) |priority, index| {
+        if (priority.weight == 0) return error.InvalidMusclePriorityWeight;
+        for (context.muscle_priorities[0..index]) |prior| {
+            if (priority.muscle_id.eql(prior.muscle_id)) return error.DuplicateMusclePriority;
+        }
     }
 }
 
@@ -273,7 +316,7 @@ test "build normalizes hypertrophy policy into hard constraints and objectives" 
         .target = .{ .family = family },
         .weight = 3,
     }};
-    var objectives: [3]model.Objective = undefined;
+    var objectives: [6]model.Objective = undefined;
     var duration_storage: [1]model.DurationEstimate = undefined;
 
     const result = try build(.{
@@ -305,10 +348,13 @@ test "build normalizes hypertrophy policy into hard constraints and objectives" 
     try std.testing.expectEqual(@as(usize, 1), result.constraints.available_equipment_ids.len);
     try std.testing.expect(result.constraints.available_equipment_ids[0].eql(bench));
     try std.testing.expectEqual(@as(?u16, 40), result.constraints.hard_maximum_minutes);
-    try std.testing.expectEqual(@as(usize, 3), result.objectives.len);
+    try std.testing.expectEqual(@as(usize, 6), result.objectives.len);
     try std.testing.expect(result.objectives[0] == .exercise_preference);
     try std.testing.expect(result.objectives[1] == .muscle_priority);
     try std.testing.expect(result.objectives[2] == .target_duration);
+    try std.testing.expect(result.objectives[3] == .avoid_exercise_reuse);
+    try std.testing.expect(result.objectives[4] == .movement_variety);
+    try std.testing.expect(result.objectives[5] == .minimize_equipment_transitions);
     try std.testing.expectEqual(@as(usize, 1), result.duration_estimates.len);
     try std.testing.expect(result.duration_estimates[0].slot_id.eql(slot_id));
 }

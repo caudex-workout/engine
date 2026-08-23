@@ -271,6 +271,90 @@ export interface ProgramRecommendationRequest {
   trainingContext?: TrainingContext;
 }
 
+export type CompositionSlotPresence = "required" | "optional";
+export type CompositionSelection =
+  | { fixed: { exerciseId: string } }
+  | { dynamic: { exerciseIds?: string[]; familyIds?: string[]; muscleIds?: string[]; movementPatternIds?: string[]; equipmentIds?: string[]; excludedExerciseIds?: string[] } };
+export interface CompositionSlot<TConfig = JsonValue> {
+  id: string;
+  presence?: CompositionSlotPresence;
+  selection: CompositionSelection;
+  progression: ProgressionAssignment<TConfig>;
+  priorityTier?: number;
+  beforeSlotIds?: string[];
+  afterSlotIds?: string[];
+}
+export interface CompositionIntent {
+  definitionId: string;
+  definitionVersion: number;
+  definitionFingerprint: string;
+  instanceId: string;
+  occurrenceId: string;
+  blockId: string;
+  roleId: string;
+  planningStateRevision: number;
+  strategy?: "fixed" | "adaptive_hypertrophy";
+  slots: CompositionSlot[];
+}
+export interface CompositionConstraints {
+  availableEquipmentIds?: string[];
+  requiredExerciseIds?: string[];
+  excludedExerciseIds?: string[];
+  excludedFamilyIds?: string[];
+  excludedMovementPatternIds?: string[];
+  excludedRestrictionTagIds?: string[];
+  excludedEquipmentIds?: string[];
+  minimumExercises?: number;
+  maximumExercises?: number;
+  availableMinutes?: number;
+  hardMaximumMinutes?: number;
+  targetDurationMinutes?: number;
+  unknownDurationPolicy?: "allow" | "reject";
+}
+export interface CompositionDurationEstimate { slotId: string; exerciseId: string; minutes: number }
+export interface CompositionRequest {
+  schemaVersion?: 1;
+  asOf: string;
+  intent: CompositionIntent;
+  catalog: Exercise[];
+  constraints?: CompositionConstraints;
+  durationEstimates?: CompositionDurationEstimate[];
+  history?: { workouts?: CompletedWorkout[]; summaries?: JsonValue };
+  preferences?: ExercisePreference[];
+  musclePriorities?: MusclePriority[];
+  candidateLimitPerSlot?: number;
+  beamWidth?: number;
+}
+export interface CompositionScore { program: number; training: number; preference: number }
+export interface CompositionAlternative { exerciseId: string; localRank: number; estimatedDurationMinutes?: number; score: CompositionScore; rankedLowerBecause: "lower_score" | "deterministic_tie_break" | "global_assignment_tradeoff" }
+export interface CompositionSelectionMetadata { slotId: string; exerciseId: string; position: number; selectionKind: "fixed" | "optimized"; eligibleCandidateCount?: number; localRank?: number; estimatedDurationMinutes?: number; score: CompositionScore; alternatives?: CompositionAlternative[] }
+export interface CompositionOmission { slotId: string; reason: "optimizer_tradeoff" | "no_eligible_candidate" }
+export interface CompositionDecisionReason { code: string; subjectKind: "session" | "slot" | "exercise" | "selection"; slotId?: string; exerciseId?: string; contribution: CompositionScore }
+export interface CompositionIntentOrigin { definitionId: string; definitionVersion: number; definitionFingerprint: string; instanceId: string; occurrenceId: string; blockId: string; roleId: string; planningStateRevision: number; strategy: "fixed" | "adaptive_hypertrophy" }
+export interface CompositionPlan {
+  problemFingerprint: string;
+  exercises: SessionRecommendation["exercises"];
+  omittedSlotIds?: string[];
+  estimatedDurationMinutes?: number;
+  requiredSlotCount: number;
+  targetSlotCount: number;
+  optionalSlotCount: number;
+  composedSlotCount: number;
+  omittedOptionalSlotCount: number;
+  selectionMetadata?: CompositionSelectionMetadata[];
+  omittedReasons?: CompositionOmission[];
+  decisionReasons?: CompositionDecisionReason[];
+  intentOrigin: CompositionIntentOrigin;
+}
+export interface CompositionMetadata { engineVersion: string; schemaVersion: number; composer: ResolvedComponent; inputFingerprint: string; resultFingerprint: string }
+export interface CompositionSuccess { plan: CompositionPlan; recommendation: SessionRecommendation; explanations?: Explanation[]; metadata: CompositionMetadata }
+export type CompositionResult =
+  | { successful: CompositionSuccess }
+  | { constrained: CompositionSuccess }
+  | { unsatisfiable: { problemFingerprint: string; violations: JsonValue[] } }
+  | { invalid: { code: string } }
+  | { searchExhausted: { problemFingerprint: string; exploredStateCount: number } };
+
 export type GoalId = "hypertrophy" | "strength" | "general-fitness" | "muscular-endurance" | "powerlifting-practice" | "limited-equipment" | "maintenance" | (string & {});
 export interface Goal { id: GoalId; weight?: number }
 export interface GoalSet { primary?: Goal; secondary?: Goal[]; bodyCompositionObjective?: string }
@@ -1031,6 +1115,7 @@ export interface Program {
 
 export interface RuntimeFacade {
   recommend(request: RecommendationRequest): RecommendationResult;
+  composeSession(request: CompositionRequest): CompositionResult;
   evaluate(request: EvaluationRequest): EvaluationResult;
   recommendProgram(request: ProgramRecommendationRequest): ProgramRecommendationResult;
   evaluateProgram(request: ProgramEvaluationRequest): ProgramEvaluationResult;
@@ -1122,6 +1207,8 @@ export interface Caudex {
   /** Binds stable host context while constructing complete requests for every engine call. */
   createProgram(options: ProgramOptions): Program;
   recommendSession(request: RecommendationRequest): RecommendationResult;
+  composeSession(request: CompositionRequest): CompositionResult;
+  startComposedWorkout(result: CompositionResult, input: { catalog: Exercise[]; scope: { hostScopeKey: string; athleteId?: string }; acceptedRecommendationId?: string }): Promise<ActiveWorkout>;
   evaluatePerformance(request: EvaluationRequest): EvaluationResult;
   recommendProgram(request: ProgramRecommendationRequest): ProgramRecommendationResult;
   evaluateProgram(request: ProgramEvaluationRequest): ProgramEvaluationResult;
@@ -1165,7 +1252,7 @@ function createFacade(exports: WasmExports, runtime: number, options: CreateCaud
   const volatileActiveWorkouts = new Map<string, ActiveWorkoutRecord>();
   const execute = <Request, Result>(
     request: Request,
-    operation: "recommend" | "evaluate" | "recommendProgram" | "evaluateProgram" | "validateProgramDefinition" | "instantiateProgram" | "resolvePlannedSession" | "proposeProgramAdvancement" | "applyTrackingCommand" | "applyTrackingBatch" | "instantiateRecommendation" | "instantiateTemplate" | "completeForEvaluation" | "listMethodologies" | "describeMethodology" | "validateMethodologyConfig" | "validateMethodologyState" | "listCapabilities" | "exportPortable" | "validatePortableImport",
+    operation: "recommend" | "evaluate" | "recommendProgram" | "evaluateProgram" | "composeSession" | "validateProgramDefinition" | "instantiateProgram" | "resolvePlannedSession" | "proposeProgramAdvancement" | "applyTrackingCommand" | "applyTrackingBatch" | "instantiateRecommendation" | "instantiateTemplate" | "completeForEvaluation" | "listMethodologies" | "describeMethodology" | "validateMethodologyConfig" | "validateMethodologyState" | "listCapabilities" | "exportPortable" | "validatePortableImport",
     programmingResult: boolean,
   ): Result => {
     if (disposed) {
@@ -1274,6 +1361,7 @@ function createFacade(exports: WasmExports, runtime: number, options: CreateCaud
     });
   const runtimeFacade: RuntimeFacade = {
     recommend: (request) => profileIssueResult<RecommendationResult>(request) ?? execute(request, "recommend", true),
+    composeSession: (request) => execute<CompositionRequest, CompositionResult>(request, "composeSession", true),
     evaluate: (request) => execute(request, "evaluate", true),
     recommendProgram: (request) => profileIssueResult<ProgramRecommendationResult>(request) ?? invalidProgramRequest(request) ?? execute(request, "recommendProgram", true),
     evaluateProgram: (request) => execute(request, "evaluateProgram", true),
@@ -1300,6 +1388,31 @@ function createFacade(exports: WasmExports, runtime: number, options: CreateCaud
         "recommend",
         true,
       );
+    },
+    composeSession(request) {
+      return execute<CompositionRequest, CompositionResult>(request, "composeSession", true);
+    },
+    startComposedWorkout(result, input) {
+      const composed = "successful" in result ? result.successful
+        : "constrained" in result ? result.constrained
+        : null;
+      if (!composed) throw new CaudexRuntimeError("A successful or constrained composition is required.");
+      return facade.workflows.startRecommendation({
+        ok: true,
+        recommendation: composed.recommendation,
+        explanations: composed.explanations,
+        metadata: {
+          engineVersion: composed.metadata.engineVersion,
+          schemaVersion: composed.metadata.schemaVersion,
+          methodology: {
+            id: composed.metadata.composer.id,
+            version: composed.metadata.composer.version,
+            configVersion: composed.metadata.composer.configVersion,
+          },
+          inputFingerprint: composed.metadata.inputFingerprint,
+          resultFingerprint: composed.metadata.resultFingerprint,
+        },
+      }, input);
     },
     evaluatePerformance(request) {
       return execute<EvaluationRequest, EvaluationResult>(

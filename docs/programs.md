@@ -8,10 +8,11 @@ their lanes; the shared planner resolves the session; and progression
 prescribes and evaluates each selected lane.
 
 The typed Zig lifecycle API and its current v0.1 protocol snapshots are
-authoritative for the released contract. The session-planning kernel described
-here is currently a direct-Zig surface; it is not yet carried by the released
-C, WASM/npm, or portable records. This guide uses public names and a schematic
-value flow rather than duplicating every binding signature.
+authoritative for the released contract. The generic canonical execution
+boundary and npm facade expose the planning kernel through `composeSession`;
+the C ABI remains the same caller-buffer operation boundary rather than adding
+a convenience object model. See [session composition](session-composition.md)
+for the result and constraint semantics.
 
 The v0.1 lifecycle `program_planning.PlannedSessionIntent` and the direct-Zig
 `programs.intent.PlannedSessionIntent` consumed by `planning.buildProblem` are
