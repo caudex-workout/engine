@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://caudex.dev/schemas/selection/v1/exercise-substitution-request.schema.json",
+  "title": "Exercise substitution request v1",
+  "type": "object",
+  "required": ["exerciseId", "catalog"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "exerciseId": { "type": "string", "minLength": 1 },
+    "role": { "$ref": "exercise-selection-request.schema.json#/$defs/role" },
+    "catalog": { "type": "array", "maxItems": 2048, "items": { "$ref": "../../v0/canonical.schema.json#/$defs/exercise" } },
+    "context": { "$ref": "exercise-selection-request.schema.json#/$defs/context" },
+    "alternativeLimit": { "type": "integer", "minimum": 0, "maximum": 64, "default": 8 },
+    "rejectionLimit": { "type": "integer", "minimum": 0, "maximum": 64, "default": 32 }
+  },
+  "additionalProperties": false
+}

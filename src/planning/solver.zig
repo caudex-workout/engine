@@ -513,7 +513,7 @@ fn candidateEligible(problem: model.PlanningProblem, slot: model.Slot, exercise:
                 .catalog => {},
                 .allowlist => |allowlist| if (!exerciseSetContains(exercise, allowlist)) return false,
             }
-            if (!matchesRequirements(exercise, adaptive.requirements)) return false;
+            if (!matchesPlannerOnlyRequirements(exercise, adaptive.requirements)) return false;
         },
     }
     const constraints = problem.constraints;
@@ -524,9 +524,16 @@ fn candidateEligible(problem: model.PlanningProblem, slot: model.Slot, exercise:
         return false;
     // The standalone selector owns shared exercise-local hard eligibility;
     // the planner adds slot-universe and whole-session constraints around it.
-    if (exercise_selection.eligibility(exercise, .{
-        .progression_requirement = slot.progression.method.requirement(),
-    }, .{
+    const selection_role: exercise_selection.Role = switch (slot.selection) {
+        .fixed => |id| .{ .fixed_exercise_id = id, .progression_requirement = slot.progression.method.requirement() },
+        .adaptive => |adaptive| .{
+            .target_muscles = if (adaptive.requirements.muscles.mode == .any) adaptive.requirements.muscles.ids else &.{},
+            .movement_patterns = if (adaptive.requirements.movement_patterns.mode == .any) adaptive.requirements.movement_patterns.ids else &.{},
+            .exercise_families = if (adaptive.requirements.exercise_families.mode == .any) adaptive.requirements.exercise_families.ids else &.{},
+            .progression_requirement = slot.progression.method.requirement(),
+        },
+    };
+    if (exercise_selection.eligibility(exercise, selection_role, .{
         .available_equipment_ids = constraints.available_equipment_ids,
         .excluded_restriction_ids = constraints.excluded_restriction_tag_ids,
     }) != null) return false;
@@ -535,12 +542,16 @@ fn candidateEligible(problem: model.PlanningProblem, slot: model.Slot, exercise:
     return true;
 }
 
-fn matchesRequirements(exercise: training.Exercise, requirements: model.SlotRequirements) bool {
+fn matchesPlannerOnlyRequirements(exercise: training.Exercise, requirements: model.SlotRequirements) bool {
     if (containsId(requirements.excluded_exercise_ids, exercise.id)) return false;
-    return matchRequirement(exercise, requirements.muscles, .muscle) and
-        matchRequirement(exercise, requirements.movement_patterns, .movement) and
-        matchRequirement(exercise, requirements.exercise_families, .family) and
+    return matchAllRequirement(exercise, requirements.muscles, .muscle) and
+        matchAllRequirement(exercise, requirements.movement_patterns, .movement) and
+        matchAllRequirement(exercise, requirements.exercise_families, .family) and
         matchRequirement(exercise, requirements.equipment, .equipment);
+}
+
+fn matchAllRequirement(exercise: training.Exercise, requirement: model.IdRequirement, taxonomy: Taxonomy) bool {
+    return requirement.mode == .any or matchRequirement(exercise, requirement, taxonomy);
 }
 
 const Taxonomy = enum { muscle, movement, family, equipment };

@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://caudex.dev/schemas/selection/v1/exercise-selection-request.schema.json",
+  "title": "Exercise selection request v1",
+  "type": "object",
+  "required": ["role", "catalog"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "role": { "$ref": "#/$defs/role" },
+    "catalog": { "type": "array", "maxItems": 2048, "items": { "$ref": "../../v0/canonical.schema.json#/$defs/exercise" } },
+    "context": { "$ref": "#/$defs/context" },
+    "alternativeLimit": { "type": "integer", "minimum": 0, "maximum": 64, "default": 8 },
+    "rejectionLimit": { "type": "integer", "minimum": 0, "maximum": 64, "default": 32 }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "role": {
+      "type": "object",
+      "properties": {
+        "targetMuscles": { "$ref": "#/$defs/ids" },
+        "movementPatterns": { "$ref": "#/$defs/ids" },
+        "exerciseFamilies": { "$ref": "#/$defs/ids" },
+        "fixedExerciseId": { "type": "string", "minLength": 1 },
+        "progressionRequirement": { "enum": ["externally_loadable_repetitions", "repetitions", "duration", "distance"] },
+        "requiredLaterality": { "type": "boolean" },
+        "requiredStructuralType": { "enum": ["compound", "isolation", "isometric", "locomotor", "conditioning", "mobility", "other"] }
+      },
+      "additionalProperties": false
+    },
+    "policy": {
+      "type": "object",
+      "properties": {
+        "preferredExercises": { "$ref": "#/$defs/ids" },
+        "dislikedExercises": { "$ref": "#/$defs/ids" },
+        "excludedExercises": { "$ref": "#/$defs/ids" },
+        "continuity": { "enum": ["dynamic", "sticky", "fixed", "novelty_biased"] },
+        "preferredFamilyIds": { "$ref": "#/$defs/ids" },
+        "dislikePenalty": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
+        "preferenceBonus": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
+        "continuityBonus": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
+        "noveltyBonus": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
+        "overlapPenalty": { "type": "integer", "minimum": 0, "maximum": 2147483647 }
+      },
+      "additionalProperties": false
+    },
+    "context": {
+      "type": "object",
+      "properties": {
+        "availableEquipmentIds": { "$ref": "#/$defs/ids" },
+        "excludedRestrictionIds": { "$ref": "#/$defs/ids" },
+        "excludedExerciseIds": { "$ref": "#/$defs/ids" },
+        "recentExerciseIds": { "$ref": "#/$defs/ids" },
+        "alreadySelectedExerciseIds": { "$ref": "#/$defs/ids" },
+        "alreadySelectedFamilyIds": { "$ref": "#/$defs/ids" },
+        "policy": { "$ref": "#/$defs/policy" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

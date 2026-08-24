@@ -11,6 +11,7 @@ const primitives = caudex.primitives;
 const programming = caudex.programming;
 const program_planning = caudex.program_planning;
 const session_composer = caudex.session_composer;
+const exercise_selection = caudex.exercise_selection;
 const planning_model = caudex.planning.problem;
 const planning = caudex.planning;
 const planning_build = caudex.planning.build;
@@ -132,6 +133,8 @@ const Operation = enum {
     instantiateProgram,
     resolvePlannedSession,
     proposeProgramAdvancement,
+    rankExercises,
+    findSubstitutes,
 };
 
 const ExecutionRequest = struct {
@@ -170,7 +173,76 @@ fn executeDispatch(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) Exec
         .instantiateProgram => executeProgramInstantiation(runtime, writer.buffered(), out),
         .resolvePlannedSession => executePlannedSessionResolution(runtime, writer.buffered(), out),
         .proposeProgramAdvancement => executeProgramAdvancement(runtime, writer.buffered(), out),
+        .rankExercises => executeExerciseSelection(runtime, writer.buffered(), out, false),
+        .findSubstitutes => executeExerciseSelection(runtime, writer.buffered(), out, true),
     };
+}
+
+fn executeExerciseSelection(runtime: *Runtime, input: []const u8, out: *OwnedBuffer, substitution: bool) ExecuteError!void {
+    var arena = std.heap.ArenaAllocator.init(runtime.allocator());
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    if (substitution) {
+        const request = try canonical_json.decodeValue(canonical.ExerciseSubstitutionRequest, allocator, input, .{ .max_collection_items = 100_000 });
+        defer request.deinit();
+        if (request.value.schemaVersion != 1) return error.UnsupportedVersion;
+        const catalog = try translateCatalog(allocator, request.value.catalog);
+        try validateSelectionLimits(catalog.exercises.len, request.value.alternativeLimit, request.value.rejectionLimit);
+        const role = try translateSelectionRole(allocator, request.value.role);
+        const context = try translateSelectionContext(allocator, request.value.context);
+        const candidate_count = std.math.add(usize, request.value.alternativeLimit, 1) catch return error.OutputLimitReached;
+        const candidates = try allocator.alloc(exercise_selection.Candidate, candidate_count);
+        const rejected = try allocator.alloc(exercise_selection.Rejected, request.value.rejectionLimit);
+        const result = exercise_selection.findSubstitutes(.{ .exercise = primitives.Id.parse(request.value.exerciseId) catch return error.InvalidRequest, .role = role, .catalog = catalog, .context = context, .alternative_limit = request.value.alternativeLimit, .rejection_limit = request.value.rejectionLimit }, candidates, rejected) catch |err| return switch (err) {
+            error.InvalidPolicy => error.InvalidRequest,
+            error.OutputTooSmall, error.LimitExceeded => error.OutputLimitReached,
+        };
+        return encodeOwned(runtime, try selectionResultToCanonical(allocator, result), out);
+    }
+    const request = try canonical_json.decodeValue(canonical.ExerciseSelectionRequest, allocator, input, .{ .max_collection_items = 100_000 });
+    defer request.deinit();
+    if (request.value.schemaVersion != 1) return error.UnsupportedVersion;
+    const catalog = try translateCatalog(allocator, request.value.catalog);
+    try validateSelectionLimits(catalog.exercises.len, request.value.alternativeLimit, request.value.rejectionLimit);
+    const role = try translateSelectionRole(allocator, request.value.role);
+    const context = try translateSelectionContext(allocator, request.value.context);
+    const candidate_count = std.math.add(usize, request.value.alternativeLimit, 1) catch return error.OutputLimitReached;
+    const candidates = try allocator.alloc(exercise_selection.Candidate, candidate_count);
+    const rejected = try allocator.alloc(exercise_selection.Rejected, request.value.rejectionLimit);
+    const result = exercise_selection.rankExercises(.{ .role = role, .catalog = catalog, .context = context, .alternative_limit = request.value.alternativeLimit, .rejection_limit = request.value.rejectionLimit }, candidates, rejected) catch |err| return switch (err) {
+        error.InvalidPolicy => error.InvalidRequest,
+        error.OutputTooSmall, error.LimitExceeded => error.OutputLimitReached,
+    };
+    return encodeOwned(runtime, try selectionResultToCanonical(allocator, result), out);
+}
+
+fn validateSelectionLimits(catalog_count: usize, alternative_limit: usize, rejection_limit: usize) ExecuteError!void {
+    if (catalog_count > exercise_selection.max_catalog_exercises or
+        alternative_limit > exercise_selection.max_alternatives or
+        rejection_limit > exercise_selection.max_rejections) return error.OutputLimitReached;
+}
+
+fn translateSelectionRole(allocator: std.mem.Allocator, value: canonical.ExerciseSelectionRole) ExecuteError!exercise_selection.Role {
+    return .{ .target_muscles = try translateIds(allocator, value.targetMuscles), .movement_patterns = try translateIds(allocator, value.movementPatterns), .exercise_families = try translateIds(allocator, value.exerciseFamilies), .fixed_exercise_id = if (value.fixedExerciseId) |id| primitives.Id.parse(id) catch return error.InvalidRequest else null, .progression_requirement = if (value.progressionRequirement) |r| @enumFromInt(@intFromEnum(r)) else null, .required_laterality = value.requiredLaterality, .required_structural_type = if (value.requiredStructuralType) |kind| @tagName(kind) else null };
+}
+
+fn translateSelectionContext(allocator: std.mem.Allocator, value: canonical.ExerciseSelectionContext) ExecuteError!exercise_selection.Context {
+    return .{ .available_equipment_ids = if (value.availableEquipmentIds) |ids| try translateIds(allocator, ids) else null, .excluded_restriction_ids = try translateIds(allocator, value.excludedRestrictionIds), .excluded_exercise_ids = try translateIds(allocator, value.excludedExerciseIds), .recent_exercise_ids = try translateIds(allocator, value.recentExerciseIds), .already_selected_exercise_ids = try translateIds(allocator, value.alreadySelectedExerciseIds), .already_selected_family_ids = try translateIds(allocator, value.alreadySelectedFamilyIds), .policy = .{ .preferred_exercises = try translateIds(allocator, value.policy.preferredExercises), .disliked_exercises = try translateIds(allocator, value.policy.dislikedExercises), .excluded_exercises = try translateIds(allocator, value.policy.excludedExercises), .continuity = @enumFromInt(@intFromEnum(value.policy.continuity)), .preferred_family_ids = try translateIds(allocator, value.policy.preferredFamilyIds), .dislike_penalty = value.policy.dislikePenalty, .preference_bonus = value.policy.preferenceBonus, .continuity_bonus = value.policy.continuityBonus, .novelty_bonus = value.policy.noveltyBonus, .overlap_penalty = value.policy.overlapPenalty } };
+}
+
+fn selectionResultToCanonical(allocator: std.mem.Allocator, value: exercise_selection.Result) ExecuteError!canonical.ExerciseSelectionResult {
+    const alternatives = try allocator.alloc(canonical.ExerciseSelectionCandidate, value.alternatives.len);
+    for (value.alternatives, alternatives) |source, *target| target.* = try selectionCandidateToCanonical(allocator, source);
+    const rejected = try allocator.alloc(canonical.ExerciseSelectionRejected, value.rejected.len);
+    for (value.rejected, rejected) |source, *target| target.* = .{ .exerciseId = source.exercise.id.bytes, .reason = @enumFromInt(@intFromEnum(source.reason)) };
+    return .{ .selected = if (value.selected) |selected| try selectionCandidateToCanonical(allocator, selected.*) else null, .alternatives = alternatives, .rejected = rejected, .unsatisfiable = value.unsatisfiable, .conflict = if (value.conflict) |conflict| @enumFromInt(@intFromEnum(conflict)) else null, .progressionStateTransfer = @enumFromInt(@intFromEnum(value.progression_state_transfer)) };
+}
+
+fn selectionCandidateToCanonical(allocator: std.mem.Allocator, value: exercise_selection.Candidate) ExecuteError!canonical.ExerciseSelectionCandidate {
+    const reasons = try allocator.alloc(@typeInfo(@TypeOf((canonical.ExerciseSelectionCandidate{ .exerciseId = "", .score = .{} }).reasons)).pointer.child, value.reasonSlice().len);
+    for (value.reasonSlice(), reasons) |source, *target| target.* = @enumFromInt(@intFromEnum(source));
+    const score = value.score;
+    return .{ .exerciseId = value.exercise.id.bytes, .name = value.exercise.name, .score = .{ .targetMatch = score.target_match, .movementMatch = score.movement_match, .familyMatch = score.family_match, .preference = score.preference, .continuity = score.continuity, .novelty = score.novelty, .overlap = score.overlap, .equipmentConvenience = score.equipment_convenience, .substitutionSimilarity = score.substitution_similarity, .total = score.total() }, .reasons = reasons };
 }
 
 fn executeProgramDefinitionValidation(
@@ -2686,6 +2758,28 @@ test "versioned dispatcher accepts recommendation envelope" {
         &output,
     );
     try std.testing.expect(output.len != 0);
+}
+
+test "versioned dispatcher ranks exercises through the public wire operation" {
+    var runtime = Runtime{ .debug_allocator = .init };
+    defer _ = runtime.debug_allocator.deinit();
+    var output: OwnedBuffer = .{};
+    executeDispatch(&runtime,
+        \\{"schemaVersion":1,"operation":"rankExercises","payload":{"schemaVersion":1,"role":{"movementPatterns":["horizontal-push"]},"catalog":[{"id":"bench","movementTags":["horizontal-push"]},{"id":"row","movementTags":["horizontal-pull"]}]}}
+    , &output) catch |err| return err;
+    defer if (output.data) |data| runtime.allocator().free(data[0..output.capacity]);
+    try std.testing.expect(std.mem.indexOf(u8, output.data.?[0..output.len], "bench") != null);
+}
+
+test "versioned dispatcher returns independent progression state for substitutes" {
+    var runtime = Runtime{ .debug_allocator = .init };
+    defer _ = runtime.debug_allocator.deinit();
+    var output: OwnedBuffer = .{};
+    executeDispatch(&runtime,
+        \\{"schemaVersion":1,"operation":"findSubstitutes","payload":{"schemaVersion":1,"exerciseId":"bench","role":{"movementPatterns":["horizontal-push"]},"catalog":[{"id":"bench","movementTags":["horizontal-push"]},{"id":"press","movementTags":["horizontal-push"]}]}}
+    , &output) catch |err| return err;
+    defer if (output.data) |data| runtime.allocator().free(data[0..output.capacity]);
+    try std.testing.expect(std.mem.indexOf(u8, output.data.?[0..output.len], "independent") != null);
 }
 
 test "versioned dispatcher applies canonical tracking command and batch" {

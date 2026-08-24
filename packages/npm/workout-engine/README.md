@@ -87,6 +87,7 @@ initialization that prevent safe execution throw `CaudexRuntimeError`.
 
 The deterministic low-level `Caudex` value exposes `recommendSession()`,
 `composeSession()`,
+`rankExercises()`, `findSubstitutes()`,
 `evaluatePerformance()`, `applyTrackingCommand()`, `applyTrackingBatch()`,
 `instantiateRecommendation()`, `instantiateTemplate()`,
 `completeForEvaluation()`, `exportPortable()`, `validatePortableImport()`, and
@@ -107,6 +108,36 @@ omitted-work reasons, workload counts, planner provenance, and the complete
 mixed-progression recommendation.
 Pass either successful variant to `startComposedWorkout()` to instantiate the
 complete recommendation through the ordinary active-workout lifecycle.
+
+Exercise selection and swaps are available as deterministic, typed operations
+over the same catalog snapshot. A role describes intent (movement, muscles,
+family, structure, and progression requirements); context supplies today's
+equipment, restrictions, preferences, continuity, and overlap signals.
+
+```ts
+const ranked = caudex.rankExercises({
+  role: { targetMuscles: ["chest"], movementPatterns: ["horizontal-push"] },
+  catalog,
+  context: { availableEquipmentIds: ["barbell", "rack", "bench"] },
+  alternativeLimit: 3,
+});
+
+const swaps = caudex.findSubstitutes({
+  exerciseId: "barbell-bench-press",
+  role: { movementPatterns: ["horizontal-push"] },
+  catalog,
+  context: { availableEquipmentIds: ["dumbbell", "bench"] },
+});
+```
+
+Hard eligibility (equipment, restrictions, exclusions, fixed conflicts, and
+progression compatibility) is resolved before ranking. Results include the
+selected candidate, bounded ranked alternatives, rejected candidates with
+structured reasons, score components, and stable tie-breaking. Substitutes
+preserve role intent but retain independent progression state.
+Versioned JSON Schemas are exported as
+`@caudex-workout/engine/schema/exercise-selection-request`,
+`exercise-substitution-request`, and `exercise-selection-result`.
 
 The v0.1 npm evaluation boundary supports double progression. Requests for
 other methodology implementations return the same structured unsupported

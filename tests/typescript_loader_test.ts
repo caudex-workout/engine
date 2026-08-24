@@ -18,6 +18,8 @@ import {
   type Exercise,
   type ProgramRecommendationRequest,
   type CompositionRequest,
+  type ExerciseSelectionRequest,
+  type ExerciseSubstitutionRequest,
 } from "../packages/npm/workout-engine/src/index.ts";
 
 const [wasmPath, fixturePath, portableFixturePath] = process.argv.slice(2);
@@ -70,6 +72,65 @@ const caudex = await createCaudex({
 const result = caudex.recommendSession(request);
 if (!result.ok || !result.recommendation) {
   throw new Error("ordinary object request did not produce a recommendation");
+}
+const selectionRequest = {
+  schemaVersion: 1,
+  role: { movementPatterns: ["horizontal-push"] },
+  catalog: request.catalog,
+  alternativeLimit: 2,
+} satisfies ExerciseSelectionRequest;
+const selection = caudex.rankExercises(selectionRequest);
+if (selection.schemaVersion !== 1 || selection.selected?.exerciseId !== "incline-dumbbell-press") {
+  throw new Error("typed exercise selection did not return the expected candidate");
+}
+const substitutionRequest = {
+  schemaVersion: 1,
+  exerciseId: "incline-dumbbell-press",
+  role: { movementPatterns: ["horizontal-push"] },
+  catalog: request.catalog,
+  alternativeLimit: 2,
+} satisfies ExerciseSubstitutionRequest;
+const substitutions = caudex.findSubstitutes(substitutionRequest);
+if (substitutions.progressionStateTransfer !== "independent") {
+  throw new Error("substitution result did not preserve progression-state isolation");
+}
+const equipmentSelection = caudex.rankExercises({
+  role: {},
+  catalog: [
+    { id: "a-rack-press", equipmentIds: ["rack"] },
+    { id: "b-bodyweight-press" },
+  ],
+  context: { availableEquipmentIds: [] },
+  alternativeLimit: 1,
+  rejectionLimit: 1,
+});
+if (equipmentSelection.selected?.exerciseId !== "b-bodyweight-press" ||
+    equipmentSelection.rejected[0]?.reason !== "equipment_unavailable") {
+  throw new Error("hard equipment eligibility was not preserved across WASM");
+}
+const fixedConflict = caudex.rankExercises({
+  role: { fixedExerciseId: "missing-fixed" },
+  catalog: [{ id: "available" }],
+});
+if (!fixedConflict.unsatisfiable || fixedConflict.conflict !== "fixed_exercise_missing") {
+  throw new Error("missing fixed exercise did not produce a structured conflict");
+}
+const tieA = caudex.rankExercises({ role: {}, catalog: [{ id: "b" }, { id: "a" }] });
+const tieB = caudex.rankExercises({ role: {}, catalog: [{ id: "a" }, { id: "b" }] });
+if (tieA.selected?.exerciseId !== "a" || tieB.selected?.exerciseId !== "a") {
+  throw new Error("catalog order changed deterministic selection tie-breaking");
+}
+for (const catalogSize of [50, 250, 1000]) {
+  const benchmarkCatalog: Exercise[] = Array.from(
+    { length: catalogSize },
+    (_, index) => ({ id: `benchmark-exercise-${String(index).padStart(4, "0")}` }),
+  );
+  const started = performance.now();
+  for (let iteration = 0; iteration < 20; iteration += 1) {
+    caudex.rankExercises({ role: {}, catalog: benchmarkCatalog, alternativeLimit: 8, rejectionLimit: 0 });
+  }
+  const elapsedMilliseconds = performance.now() - started;
+  console.log(`selection_benchmark_size=${catalogSize} iterations=20 elapsed_ms=${elapsedMilliseconds.toFixed(3)}`);
 }
 if (result.recommendation.resolvedTrainingContext?.availableMinutes !== 35 ||
     result.recommendation.resolvedTrainingContext.preferences[0]?.source !== "athlete_profile") {

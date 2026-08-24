@@ -54,6 +54,18 @@ export interface Exercise {
   attributes?: JsonValue;
   knowledge?: ExerciseKnowledge;
 }
+export interface ExerciseSelectionRole { targetMuscles?: string[]; movementPatterns?: string[]; exerciseFamilies?: string[]; fixedExerciseId?: string; progressionRequirement?: "externally_loadable_repetitions" | "repetitions" | "duration" | "distance"; requiredLaterality?: boolean; requiredStructuralType?: ExerciseKnowledge["structuralType"] }
+export type ExerciseSelectionContinuity = "dynamic" | "sticky" | "fixed" | "novelty_biased";
+export interface ExerciseSelectionPolicy { preferredExercises?: string[]; dislikedExercises?: string[]; excludedExercises?: string[]; continuity?: ExerciseSelectionContinuity; preferredFamilyIds?: string[]; dislikePenalty?: number; preferenceBonus?: number; continuityBonus?: number; noveltyBonus?: number; overlapPenalty?: number }
+export interface ExerciseSelectionContext { availableEquipmentIds?: string[]; excludedRestrictionIds?: string[]; excludedExerciseIds?: string[]; recentExerciseIds?: string[]; alreadySelectedExerciseIds?: string[]; alreadySelectedFamilyIds?: string[]; policy?: ExerciseSelectionPolicy }
+export interface ExerciseSelectionRequest { schemaVersion?: 1; role: ExerciseSelectionRole; catalog: Exercise[]; context?: ExerciseSelectionContext; alternativeLimit?: number; rejectionLimit?: number }
+export interface ExerciseSubstitutionRequest extends Omit<ExerciseSelectionRequest, "role"> { exerciseId: string; role?: ExerciseSelectionRole }
+export interface ExerciseSelectionScore { targetMatch: number; movementMatch: number; familyMatch: number; preference: number; continuity: number; novelty: number; overlap: number; equipmentConvenience: number; substitutionSimilarity: number; total: number }
+export type ExerciseSelectionReason = "target_match" | "movement_match" | "family_match" | "preference" | "dislike" | "continuity" | "novelty" | "overlap" | "equipment_convenience" | "substitution_similarity";
+export type ExerciseEligibilityReason = "excluded" | "fixed_conflict" | "equipment_unavailable" | "restriction" | "progression_incompatible" | "movement_missing" | "muscle_missing" | "family_missing" | "laterality_mismatch" | "structural_type_mismatch";
+export interface ExerciseSelectionCandidate { exerciseId: string; name?: string; score: ExerciseSelectionScore; reasons: ExerciseSelectionReason[] }
+export interface ExerciseSelectionRejected { exerciseId: string; reason: ExerciseEligibilityReason }
+export interface ExerciseSelectionResult { schemaVersion: 1; selected: ExerciseSelectionCandidate | null; alternatives: ExerciseSelectionCandidate[]; rejected: ExerciseSelectionRejected[]; unsatisfiable: boolean; conflict?: "fixed_exercise_missing" | "source_exercise_missing"; progressionStateTransfer?: "not_applicable" | "independent" }
 
 export interface CompletedSet {
   id?: string;
@@ -484,6 +496,8 @@ export interface Program {
 }
 export interface RuntimeFacade {
   recommend(request: RecommendationRequest): RecommendationResult;
+  rankExercises(request: ExerciseSelectionRequest): ExerciseSelectionResult;
+  findSubstitutes(request: ExerciseSubstitutionRequest): ExerciseSelectionResult;
   composeSession(request: CompositionRequest): CompositionResult;
   evaluate(request: EvaluationRequest): EvaluationResult;
   recommendProgram(request: ProgramRecommendationRequest): ProgramRecommendationResult;
@@ -509,6 +523,8 @@ export interface Caudex {
   readonly runtime: RuntimeFacade;
   createProgram(options: ProgramOptions): Program;
   recommendSession(request: RecommendationRequest): RecommendationResult;
+  rankExercises(request: ExerciseSelectionRequest): ExerciseSelectionResult;
+  findSubstitutes(request: ExerciseSubstitutionRequest): ExerciseSelectionResult;
   composeSession(request: CompositionRequest): CompositionResult;
   evaluatePerformance(request: EvaluationRequest): EvaluationResult;
   startComposedWorkout(result: CompositionResult, input: { catalog: Exercise[]; scope: { hostScopeKey: string; athleteId?: string }; acceptedRecommendationId?: string }): Promise<ActiveWorkout>;

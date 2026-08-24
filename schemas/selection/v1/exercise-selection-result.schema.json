@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://caudex.dev/schemas/selection/v1/exercise-selection-result.schema.json",
+  "title": "Exercise selection result v1",
+  "type": "object",
+  "required": ["schemaVersion", "selected", "alternatives", "rejected", "unsatisfiable", "progressionStateTransfer"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "selected": { "oneOf": [{ "$ref": "#/$defs/candidate" }, { "type": "null" }] },
+    "alternatives": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/candidate" } },
+    "rejected": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/rejected" } },
+    "unsatisfiable": { "type": "boolean" },
+    "conflict": { "enum": ["fixed_exercise_missing", "source_exercise_missing", null] },
+    "progressionStateTransfer": { "enum": ["not_applicable", "independent"] }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "score": {
+      "type": "object",
+      "required": ["targetMatch", "movementMatch", "familyMatch", "preference", "continuity", "novelty", "overlap", "equipmentConvenience", "substitutionSimilarity", "total"],
+      "properties": {
+        "targetMatch": { "type": "integer" }, "movementMatch": { "type": "integer" }, "familyMatch": { "type": "integer" },
+        "preference": { "type": "integer" }, "continuity": { "type": "integer" }, "novelty": { "type": "integer" },
+        "overlap": { "type": "integer" }, "equipmentConvenience": { "type": "integer" },
+        "substitutionSimilarity": { "type": "integer" }, "total": { "type": "integer" }
+      },
+      "additionalProperties": false
+    },
+    "candidate": {
+      "type": "object", "required": ["exerciseId", "score", "reasons"],
+      "properties": { "exerciseId": { "type": "string" }, "name": { "type": ["string", "null"] }, "score": { "$ref": "#/$defs/score" }, "reasons": { "type": "array", "items": { "type": "string" } } },
+      "additionalProperties": false
+    },
+    "rejected": {
+      "type": "object", "required": ["exerciseId", "reason"],
+      "properties": { "exerciseId": { "type": "string" }, "reason": { "enum": ["excluded", "fixed_conflict", "equipment_unavailable", "restriction", "progression_incompatible", "movement_missing", "muscle_missing", "family_missing", "laterality_mismatch", "structural_type_mismatch"] } },
+      "additionalProperties": false
+    }
+  }
+}

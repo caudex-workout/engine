@@ -119,6 +119,96 @@ pub const Exercise = struct {
     knowledge: ?ExerciseKnowledge = null,
 };
 
+/// Role-driven exercise selection request.  These wire types intentionally
+/// mirror the deterministic selector while keeping the public JSON boundary
+/// independent of implementation pointers and IDs.
+pub const ExerciseSelectionRole = struct {
+    targetMuscles: []const []const u8 = &.{},
+    movementPatterns: []const []const u8 = &.{},
+    exerciseFamilies: []const []const u8 = &.{},
+    fixedExerciseId: ?[]const u8 = null,
+    progressionRequirement: ?enum { externally_loadable_repetitions, repetitions, duration, distance } = null,
+    requiredLaterality: ?bool = null,
+    requiredStructuralType: ?enum { compound, isolation, isometric, locomotor, conditioning, mobility, other } = null,
+};
+
+pub const ExerciseSelectionPolicy = struct {
+    preferredExercises: []const []const u8 = &.{},
+    dislikedExercises: []const []const u8 = &.{},
+    excludedExercises: []const []const u8 = &.{},
+    continuity: enum { dynamic, sticky, fixed, novelty_biased } = .dynamic,
+    preferredFamilyIds: []const []const u8 = &.{},
+    dislikePenalty: i32 = 12,
+    preferenceBonus: i32 = 24,
+    continuityBonus: i32 = 20,
+    noveltyBonus: i32 = 8,
+    overlapPenalty: i32 = 18,
+};
+
+pub const ExerciseSelectionContext = struct {
+    availableEquipmentIds: ?[]const []const u8 = null,
+    excludedRestrictionIds: []const []const u8 = &.{},
+    excludedExerciseIds: []const []const u8 = &.{},
+    recentExerciseIds: []const []const u8 = &.{},
+    alreadySelectedExerciseIds: []const []const u8 = &.{},
+    alreadySelectedFamilyIds: []const []const u8 = &.{},
+    policy: ExerciseSelectionPolicy = .{},
+};
+
+pub const ExerciseSelectionRequest = struct {
+    schemaVersion: u32 = 1,
+    role: ExerciseSelectionRole,
+    catalog: []const Exercise,
+    context: ExerciseSelectionContext = .{},
+    alternativeLimit: u16 = 8,
+    rejectionLimit: u16 = 32,
+};
+
+pub const ExerciseSubstitutionRequest = struct {
+    schemaVersion: u32 = 1,
+    exerciseId: []const u8,
+    role: ExerciseSelectionRole = .{},
+    catalog: []const Exercise,
+    context: ExerciseSelectionContext = .{},
+    alternativeLimit: u16 = 8,
+    rejectionLimit: u16 = 32,
+};
+
+pub const ExerciseSelectionScore = struct {
+    targetMatch: i32 = 0,
+    movementMatch: i32 = 0,
+    familyMatch: i32 = 0,
+    preference: i32 = 0,
+    continuity: i32 = 0,
+    novelty: i32 = 0,
+    overlap: i32 = 0,
+    equipmentConvenience: i32 = 0,
+    substitutionSimilarity: i32 = 0,
+    total: i64 = 0,
+};
+
+pub const ExerciseSelectionCandidate = struct {
+    exerciseId: []const u8,
+    name: ?[]const u8 = null,
+    score: ExerciseSelectionScore,
+    reasons: []const enum { target_match, movement_match, family_match, preference, dislike, continuity, novelty, overlap, equipment_convenience, substitution_similarity } = &.{},
+};
+
+pub const ExerciseSelectionRejected = struct {
+    exerciseId: []const u8,
+    reason: enum { excluded, fixed_conflict, equipment_unavailable, restriction, progression_incompatible, movement_missing, muscle_missing, family_missing, laterality_mismatch, structural_type_mismatch },
+};
+
+pub const ExerciseSelectionResult = struct {
+    schemaVersion: u32 = 1,
+    selected: ?ExerciseSelectionCandidate = null,
+    alternatives: []const ExerciseSelectionCandidate = &.{},
+    rejected: []const ExerciseSelectionRejected = &.{},
+    unsatisfiable: bool,
+    conflict: ?enum { fixed_exercise_missing, source_exercise_missing } = null,
+    progressionStateTransfer: enum { not_applicable, independent } = .not_applicable,
+};
+
 pub const Goal = struct {
     /// Built-in IDs include hypertrophy, strength, general-fitness,
     /// muscular-endurance, powerlifting-practice, limited-equipment, and

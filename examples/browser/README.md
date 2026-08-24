@@ -14,6 +14,11 @@ the composed plan while leaving the intent snapshot untouched. Its output can
 be passed to the existing recommendation/active-workout lifecycle after the
 host accepts it.
 
+The result panel also calls the public `caudex.findSubstitutes()` operation for
+the composed primary exercise. Ranked swaps and their reason codes come from
+the engine, while today's temporary equipment and exclusions change the viable
+choices without embedding equivalence rules in the browser.
+
 The program-planning lab below the recommendation workspace uses the package's
 actual `programs` presets, `instantiateProgram`, `resolveNextSession`,
 `proposeProgramAdvancement`, and `acceptProgramAdvancement` exports. It contrasts

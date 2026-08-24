@@ -161,9 +161,17 @@ if (
   composed?.recommendation?.exercises?.length !== 3 ||
   !initial.composition?.constrained ||
   !composed.plan?.selectionMetadata?.some((slot) => slot.alternatives?.length > 0) ||
+  initial.swaps?.progressionStateTransfer !== "independent" ||
+  initial.swaps?.selected?.exerciseId !== "incline-dumbbell-press" ||
   composed.plan?.targetSlotCount !== 4
 ) {
   throw new Error("playground did not render its recommendation, composition alternatives, and explanations: " + JSON.stringify(initial));
+}
+const swapButton = elements["result-summary"].children.find((child) => child.tagName === "button");
+swapButton?.click();
+const swapped = JSON.parse(elements.output.textContent);
+if (swapped.acceptedSwap?.toExerciseId !== "incline-dumbbell-press") {
+  throw new Error("playground did not apply the engine-ranked swap");
 }
 const initialProgram = JSON.parse(elements["program-output"].textContent);
 if (

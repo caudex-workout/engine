@@ -49,12 +49,19 @@ through a separate explicit progression policy.
 ## Session composition
 
 The session planner uses the selector's shared exercise-local eligibility for
-equipment, restriction, and progression checks. It then adds slot-universe,
+role matching, equipment, restriction, and progression checks. It then adds slot-universe,
 duration, ordering, and global assignment constraints. Global reuse, movement
 variety, and equipment-transition objectives remain planner concerns rather
 than being duplicated in the session composer.
 
 The standalone API returns a winner, bounded viable alternatives, bounded
 rejections with structured reason codes, and an explicit unsatisfiable state.
+Requests support at most 2,048 catalog exercises, 64 alternatives, and 64
+rejections. Ranking retains only the requested top candidates while scanning
+the catalog, and duplicate canonical IDs cannot appear in one result.
 Direct Zig consumers access it as `caudex.exercise_selection.rankExercises`
 and `caudex.exercise_selection.findSubstitutes`.
+
+The generic C/WASM execution boundary exposes `rankExercises` and
+`findSubstitutes`; the npm facade provides synchronous methods with the same
+names and strong request/result types.

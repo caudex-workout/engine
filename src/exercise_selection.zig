@@ -10,6 +10,9 @@ const knowledge = @import("exercise_knowledge.zig");
 
 pub const Id = training.Id;
 pub const max_reasons = 16;
+pub const max_catalog_exercises: usize = 2048;
+pub const max_alternatives: usize = 64;
+pub const max_rejections: usize = 64;
 
 pub const Role = struct {
     target_muscles: []const Id = &.{},
@@ -32,11 +35,11 @@ pub const Policy = struct {
     preferred_family_ids: []const Id = &.{},
     /// A fixed program choice may be overridden only by an eligibility
     /// conflict; the conflict is retained in the result's rejected reasons.
-    dislike_penalty: i16 = 12,
-    preference_bonus: i16 = 24,
-    continuity_bonus: i16 = 20,
-    novelty_bonus: i16 = 8,
-    overlap_penalty: i16 = 18,
+    dislike_penalty: i32 = 12,
+    preference_bonus: i32 = 24,
+    continuity_bonus: i32 = 20,
+    novelty_bonus: i32 = 8,
+    overlap_penalty: i32 = 18,
 };
 
 pub const Context = struct {
@@ -63,7 +66,6 @@ pub const Reason = enum {
 };
 
 pub const EligibilityReason = enum {
-    not_in_catalog,
     excluded,
     fixed_conflict,
     equipment_unavailable,
@@ -77,18 +79,18 @@ pub const EligibilityReason = enum {
 };
 
 pub const Score = struct {
-    target_match: i16 = 0,
-    movement_match: i16 = 0,
-    family_match: i16 = 0,
-    preference: i16 = 0,
-    continuity: i16 = 0,
-    novelty: i16 = 0,
-    overlap: i16 = 0,
-    equipment_convenience: i16 = 0,
-    substitution_similarity: i16 = 0,
+    target_match: i32 = 0,
+    movement_match: i32 = 0,
+    family_match: i32 = 0,
+    preference: i32 = 0,
+    continuity: i32 = 0,
+    novelty: i32 = 0,
+    overlap: i32 = 0,
+    equipment_convenience: i32 = 0,
+    substitution_similarity: i32 = 0,
 
-    pub fn total(self: Score) i32 {
-        return @as(i32, self.target_match) + self.movement_match + self.family_match +
+    pub fn total(self: Score) i64 {
+        return @as(i64, self.target_match) + self.movement_match + self.family_match +
             self.preference + self.continuity + self.novelty + self.overlap +
             self.equipment_convenience + self.substitution_similarity;
     }
@@ -115,10 +117,14 @@ pub const Result = struct {
     alternatives: []const Candidate,
     rejected: []const Rejected,
     unsatisfiable: bool,
+    /// Set when a required fixed exercise is absent from the catalog.
+    conflict: ?Conflict = null,
     /// Substitution preserves the role, never an exercise-local progression
     /// history or load. Hosts may deliberately route shared state separately.
     progression_state_transfer: enum { not_applicable, independent } = .not_applicable,
 };
+
+pub const Conflict = enum { fixed_exercise_missing, source_exercise_missing };
 
 pub const Request = struct {
     role: Role,
@@ -138,36 +144,36 @@ pub const SubstitutionRequest = struct {
     rejection_limit: usize = 32,
 };
 
-pub const Error = error{OutputTooSmall};
+pub const Error = error{ OutputTooSmall, LimitExceeded, InvalidPolicy };
 
 pub fn rankExercises(
     request: Request,
     candidate_storage: []Candidate,
     rejected_storage: []Rejected,
 ) Error!Result {
+    try validateLimits(request.catalog.exercises.len, request.alternative_limit, request.rejection_limit);
+    try validatePolicy(request.context.policy);
+    const requested_count = std.math.add(usize, request.alternative_limit, 1) catch std.math.maxInt(usize);
+    const top_limit = @min(requested_count, candidate_storage.len);
     var count: usize = 0;
     var rejected_count: usize = 0;
     for (request.catalog.exercises) |*exercise| {
-        if (count >= candidate_storage.len and rejected_count >= rejected_storage.len)
-            return error.OutputTooSmall;
         if (eligibility(exercise.*, request.role, request.context)) |reason| {
-            if (rejected_count < @min(request.rejection_limit, rejected_storage.len)) {
-                rejected_storage[rejected_count] = .{ .exercise = exercise, .reason = reason };
-                rejected_count += 1;
-            }
+            try insertRejected(rejected_storage, &rejected_count, request.rejection_limit, .{ .exercise = exercise, .reason = reason });
             continue;
         }
-        if (count == candidate_storage.len) return error.OutputTooSmall;
-        candidate_storage[count] = scoreCandidate(exercise, request.role, request.context);
-        count += 1;
+        if (top_limit == 0) return error.OutputTooSmall;
+        if (count == top_limit and top_limit < requested_count) return error.OutputTooSmall;
+        insertCandidate(candidate_storage[0..top_limit], &count, scoreCandidate(exercise, request.role, request.context));
     }
-    sortCandidates(candidate_storage[0..count]);
-    const requested_count = std.math.add(usize, request.alternative_limit, 1) catch
-        std.math.maxInt(usize);
     const limit = @min(count, requested_count);
     const selected = if (count == 0) null else &candidate_storage[0];
     const alternatives = if (count == 0) candidate_storage[0..0] else candidate_storage[1..limit];
-    return .{ .selected = selected, .alternatives = alternatives, .rejected = rejected_storage[0..rejected_count], .unsatisfiable = count == 0 };
+    const conflict = if (request.role.fixed_exercise_id != null and request.catalog.find(request.role.fixed_exercise_id.?) == null)
+        Conflict.fixed_exercise_missing
+    else
+        null;
+    return .{ .selected = selected, .alternatives = alternatives, .rejected = rejected_storage[0..rejected_count], .unsatisfiable = count == 0, .conflict = conflict };
 }
 
 pub fn findSubstitutes(
@@ -175,37 +181,37 @@ pub fn findSubstitutes(
     candidate_storage: []Candidate,
     rejected_storage: []Rejected,
 ) Error!Result {
+    try validateLimits(request.catalog.exercises.len, request.alternative_limit, request.rejection_limit);
+    try validatePolicy(request.context.policy);
     const original = request.catalog.find(request.exercise) orelse {
         return .{
             .selected = null,
             .alternatives = candidate_storage[0..0],
             .rejected = rejected_storage[0..0],
             .unsatisfiable = true,
+            .conflict = .source_exercise_missing,
             .progression_state_transfer = .independent,
         };
     };
+    const requested_count = std.math.add(usize, request.alternative_limit, 1) catch std.math.maxInt(usize);
+    const top_limit = @min(requested_count, candidate_storage.len);
     var kept: usize = 0;
     var rejected_count: usize = 0;
     for (request.catalog.exercises) |*exercise| {
         if (exercise.id.eql(original.id)) continue;
         if (eligibility(exercise.*, request.role, request.context)) |reason| {
-            if (rejected_count < @min(request.rejection_limit, rejected_storage.len)) {
-                rejected_storage[rejected_count] = .{ .exercise = exercise, .reason = reason };
-                rejected_count += 1;
-            }
+            try insertRejected(rejected_storage, &rejected_count, request.rejection_limit, .{ .exercise = exercise, .reason = reason });
             continue;
         }
-        if (kept == candidate_storage.len) return error.OutputTooSmall;
-        candidate_storage[kept] = scoreCandidate(exercise, request.role, request.context);
-        const candidate = &candidate_storage[kept];
+        if (top_limit == 0) return error.OutputTooSmall;
+        if (kept == top_limit and top_limit < requested_count) return error.OutputTooSmall;
+        var scored = scoreCandidate(exercise, request.role, request.context);
+        const candidate = &scored;
         candidate.score.substitution_similarity = similarity(original.*, exercise.*, request.role);
         if (candidate.score.substitution_similarity != 0)
             addReason(candidate, .substitution_similarity) catch {};
-        kept += 1;
+        insertCandidate(candidate_storage[0..top_limit], &kept, scored);
     }
-    sortCandidates(candidate_storage[0..kept]);
-    const requested_count = std.math.add(usize, request.alternative_limit, 1) catch
-        std.math.maxInt(usize);
     const limit = @min(kept, requested_count);
     return .{
         .selected = if (kept == 0) null else &candidate_storage[0],
@@ -214,6 +220,18 @@ pub fn findSubstitutes(
         .unsatisfiable = kept == 0,
         .progression_state_transfer = .independent,
     };
+}
+
+fn validateLimits(catalog_count: usize, alternative_limit: usize, rejection_limit: usize) Error!void {
+    if (catalog_count > max_catalog_exercises or
+        alternative_limit > max_alternatives or
+        rejection_limit > max_rejections) return error.LimitExceeded;
+}
+
+fn validatePolicy(policy: Policy) Error!void {
+    if (policy.dislike_penalty < 0 or policy.preference_bonus < 0 or
+        policy.continuity_bonus < 0 or policy.novelty_bonus < 0 or
+        policy.overlap_penalty < 0) return error.InvalidPolicy;
 }
 
 pub fn eligibility(exercise: training.Exercise, role: Role, context: Context) ?EligibilityReason {
@@ -251,13 +269,13 @@ fn scoreCandidate(exercise: *const training.Exercise, role: Role, context: Conte
     candidate.score.family_match = if (role.exercise_families.len == 0) 0 else if (anyFamily(exercise.*, role.exercise_families)) 25 else 0;
     if (contains(context.policy.preferred_exercises, exercise.id)) candidate.score.preference = context.policy.preference_bonus;
     if (anyFamily(exercise.*, context.policy.preferred_family_ids))
-        candidate.score.preference += context.policy.preference_bonus;
-    if (contains(context.policy.disliked_exercises, exercise.id)) candidate.score.preference -= context.policy.dislike_penalty;
+        candidate.score.preference +|= context.policy.preference_bonus;
+    if (contains(context.policy.disliked_exercises, exercise.id)) candidate.score.preference -|= context.policy.dislike_penalty;
     if (contains(context.recent_exercise_ids, exercise.id)) {
         candidate.score.continuity = if (context.policy.continuity == .dynamic or context.policy.continuity == .novelty_biased) 0 else context.policy.continuity_bonus;
-        if (context.policy.continuity == .novelty_biased) candidate.score.novelty = -context.policy.novelty_bonus;
+        if (context.policy.continuity == .novelty_biased) candidate.score.novelty = negate(context.policy.novelty_bonus);
     } else if (context.policy.continuity == .novelty_biased) candidate.score.novelty = context.policy.novelty_bonus;
-    if (contains(context.already_selected_exercise_ids, exercise.id) or anyFamily(exercise.*, context.already_selected_family_ids)) candidate.score.overlap = -context.policy.overlap_penalty;
+    if (contains(context.already_selected_exercise_ids, exercise.id) or anyFamily(exercise.*, context.already_selected_family_ids)) candidate.score.overlap = negate(context.policy.overlap_penalty);
     if (exercise.knowledge) |item| {
         if (item.setupBurden) |burden| candidate.score.equipment_convenience = switch (burden) {
             .trivial => 4,
@@ -267,7 +285,18 @@ fn scoreCandidate(exercise: *const training.Exercise, role: Role, context: Conte
         };
     }
     addReasons(&candidate);
+    const preferred = contains(context.policy.preferred_exercises, exercise.id) or
+        anyFamily(exercise.*, context.policy.preferred_family_ids);
+    if (preferred and !hasReason(&candidate, .preference))
+        addReason(&candidate, .preference) catch {};
+    if (contains(context.policy.disliked_exercises, exercise.id) and
+        !hasReason(&candidate, .dislike)) addReason(&candidate, .dislike) catch {};
     return candidate;
+}
+
+fn hasReason(candidate: *const Candidate, reason: Reason) bool {
+    for (candidate.reasonSlice()) |existing| if (existing == reason) return true;
+    return false;
 }
 
 fn addReasons(candidate: *Candidate) void {
@@ -289,11 +318,61 @@ fn addReason(candidate: *Candidate, reason: Reason) error{Full}!void {
 fn sortCandidates(candidates: []Candidate) void {
     std.sort.heap(Candidate, candidates, {}, compareCandidates);
 }
+/// Keep only the best bounded prefix. The catalog is never copied into a
+/// second, catalog-sized allocation. Duplicate IDs already in the prefix are
+/// replaced only when the later record is strictly better; ties retain the
+/// first record, making malformed duplicate catalogs deterministic.
+fn insertCandidate(storage: []Candidate, count: *usize, candidate: Candidate) void {
+    for (storage[0..count.*]) |*existing| {
+        if (existing.exercise.id.eql(candidate.exercise.id)) {
+            if (compareCandidates({}, candidate, existing.*)) existing.* = candidate;
+            sortCandidates(storage[0..count.*]);
+            return;
+        }
+    }
+    if (count.* < storage.len) {
+        storage[count.*] = candidate;
+        count.* += 1;
+        sortCandidates(storage[0..count.*]);
+    } else if (storage.len != 0 and compareCandidates({}, candidate, storage[storage.len - 1])) {
+        storage[storage.len - 1] = candidate;
+        sortCandidates(storage);
+    }
+}
+
+fn rejectedLess(a: Rejected, b: Rejected) bool {
+    if (a.reason != b.reason) return @intFromEnum(a.reason) < @intFromEnum(b.reason);
+    return std.mem.order(u8, a.exercise.id.bytes, b.exercise.id.bytes) == .lt;
+}
+
+fn insertRejected(storage: []Rejected, count: *usize, limit: usize, rejected: Rejected) Error!void {
+    if (limit == 0) return;
+    if (storage.len == 0) return error.OutputTooSmall;
+    for (storage[0..count.*]) |existing| if (existing.exercise.id.eql(rejected.exercise.id)) return;
+    const bounded = @min(limit, storage.len);
+    if (count.* < bounded) {
+        storage[count.*] = rejected;
+        count.* += 1;
+    } else if (storage.len < limit) {
+        return error.OutputTooSmall;
+    } else if (rejectedLess(rejected, storage[count.* - 1])) {
+        storage[count.* - 1] = rejected;
+    } else return;
+    std.sort.heap(Rejected, storage[0..count.*], {}, struct {
+        fn less(_: void, a: Rejected, b: Rejected) bool {
+            return rejectedLess(a, b);
+        }
+    }.less);
+}
+
 fn compareCandidates(_: void, a: Candidate, b: Candidate) bool {
     const as = a.score.total();
     const bs = b.score.total();
     if (as != bs) return as > bs;
     return std.mem.order(u8, a.exercise.id.bytes, b.exercise.id.bytes) == .lt;
+}
+fn negate(value: i32) i32 {
+    return if (value == std.math.minInt(i32)) std.math.maxInt(i32) else -value;
 }
 fn contains(ids: []const Id, id: Id) bool {
     for (ids) |candidate| if (candidate.eql(id)) return true;
@@ -316,8 +395,8 @@ fn anyFamily(exercise: training.Exercise, ids: []const Id) bool {
     if (exercise.knowledge) |k| if (k.familyId) |f| for (ids) |id| if (std.mem.eql(u8, f, id.bytes)) return true;
     return false;
 }
-fn similarity(original: training.Exercise, candidate: training.Exercise, role: Role) i16 {
-    var score: i16 = 0;
+fn similarity(original: training.Exercise, candidate: training.Exercise, role: Role) i32 {
+    var score: i32 = 0;
     if (role.movement_patterns.len != 0) {
         if (anyMovement(candidate, role.movement_patterns)) score += 35;
     } else if (sameMovement(original, candidate)) score += 35;
@@ -388,8 +467,8 @@ test "fixed exercise conflict is explicit when equipment makes it impossible" {
         .context = .{ .available_equipment_ids = &.{} },
     }, &candidates, &rejected);
     try std.testing.expect(result.unsatisfiable);
-    try std.testing.expectEqual(EligibilityReason.equipment_unavailable, result.rejected[0].reason);
-    try std.testing.expectEqual(EligibilityReason.fixed_conflict, result.rejected[1].reason);
+    try std.testing.expectEqual(EligibilityReason.fixed_conflict, result.rejected[0].reason);
+    try std.testing.expectEqual(EligibilityReason.equipment_unavailable, result.rejected[1].reason);
 }
 
 test "progression incompatibility is a hard rejection" {
@@ -485,4 +564,97 @@ test "substitution alternative limits are safe and exact" {
         .alternative_limit = 1,
     }, &candidates, &rejected);
     try std.testing.expectEqual(@as(usize, 1), one.alternatives.len);
+}
+
+test "bounded ranking handles large duplicate catalogs and zero rejection limit" {
+    const exercise = training.Exercise{ .id = try .parse("repeated") };
+    var catalog: [1024]training.Exercise = undefined;
+    for (&catalog) |*item| item.* = exercise;
+    var candidates: [1]Candidate = undefined;
+    var rejected: [0]Rejected = .{};
+    const result = try rankExercises(.{
+        .role = .{},
+        .catalog = .{ .exercises = &catalog },
+        .rejection_limit = 0,
+        .alternative_limit = 0,
+    }, &candidates, &rejected);
+    try std.testing.expectEqual(@as(usize, 0), result.alternatives.len);
+    try std.testing.expectEqual(@as(usize, 1), @as(usize, if (result.selected != null) 1 else 0));
+    try std.testing.expectEqual(@as(usize, 0), result.rejected.len);
+}
+
+test "selection limits reject above-bound requests and substitution reports missing source" {
+    var catalog: [max_catalog_exercises + 1]training.Exercise = undefined;
+    for (&catalog, 0..) |*exercise, index| {
+        exercise.* = .{ .id = .{ .bytes = try std.fmt.allocPrint(std.testing.allocator, "exercise-{d}", .{index}) } };
+    }
+    defer for (&catalog) |exercise| std.testing.allocator.free(exercise.id.bytes);
+    var candidate: [1]Candidate = undefined;
+    var rejected: [1]Rejected = undefined;
+    try std.testing.expectError(error.LimitExceeded, rankExercises(.{
+        .role = .{},
+        .catalog = .{ .exercises = &catalog },
+        .alternative_limit = 0,
+        .rejection_limit = 0,
+    }, &candidate, &rejected));
+
+    const available = training.Exercise{ .id = try .parse("available") };
+    const missing = try findSubstitutes(.{
+        .exercise = try .parse("missing"),
+        .catalog = .{ .exercises = &.{available} },
+        .alternative_limit = 0,
+        .rejection_limit = 0,
+    }, &candidate, &rejected);
+    try std.testing.expectEqual(Conflict.source_exercise_missing, missing.conflict.?);
+}
+
+test "empty candidate storage is valid when every exercise is rejected" {
+    const exercise = training.Exercise{ .id = try .parse("excluded") };
+    var candidates: [0]Candidate = .{};
+    var rejected: [1]Rejected = undefined;
+    const result = try rankExercises(.{
+        .role = .{},
+        .catalog = .{ .exercises = &.{exercise} },
+        .context = .{ .policy = .{ .excluded_exercises = &.{exercise.id} } },
+    }, &candidates, &rejected);
+    try std.testing.expect(result.unsatisfiable);
+    try std.testing.expectEqual(@as(usize, 1), result.rejected.len);
+}
+
+test "extreme policy weights remain bounded and deterministic" {
+    const a = training.Exercise{ .id = try .parse("a") };
+    const b = training.Exercise{ .id = try .parse("b") };
+    var candidates: [2]Candidate = undefined;
+    var rejected: [1]Rejected = undefined;
+    const result = try rankExercises(.{
+        .role = .{},
+        .catalog = .{ .exercises = &.{ a, b } },
+        .context = .{ .policy = .{
+            .preferred_exercises = &.{a.id},
+            .preference_bonus = std.math.maxInt(i32),
+            .dislike_penalty = std.math.maxInt(i32),
+        } },
+    }, &candidates, &rejected);
+    try std.testing.expect(result.selected.?.exercise.id.eql(a.id));
+    try std.testing.expect(result.selected.?.score.total() <= std.math.maxInt(i64));
+}
+
+test "undersized output storage and negative policy weights are rejected" {
+    const a = training.Exercise{ .id = try .parse("a") };
+    const b = training.Exercise{ .id = try .parse("b") };
+    var one_candidate: [1]Candidate = undefined;
+    var one_rejected: [1]Rejected = undefined;
+    try std.testing.expectError(error.OutputTooSmall, rankExercises(.{
+        .role = .{},
+        .catalog = .{ .exercises = &.{ a, b } },
+        .alternative_limit = 1,
+        .rejection_limit = 0,
+    }, &one_candidate, &one_rejected));
+    try std.testing.expectError(error.InvalidPolicy, rankExercises(.{
+        .role = .{},
+        .catalog = .{ .exercises = &.{a} },
+        .context = .{ .policy = .{ .preference_bonus = -1 } },
+        .alternative_limit = 0,
+        .rejection_limit = 0,
+    }, &one_candidate, &one_rejected));
 }

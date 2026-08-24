@@ -135,13 +135,13 @@ const compositionRequest = {
     })),
   },
   catalog: [
-    { id: "bench-press", name: "Bench Press", equipmentIds: ["barbell", "adjustable-bench"] },
-    { id: "incline-dumbbell-press", name: "Incline Dumbbell Press", equipmentIds: ["dumbbell", "adjustable-bench"] },
-    { id: "flat-dumbbell-press", name: "Flat Dumbbell Press", equipmentIds: ["dumbbell", "adjustable-bench"] },
-    { id: "machine-chest-press", name: "Machine Chest Press", equipmentIds: ["chest-press-machine"] },
-    { id: "chest-supported-row", name: "Chest-Supported Row", equipmentIds: ["dumbbell", "adjustable-bench"] },
-    { id: "one-arm-dumbbell-row", name: "One-Arm Dumbbell Row", equipmentIds: ["dumbbell", "adjustable-bench"] },
-    { id: "seated-cable-row", name: "Seated Cable Row", equipmentIds: ["cable-stack"] },
+    { id: "bench-press", name: "Bench Press", equipmentIds: ["barbell", "adjustable-bench"], movementTags: ["horizontal-push"] },
+    { id: "incline-dumbbell-press", name: "Incline Dumbbell Press", equipmentIds: ["dumbbell", "adjustable-bench"], movementTags: ["horizontal-push"] },
+    { id: "flat-dumbbell-press", name: "Flat Dumbbell Press", equipmentIds: ["dumbbell", "adjustable-bench"], movementTags: ["horizontal-push"] },
+    { id: "machine-chest-press", name: "Machine Chest Press", equipmentIds: ["chest-press-machine"], movementTags: ["horizontal-push"] },
+    { id: "chest-supported-row", name: "Chest-Supported Row", equipmentIds: ["dumbbell", "adjustable-bench"], movementTags: ["horizontal-pull"] },
+    { id: "one-arm-dumbbell-row", name: "One-Arm Dumbbell Row", equipmentIds: ["dumbbell", "adjustable-bench"], movementTags: ["horizontal-pull"] },
+    { id: "seated-cable-row", name: "Seated Cable Row", equipmentIds: ["cable-stack"], movementTags: ["horizontal-pull"] },
     { id: "cable-lateral-raise", name: "Cable Lateral Raise", equipmentIds: ["cable-stack"] },
     { id: "dumbbell-lateral-raise", name: "Dumbbell Lateral Raise", equipmentIds: ["dumbbell"] },
   ],
@@ -331,21 +331,54 @@ function renderCompositionDemo() {
     preferences: today.preferences,
   });
   const recommendation = JSON.parse(elements.output.textContent);
-  elements.output.textContent = formatJson({ ...recommendation, composition: result });
   const outcome = result.successful ?? result.constrained;
   if (!outcome) {
+    elements.output.textContent = formatJson({ ...recommendation, composition: result });
     setActionStatus(`Session composition returned ${Object.keys(result)[0]}.`, true);
     return;
   }
   const exercises = outcome.recommendation.exercises ?? [];
+  const swaps = exercises[0] ? caudex.findSubstitutes({
+    exerciseId: exercises[0].exerciseId,
+    role: { movementPatterns: ["horizontal-push"] },
+    catalog: compositionRequest.catalog,
+    context: {
+      availableEquipmentIds: [...equipment],
+      excludedExerciseIds: today.excludedExerciseIds,
+      alreadySelectedExerciseIds: exercises.slice(1).map((item) => item.exerciseId),
+    },
+    alternativeLimit: 3,
+  }) : null;
+  elements.output.textContent = formatJson({ ...recommendation, composition: result, swaps });
   const alternativeCount = (outcome.plan.selectionMetadata ?? [])
     .reduce((count, slot) => count + (slot.alternatives?.length ?? 0), 0);
   const omitted = (outcome.plan.omittedReasons ?? [])
     .map((item) => `${item.slotId}: ${item.reason}`);
+  const exerciseNodes = exercises.map((exercise) =>
+    element("div", displayName(exercise.exerciseId), "exercise-name"));
+  const swapButton = element("button", "Swap primary exercise", "secondary");
+  swapButton.addEventListener("click", () => {
+    const choices = [swaps?.selected, ...(swaps?.alternatives ?? [])].filter(Boolean);
+    if (choices.length === 0) {
+      setActionStatus("No eligible substitute under today's constraints.");
+      return;
+    }
+    exerciseNodes[0].textContent = displayName(choices[0].exerciseId);
+    swapButton.textContent = `Applied ${displayName(choices[0].exerciseId)}`;
+    elements.output.textContent = formatJson({
+      ...recommendation,
+      composition: result,
+      swaps,
+      acceptedSwap: { fromExerciseId: exercises[0].exerciseId, toExerciseId: choices[0].exerciseId },
+    });
+    setActionStatus(`Applied swap: ${displayName(choices[0].exerciseId)} · ${choices[0].reasons.join(", ")}`);
+  });
   elements["result-summary"].replaceChildren(
     element("p", `${Object.hasOwn(result, "constrained") ? "Constrained" : "Complete"} session · ${outcome.plan.estimatedDurationMinutes ?? "unknown"} min estimate`),
-    ...exercises.map((exercise) => element("div", displayName(exercise.exerciseId), "exercise-name")),
+    ...exerciseNodes,
     element("p", `${alternativeCount} viable slot alternatives · ${outcome.plan.decisionReasons?.length ?? 0} structured planning reasons`),
+    element("p", `${swaps?.selected ? 1 + swaps.alternatives.length : 0} role-preserving primary swaps under today's equipment`),
+    swapButton,
     ...omitted.map((reason) => element("p", `Omitted ${reason}`)),
     metricList(exercises.flatMap((exercise) => exercise.sets.flatMap((set) => set.targetMetrics ?? []))),
   );
