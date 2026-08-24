@@ -29,7 +29,19 @@ h1 em { color: var(--acid); font-family: Georgia, serif; font-weight: 400; }
 .lede { max-width: 690px; color: var(--muted); font-size: clamp(1rem,2vw,1.25rem); line-height: 1.65; }
 .workspace { display: grid; grid-template-columns: minmax(0,1.05fr) minmax(22rem,.95fr); border: 1px solid var(--line); border-radius: 1rem; overflow: hidden; background: var(--surface); box-shadow: 0 2rem 6rem rgba(0,0,0,.24); }
 .program-lab { margin-top: 1.5rem; padding: clamp(1.25rem,3vw,2rem); border: 1px solid var(--line); border-radius: 1rem; background: var(--surface); box-shadow: 0 2rem 6rem rgba(0,0,0,.18); }
+.volume-lab { margin-top: 1.5rem; padding: clamp(1.25rem,3vw,2rem); border: 1px solid var(--line); border-radius: 1rem; background: var(--surface); box-shadow: 0 2rem 6rem rgba(0,0,0,.18); }
 .program-intro { max-width: 60rem; color: var(--muted); line-height: 1.6; }
+.volume-scope { margin: 1rem 0; color: var(--muted); font: .72rem ui-monospace, monospace; text-transform: uppercase; letter-spacing: .08em; }
+.volume-progress { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
+.volume-card { padding: 1rem; border: 1px solid var(--line); border-radius: .55rem; background: var(--raised); }
+.volume-muscle { color: var(--ink); font-weight: 700; }
+.volume-total { margin-top: .4rem; color: var(--acid); font: .85rem ui-monospace, monospace; }
+.volume-meter { height: .4rem; margin: .8rem 0 .65rem; overflow: hidden; border-radius: 999px; background: #101210; }
+.volume-meter span { display: block; height: 100%; border-radius: inherit; background: var(--acid); }
+.volume-detail { margin: .45rem 0 0; color: var(--muted); font-size: .72rem; line-height: 1.45; }
+.volume-estimate { margin-top: 1rem; padding: 1rem; border: 1px solid var(--line); border-radius: .55rem; background: var(--acid-soft); }
+.volume-estimate strong { color: var(--acid); font-size: .8rem; }
+.volume-estimate p { margin: .5rem 0 0; color: var(--ink); font: .75rem ui-monospace, monospace; }
 .program-controls { display: flex; align-items: end; justify-content: space-between; gap: 1rem; margin: 1.5rem 0; }
 .panel { min-width: 0; padding: clamp(1.25rem,3vw,2rem); }
 .result-panel { border-left: 1px solid var(--line); background: var(--raised); }
@@ -71,6 +83,7 @@ footer { border-top: 1px solid var(--line); color: var(--muted); font-size: .72r
   .editor-footer { align-items: flex-start; flex-direction: column; }
   .actions { width: 100%; flex-wrap: wrap; }
   .program-controls { align-items: stretch; flex-direction: column; }
+  .volume-progress { grid-template-columns: 1fr; }
   .primary { flex: 1; }
   .local-badge { display: none; }
 }

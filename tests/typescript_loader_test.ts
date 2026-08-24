@@ -20,6 +20,8 @@ import {
   type CompositionRequest,
   type ExerciseSelectionRequest,
   type ExerciseSubstitutionRequest,
+  type VolumeCalculateRequest,
+  type VolumeEstimateRequest,
 } from "../packages/npm/workout-engine/src/index.ts";
 
 const [wasmPath, fixturePath, portableFixturePath] = process.argv.slice(2);
@@ -82,6 +84,60 @@ const selectionRequest = {
 const selection = caudex.rankExercises(selectionRequest);
 if (selection.schemaVersion !== 1 || selection.selected?.exerciseId !== "incline-dumbbell-press") {
   throw new Error("typed exercise selection did not return the expected candidate");
+}
+const volumeCatalog: Exercise[] = [{
+  id: "bench-volume",
+  muscleContributions: [
+    { muscleId: "chest", role: "primary" },
+    { muscleId: "triceps", role: "secondary" },
+  ],
+}];
+const volumeRequest = {
+  schemaVersion: 1,
+  catalog: volumeCatalog,
+  history: { workouts: [{
+    id: "volume-workout",
+    startedAt: "2026-08-01T10:00:00Z",
+    completedAt: "2026-08-01T11:00:00Z",
+    exercises: [{ exerciseId: "bench-volume", sets: [
+      { id: "working", kind: "working", actualMetrics: [], status: "completed" },
+      { id: "warmup", kind: "warmup", actualMetrics: [], status: "completed" },
+      { id: "skipped", kind: "working", actualMetrics: [], status: "skipped" },
+    ] }],
+  }] },
+  prescribedWorkouts: [{
+    id: "volume-workout",
+    scheduledAt: "2026-08-01T10:00:00Z",
+    exercises: [{ exerciseId: "bench-volume", sets: [
+      { id: "working", kind: "working" },
+      { id: "skipped", kind: "working" },
+    ] }],
+  }],
+  targets: [{
+    muscleId: "chest",
+    minimum: 2_000_000,
+    preferredMinimum: 3_000_000,
+    hardCap: 4_000_000,
+    source: { kind: "program_strategy", id: "test-volume" },
+  }],
+  scope: { allHistory: {} },
+} satisfies VolumeCalculateRequest;
+const volumeState = caudex.calculateVolume(volumeRequest);
+const chestVolume = volumeState.muscles.find((muscle) => muscle.muscleId === "chest");
+const tricepsVolume = volumeState.muscles.find((muscle) => muscle.muscleId === "triceps");
+if (chestVolume?.completedCredit !== 1_000_000 || chestVolume.prescribedCredit !== 2_000_000 ||
+    chestVolume.remaining.required !== 1_000_000 || tricepsVolume?.completedCredit !== 500_000) {
+  throw new Error("typed volume calculation did not preserve prescription, completion, and indirect credit");
+}
+const estimateRequest = {
+  schemaVersion: 1,
+  catalog: volumeCatalog,
+  work: [{ exerciseId: "bench-volume", setCount: 3, kind: "working" }],
+} satisfies VolumeEstimateRequest;
+const volumeImpact = caudex.estimateVolume(estimateRequest);
+if (volumeImpact.muscles.find((muscle) => muscle.muscleId === "chest")?.credit !== 3_000_000 ||
+    volumeImpact.muscles.find((muscle) => muscle.muscleId === "triceps")?.credit !== 1_500_000) {
+  throw new Error("typed prospective volume did not use retrospective policy semantics");
 }
 const substitutionRequest = {
   schemaVersion: 1,
@@ -440,6 +496,21 @@ if (!("constrained" in shortComposition) || shortComposition.constrained.plan.om
 const unavailableRequired = caudex.composeSession({ ...compositionRequest, constraints: { ...compositionRequest.constraints, excludedExerciseIds: ["bench-press"] } });
 if (!("unsatisfiable" in unavailableRequired) || unavailableRequired.unsatisfiable.violations.length === 0) {
   throw new Error("unavailable required exercise did not produce a structured hard conflict");
+}
+const cappedTricepsState = caudex.calculateVolume({
+  catalog: [{ id: "bench-press", muscleContributions: [{ muscleId: "triceps", role: "secondary" }] }],
+  targets: [{ muscleId: "triceps", hardCap: 0, source: { kind: "program_strategy", id: "cap-test" } }],
+});
+const cappedComposition = caudex.composeSession({
+  ...compositionRequest,
+  catalog: compositionRequest.catalog.map((exercise) => exercise.id === "bench-press"
+    ? { ...exercise, muscleContributions: [{ muscleId: "triceps", role: "secondary" as const }] }
+    : exercise),
+  volumeState: cappedTricepsState,
+  volumePolicy: {},
+});
+if (!("unsatisfiable" in cappedComposition)) {
+  throw new Error("public composition ignored indirect muscle-volume hard caps");
 }
 const mixedRequest: ProgramRecommendationRequest = {
   schemaVersion: 1,

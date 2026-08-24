@@ -5,7 +5,7 @@ const assets = @import("repository_test_assets");
 test "public root exports are intentional" {
     const declarations = std.meta.declarations(caudex);
 
-    try std.testing.expectEqual(@as(usize, 24), declarations.len);
+    try std.testing.expectEqual(@as(usize, 25), declarations.len);
     try std.testing.expectEqualStrings("canonical", declarations[0].name);
     try std.testing.expectEqualStrings("canonical_json", declarations[1].name);
     try std.testing.expectEqualStrings("athlete_profile", declarations[2].name);
@@ -28,8 +28,9 @@ test "public root exports are intentional" {
     try std.testing.expectEqualStrings("session_composer", declarations[19].name);
     try std.testing.expectEqualStrings("rpe_top_set_backoff", declarations[20].name);
     try std.testing.expectEqualStrings("training", declarations[21].name);
-    try std.testing.expectEqualStrings("progression", declarations[22].name);
-    try std.testing.expectEqualStrings("programs", declarations[23].name);
+    try std.testing.expectEqualStrings("volume", declarations[22].name);
+    try std.testing.expectEqualStrings("progression", declarations[23].name);
+    try std.testing.expectEqualStrings("programs", declarations[24].name);
 }
 
 test "core source has no forbidden effect or dependency imports" {

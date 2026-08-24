@@ -119,7 +119,7 @@ export interface CompositionSlot<TConfig = JsonValue> { id: string; presence?: C
 export interface CompositionIntent { definitionId: string; definitionVersion: number; definitionFingerprint: string; instanceId: string; occurrenceId: string; blockId: string; roleId: string; planningStateRevision: number; strategy?: "fixed" | "adaptive_hypertrophy"; slots: CompositionSlot[] }
 export interface CompositionConstraints { availableEquipmentIds?: string[]; requiredExerciseIds?: string[]; excludedExerciseIds?: string[]; excludedFamilyIds?: string[]; excludedMovementPatternIds?: string[]; excludedRestrictionTagIds?: string[]; excludedEquipmentIds?: string[]; minimumExercises?: number; maximumExercises?: number; availableMinutes?: number; hardMaximumMinutes?: number; targetDurationMinutes?: number; unknownDurationPolicy?: "allow" | "reject" }
 export interface CompositionDurationEstimate { slotId: string; exerciseId: string; minutes: number }
-export interface CompositionRequest { schemaVersion?: 1; asOf: string; intent: CompositionIntent; catalog: Exercise[]; constraints?: CompositionConstraints; durationEstimates?: CompositionDurationEstimate[]; history?: { workouts?: CompletedWorkout[]; summaries?: JsonValue }; preferences?: ExercisePreference[]; musclePriorities?: MusclePriority[]; candidateLimitPerSlot?: number; beamWidth?: number }
+export interface CompositionRequest { schemaVersion?: 1; asOf: string; intent: CompositionIntent; catalog: Exercise[]; constraints?: CompositionConstraints; durationEstimates?: CompositionDurationEstimate[]; history?: { workouts?: CompletedWorkout[]; summaries?: JsonValue }; preferences?: ExercisePreference[]; musclePriorities?: MusclePriority[]; volumeState?: MuscleVolumeState; volumePolicy?: VolumeCreditPolicy; candidateLimitPerSlot?: number; beamWidth?: number }
 export interface CompositionScore { program: number; training: number; preference: number }
 export interface CompositionAlternative { exerciseId: string; localRank: number; estimatedDurationMinutes?: number; score: CompositionScore; rankedLowerBecause: "lower_score" | "deterministic_tie_break" | "global_assignment_tradeoff" }
 export interface CompositionSelectionMetadata { slotId: string; exerciseId: string; position: number; selectionKind: "fixed" | "optimized"; eligibleCandidateCount?: number; localRank?: number; estimatedDurationMinutes?: number; score: CompositionScore; alternatives?: CompositionAlternative[] }
@@ -494,6 +494,25 @@ export interface Program {
   evaluate(completedWorkout: CompletedWorkout, options?: { asOf?: string; history?: EvaluationRequest["history"] }): EvaluationResult;
   acceptState(evaluation: EvaluationResult): Promise<unknown>;
 }
+export type VolumeUnits = number;
+export type VolumePolicyMode = "role_credit" | "catalog_weight" | "direct_only";
+export interface VolumeCreditPolicy { id?: string; version?: number; mode?: VolumePolicyMode; primaryCredit?: VolumeUnits; secondaryCredit?: VolumeUnits; stabilizerCredit?: VolumeUnits; customCredit?: VolumeUnits; countPartial?: boolean; countFailed?: boolean; qualifyingSetKinds?: string[]; maximumCreditPerMusclePerSet?: VolumeUnits }
+export type VolumeScope = { allHistory: {} } | { interval: { from: string; through: string } } | { programWindow: { instanceId: string; blockId: string; microcycleIndex: number } };
+export interface VolumeTargetSource { kind: "program_template" | "program_strategy" | "block" | "athlete_override" | "temporary_adjustment"; id: string; version?: number }
+export interface VolumeTarget { muscleId: string; minimum?: VolumeUnits; preferredMinimum?: VolumeUnits; preferredMaximum?: VolumeUnits; hardCap?: VolumeUnits; desiredExposures?: number; priorityWeight?: number; source: VolumeTargetSource }
+export interface PrescribedVolumeSet { id?: string; kind: string }
+export interface PrescribedVolumeExercise { exerciseId: string; sets: PrescribedVolumeSet[] }
+export interface PrescribedVolumeWorkout { id: string; scheduledAt: string; exercises: PrescribedVolumeExercise[] }
+export interface VolumeCalculateRequest { schemaVersion?: 1; catalog: Exercise[]; history?: { workouts?: CompletedWorkout[]; summaries?: JsonValue }; prescribedWorkouts?: PrescribedVolumeWorkout[]; targets?: VolumeTarget[]; policy?: VolumeCreditPolicy; scope?: VolumeScope }
+export interface VolumeProposedWork { exerciseId: string; setCount: number; kind?: string }
+export interface VolumeEstimateRequest { schemaVersion?: 1; catalog: Exercise[]; work: VolumeProposedWork[]; policy?: VolumeCreditPolicy }
+export interface VolumeContribution { phase: "prescribed" | "completed"; muscleId: string; workoutId: string; exerciseId: string; setId?: string; role: MuscleContribution["role"]; credit: VolumeUnits }
+export type VolumeStatus = "no_target" | "below_minimum" | "below_preferred" | "within_preferred" | "above_preferred" | "within_limits" | "at_hard_cap" | "above_hard_cap";
+export interface VolumeRemaining { required: VolumeUnits | null; preferred: VolumeUnits | null; maximumAdditional: VolumeUnits | null }
+export interface MuscleVolumeObservation { muscleId: string; prescribedRawSets: number; completedRawSets: number; directRawSets: number; indirectRawSets: number; prescribedCredit: VolumeUnits; completedCredit: VolumeUnits; prescribedExposureCount: number; exposureCount: number; remainingExposures: number | null; lastExposure?: string; target?: VolumeTarget; remaining: VolumeRemaining; excessAbovePreferred: VolumeUnits; status: VolumeStatus }
+export interface MuscleVolumeState { policyId: string; policyVersion: number; scope: VolumeScope; muscles: MuscleVolumeObservation[]; contributions: VolumeContribution[] }
+export interface VolumeEstimateImpact { policyId: string; policyVersion: number; muscles: Array<{ muscleId: string; rawSets: number; credit: VolumeUnits }> }
+
 export interface RuntimeFacade {
   recommend(request: RecommendationRequest): RecommendationResult;
   rankExercises(request: ExerciseSelectionRequest): ExerciseSelectionResult;
@@ -507,6 +526,8 @@ export interface RuntimeFacade {
   instantiateRecommendation(request: RecommendationInstantiationRequest): InstantiationResult;
   instantiateTemplate(request: TemplateInstantiationRequest): InstantiationResult;
   completeForEvaluation(request: CompletionConversionRequest): CompletionConversionResult;
+  calculateVolume(request: VolumeCalculateRequest): MuscleVolumeState;
+  estimateVolume(request: VolumeEstimateRequest): VolumeEstimateImpact;
 }
 export interface WorkflowFacade {
   recommend(request: RecommendationRequest): RecommendationResult;
@@ -536,6 +557,8 @@ export interface Caudex {
   instantiateRecommendation(request: RecommendationInstantiationRequest): InstantiationResult;
   instantiateTemplate(request: TemplateInstantiationRequest): InstantiationResult;
   completeForEvaluation(request: CompletionConversionRequest): CompletionConversionResult;
+  calculateVolume(request: VolumeCalculateRequest): MuscleVolumeState;
+  estimateVolume(request: VolumeEstimateRequest): VolumeEstimateImpact;
   listMethodologies(): DiscoveryRegistry;
   describeMethodology(id: string): MethodologyDescriptor;
   listCapabilities(): DiscoveryRegistry;

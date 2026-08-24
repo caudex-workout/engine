@@ -73,6 +73,17 @@
         <div id="program-summary" class="result-summary"><p>Loading the program planner…</p></div>
         <details class="raw-result"><summary>Definition, instance, state, intent, and proposal JSON</summary><pre id="program-output"></pre></details>
       </section>
+      <section class="volume-lab" aria-label="Muscle volume progress">
+        <div class="panel-heading">
+          <div><span class="step">05</span><h2>Muscle-volume state</h2></div>
+          <span id="volume-status" class="result-status">Waiting</span>
+        </div>
+        <p class="program-intro">A single authoritative volume calculation separates prescribed work from completed work, credits direct and indirect contributions, and exposes what the next session can add.</p>
+        <div id="volume-scope" class="volume-scope"></div>
+        <div id="volume-progress" class="volume-progress"><p>Loading volume state…</p></div>
+        <div id="volume-estimate" class="volume-estimate"></div>
+        <details class="raw-result"><summary>Volume state and prospective impact JSON</summary><pre id="volume-output"></pre></details>
+      </section>
     </main>
     <footer><span>Runs entirely in this browser</span><span>Deterministic · Stateless · Explainable</span></footer>
     <script type="module" src="./dist/app.js"></script>

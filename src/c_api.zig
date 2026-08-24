@@ -18,6 +18,7 @@ const planning_build = caudex.planning.build;
 const program_intent = caudex.programs.intent;
 const rpe_top_set_backoff = caudex.rpe_top_set_backoff;
 const training = caudex.training;
+const volume = caudex.volume;
 const tracking = @import("caudex_tracking");
 const tracking_protocol = @import("caudex_tracking_protocol");
 const workflows = @import("caudex_workflows");
@@ -135,6 +136,8 @@ const Operation = enum {
     proposeProgramAdvancement,
     rankExercises,
     findSubstitutes,
+    calculateVolume,
+    estimateVolume,
 };
 
 const ExecutionRequest = struct {
@@ -175,7 +178,83 @@ fn executeDispatch(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) Exec
         .proposeProgramAdvancement => executeProgramAdvancement(runtime, writer.buffered(), out),
         .rankExercises => executeExerciseSelection(runtime, writer.buffered(), out, false),
         .findSubstitutes => executeExerciseSelection(runtime, writer.buffered(), out, true),
+        .calculateVolume => executeVolumeCalculation(runtime, writer.buffered(), out),
+        .estimateVolume => executeVolumeEstimate(runtime, writer.buffered(), out),
     };
+}
+
+fn executeVolumeCalculation(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) ExecuteError!void {
+    const request = try canonical_json.decodeValue(
+        canonical.VolumeCalculateRequest,
+        runtime.allocator(),
+        input,
+        .{ .max_collection_items = 100_000 },
+    );
+    defer request.deinit();
+    if (request.value.schemaVersion != 1) return error.UnsupportedVersion;
+    var arena = std.heap.ArenaAllocator.init(runtime.allocator());
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const policy = try translateVolumePolicy(allocator, request.value.policy);
+    const targets = try translateVolumeTargets(allocator, request.value.targets);
+    const prescribed = try translatePrescribedWorkouts(allocator, request.value.prescribedWorkouts);
+    var owned = volume.calculate(runtime.allocator(), .{
+        .catalog = try translateCatalog(allocator, request.value.catalog),
+        .history = try translateHistory(allocator, request.value.history),
+        .prescribed_workouts = prescribed,
+        .targets = targets,
+        .policy = policy,
+        .scope = try translateVolumeScope(request.value.scope),
+    }) catch |err| return switch (err) {
+        error.OutOfMemory => error.OutOfMemory,
+        else => error.InvalidRequest,
+    };
+    defer owned.deinit();
+    return encodeOwned(runtime, try canonicalVolumeState(allocator, owned.state), out);
+}
+
+fn executeVolumeEstimate(runtime: *Runtime, input: []const u8, out: *OwnedBuffer) ExecuteError!void {
+    const request = try canonical_json.decodeValue(
+        canonical.VolumeEstimateRequest,
+        runtime.allocator(),
+        input,
+        .{ .max_collection_items = 100_000 },
+    );
+    defer request.deinit();
+    if (request.value.schemaVersion != 1) return error.UnsupportedVersion;
+    var arena = std.heap.ArenaAllocator.init(runtime.allocator());
+    defer arena.deinit();
+    const allocator = arena.allocator();
+    const policy = try translateVolumePolicy(allocator, request.value.policy);
+    const work = allocator.alloc(volume.ProposedWork, request.value.work.len) catch
+        return error.OutOfMemory;
+    for (request.value.work, work) |source, *target| target.* = .{
+        .exercise_id = primitives.Id.parse(source.exerciseId) catch return error.InvalidRequest,
+        .set_count = source.setCount,
+        .kind = primitives.Id.parse(source.kind) catch return error.InvalidRequest,
+    };
+    var owned = volume.estimate(
+        runtime.allocator(),
+        try translateCatalog(allocator, request.value.catalog),
+        work,
+        policy,
+    ) catch |err| return switch (err) {
+        error.OutOfMemory => error.OutOfMemory,
+        else => error.InvalidRequest,
+    };
+    defer owned.deinit();
+    const impacts = allocator.alloc(canonical.VolumeImpact, owned.muscles.len) catch
+        return error.OutOfMemory;
+    for (owned.muscles, impacts) |source, *target| target.* = .{
+        .muscleId = source.muscle_id.bytes,
+        .rawSets = source.raw_sets,
+        .credit = source.credit,
+    };
+    return encodeOwned(runtime, canonical.VolumeEstimateResult{
+        .policyId = policy.id.bytes,
+        .policyVersion = policy.version,
+        .muscles = impacts,
+    }, out);
 }
 
 fn executeExerciseSelection(runtime: *Runtime, input: []const u8, out: *OwnedBuffer, substitution: bool) ExecuteError!void {
@@ -515,9 +594,17 @@ fn executeComposeSession(runtime: *Runtime, input: []const u8, out: *OwnedBuffer
         },
     };
     const as_of = primitives.Timestamp.parse(source.asOf) catch return error.InvalidRequest;
+    if ((source.volumeState == null) != (source.volumePolicy == null))
+        return encodeOwned(runtime, canonical.CompositionResult{
+            .invalid = .{ .code = "VolumeStateAndPolicyRequired" },
+        }, out);
+    const volume_context: ?planning_model.VolumeContext = if (source.volumeState) |state| .{
+        .state = try translateVolumeState(allocator, state),
+        .policy = try translateVolumePolicy(allocator, source.volumePolicy.?),
+    } else null;
     const objective_storage = allocator.alloc(planning_model.Objective, planning.solver.max_objectives) catch return error.OutOfMemory;
     const duration_storage = allocator.alloc(planning_model.DurationEstimate, planning.solver.max_duration_estimates) catch return error.OutOfMemory;
-    var problem = planning_build.build(intent_domain, .{ .as_of = as_of, .catalog = catalog, .constraints = planning_constraints, .exercise_preferences = preferences, .muscle_priorities = muscle_priorities, .target_duration_minutes = constraints.targetDurationMinutes }, null, .{ .objectives = objective_storage, .duration_estimates = duration_storage }) catch |err| {
+    var problem = planning_build.build(intent_domain, .{ .as_of = as_of, .catalog = catalog, .constraints = planning_constraints, .exercise_preferences = preferences, .muscle_priorities = muscle_priorities, .target_duration_minutes = constraints.targetDurationMinutes, .volume_context = volume_context }, null, .{ .objectives = objective_storage, .duration_estimates = duration_storage }) catch |err| {
         return encodeOwned(runtime, canonical.CompositionResult{
             .invalid = .{ .code = @errorName(err) },
         }, out);
@@ -2543,6 +2630,233 @@ fn translateCatalog(
         };
     }
     return .{ .exercises = exercises };
+}
+
+fn translateVolumePolicy(
+    allocator: std.mem.Allocator,
+    source: canonical.VolumePolicy,
+) ExecuteError!volume.CreditPolicy {
+    return .{
+        .id = primitives.Id.parse(source.id) catch return error.InvalidRequest,
+        .version = source.version,
+        .mode = @enumFromInt(@intFromEnum(source.mode)),
+        .primary_credit = source.primaryCredit,
+        .secondary_credit = source.secondaryCredit,
+        .stabilizer_credit = source.stabilizerCredit,
+        .custom_credit = source.customCredit,
+        .count_partial = source.countPartial,
+        .count_failed = source.countFailed,
+        .qualifying_set_kinds = try translateIds(allocator, source.qualifyingSetKinds),
+        .maximum_credit_per_muscle_per_set = source.maximumCreditPerMusclePerSet,
+    };
+}
+
+fn translateVolumeTargets(
+    allocator: std.mem.Allocator,
+    source: []const canonical.VolumeTarget,
+) ExecuteError![]const volume.Target {
+    const targets = allocator.alloc(volume.Target, source.len) catch return error.OutOfMemory;
+    for (source, targets) |input, *output| output.* = .{
+        .muscle_id = primitives.Id.parse(input.muscleId) catch return error.InvalidRequest,
+        .minimum = input.minimum,
+        .preferred_minimum = input.preferredMinimum,
+        .preferred_maximum = input.preferredMaximum,
+        .hard_cap = input.hardCap,
+        .desired_exposures = input.desiredExposures,
+        .priority_weight = input.priorityWeight,
+        .source = .{
+            .kind = @enumFromInt(@intFromEnum(input.source.kind)),
+            .id = primitives.Id.parse(input.source.id) catch return error.InvalidRequest,
+            .version = input.source.version,
+        },
+    };
+    return targets;
+}
+
+fn translatePrescribedWorkouts(
+    allocator: std.mem.Allocator,
+    source: []const canonical.VolumePrescribedWorkout,
+) ExecuteError![]const volume.PrescribedWorkout {
+    const workouts = allocator.alloc(volume.PrescribedWorkout, source.len) catch
+        return error.OutOfMemory;
+    for (source, workouts) |input, *output| {
+        const exercises = allocator.alloc(volume.PrescribedExercise, input.exercises.len) catch
+            return error.OutOfMemory;
+        for (input.exercises, exercises) |input_exercise, *output_exercise| {
+            const sets = allocator.alloc(volume.PrescribedSet, input_exercise.sets.len) catch
+                return error.OutOfMemory;
+            for (input_exercise.sets, sets) |input_set, *output_set| output_set.* = .{
+                .id = if (input_set.id) |id|
+                    primitives.Id.parse(id) catch return error.InvalidRequest
+                else
+                    null,
+                .kind = primitives.Id.parse(input_set.kind) catch return error.InvalidRequest,
+            };
+            output_exercise.* = .{
+                .exercise_id = primitives.Id.parse(input_exercise.exerciseId) catch
+                    return error.InvalidRequest,
+                .sets = sets,
+            };
+        }
+        output.* = .{
+            .id = primitives.Id.parse(input.id) catch return error.InvalidRequest,
+            .scheduled_at = primitives.Timestamp.parse(input.scheduledAt) catch
+                return error.InvalidRequest,
+            .exercises = exercises,
+        };
+    }
+    return workouts;
+}
+
+fn translateVolumeScope(source: canonical.VolumeScope) ExecuteError!volume.Scope {
+    return switch (source) {
+        .allHistory => .all_history,
+        .interval => |interval| .{ .interval = .{
+            .from = primitives.Timestamp.parse(interval.from) catch return error.InvalidRequest,
+            .through = primitives.Timestamp.parse(interval.through) catch return error.InvalidRequest,
+        } },
+        .programWindow => |window| .{ .program_window = .{
+            .instance_id = primitives.Id.parse(window.instanceId) catch return error.InvalidRequest,
+            .block_id = primitives.Id.parse(window.blockId) catch return error.InvalidRequest,
+            .microcycle_index = window.microcycleIndex,
+        } },
+    };
+}
+
+fn canonicalVolumeScope(source: volume.Scope) canonical.VolumeScope {
+    return switch (source) {
+        .all_history => .{ .allHistory = .{} },
+        .interval => |interval| .{ .interval = .{
+            .from = interval.from.bytes,
+            .through = interval.through.bytes,
+        } },
+        .program_window => |window| .{ .programWindow = .{
+            .instanceId = window.instance_id.bytes,
+            .blockId = window.block_id.bytes,
+            .microcycleIndex = window.microcycle_index,
+        } },
+    };
+}
+
+fn canonicalVolumeTarget(source: volume.Target) canonical.VolumeTarget {
+    return .{
+        .muscleId = source.muscle_id.bytes,
+        .minimum = source.minimum,
+        .preferredMinimum = source.preferred_minimum,
+        .preferredMaximum = source.preferred_maximum,
+        .hardCap = source.hard_cap,
+        .desiredExposures = source.desired_exposures,
+        .priorityWeight = source.priority_weight,
+        .source = .{
+            .kind = @enumFromInt(@intFromEnum(source.source.kind)),
+            .id = source.source.id.bytes,
+            .version = source.source.version,
+        },
+    };
+}
+
+fn canonicalVolumeState(
+    allocator: std.mem.Allocator,
+    source: volume.State,
+) ExecuteError!canonical.VolumeState {
+    const muscles = allocator.alloc(canonical.VolumeObservation, source.muscles.len) catch
+        return error.OutOfMemory;
+    for (source.muscles, muscles) |input, *output| output.* = .{
+        .muscleId = input.muscle_id.bytes,
+        .prescribedRawSets = input.prescribed_raw_sets,
+        .completedRawSets = input.completed_raw_sets,
+        .directRawSets = input.direct_raw_sets,
+        .indirectRawSets = input.indirect_raw_sets,
+        .prescribedCredit = input.prescribed_credit,
+        .completedCredit = input.completed_credit,
+        .prescribedExposureCount = input.prescribed_exposure_count,
+        .exposureCount = input.exposure_count,
+        .remainingExposures = input.remaining_exposures,
+        .lastExposure = if (input.last_exposure) |timestamp| timestamp.bytes else null,
+        .target = if (input.target) |target| canonicalVolumeTarget(target) else null,
+        .remaining = .{
+            .required = input.remaining.required,
+            .preferred = input.remaining.preferred,
+            .maximumAdditional = input.remaining.maximum_additional,
+        },
+        .excessAbovePreferred = input.excess_above_preferred,
+        .status = @enumFromInt(@intFromEnum(input.status)),
+    };
+    const contributions = allocator.alloc(
+        canonical.VolumeContribution,
+        source.contributions.len,
+    ) catch return error.OutOfMemory;
+    for (source.contributions, contributions) |input, *output| output.* = .{
+        .phase = @enumFromInt(@intFromEnum(input.phase)),
+        .muscleId = input.muscle_id.bytes,
+        .workoutId = input.workout_id.bytes,
+        .exerciseId = input.exercise_id.bytes,
+        .setId = if (input.set_id) |id| id.bytes else null,
+        .role = @enumFromInt(@intFromEnum(input.role)),
+        .credit = input.credit,
+    };
+    return .{
+        .policyId = source.policy_id.bytes,
+        .policyVersion = source.policy_version,
+        .scope = canonicalVolumeScope(source.scope),
+        .muscles = muscles,
+        .contributions = contributions,
+    };
+}
+
+fn translateVolumeState(
+    allocator: std.mem.Allocator,
+    source: canonical.VolumeState,
+) ExecuteError!volume.State {
+    const muscles = allocator.alloc(volume.Observation, source.muscles.len) catch
+        return error.OutOfMemory;
+    for (source.muscles, muscles) |input, *output| {
+        const target: ?volume.Target = if (input.target) |value| .{
+            .muscle_id = primitives.Id.parse(value.muscleId) catch return error.InvalidRequest,
+            .minimum = value.minimum,
+            .preferred_minimum = value.preferredMinimum,
+            .preferred_maximum = value.preferredMaximum,
+            .hard_cap = value.hardCap,
+            .desired_exposures = value.desiredExposures,
+            .priority_weight = value.priorityWeight,
+            .source = .{
+                .kind = @enumFromInt(@intFromEnum(value.source.kind)),
+                .id = primitives.Id.parse(value.source.id) catch return error.InvalidRequest,
+                .version = value.source.version,
+            },
+        } else null;
+        output.* = .{
+            .muscle_id = primitives.Id.parse(input.muscleId) catch return error.InvalidRequest,
+            .prescribed_raw_sets = input.prescribedRawSets,
+            .completed_raw_sets = input.completedRawSets,
+            .direct_raw_sets = input.directRawSets,
+            .indirect_raw_sets = input.indirectRawSets,
+            .prescribed_credit = input.prescribedCredit,
+            .completed_credit = input.completedCredit,
+            .prescribed_exposure_count = input.prescribedExposureCount,
+            .exposure_count = input.exposureCount,
+            .remaining_exposures = input.remainingExposures,
+            .last_exposure = if (input.lastExposure) |timestamp|
+                primitives.Timestamp.parse(timestamp) catch return error.InvalidRequest
+            else
+                null,
+            .target = target,
+            .remaining = .{
+                .required = input.remaining.required,
+                .preferred = input.remaining.preferred,
+                .maximum_additional = input.remaining.maximumAdditional,
+            },
+            .excess_above_preferred = input.excessAbovePreferred,
+            .status = @enumFromInt(@intFromEnum(input.status)),
+        };
+    }
+    return .{
+        .policy_id = primitives.Id.parse(source.policyId) catch return error.InvalidRequest,
+        .policy_version = source.policyVersion,
+        .scope = try translateVolumeScope(source.scope),
+        .muscles = muscles,
+        .contributions = &.{},
+    };
 }
 
 fn translateMuscles(

@@ -7,6 +7,7 @@
 const primitives = @import("../primitives.zig");
 const progression = @import("../progression/root.zig");
 const intent = @import("intent.zig");
+const volume = @import("../volume.zig");
 
 pub const strategy_id = "caudex.adaptive-hypertrophy";
 pub const strategy_version: u32 = 1;
@@ -19,6 +20,7 @@ pub const max_slots: usize = max_primary_slots + max_accessory_slots;
 pub const max_muscle_priorities: usize = 16;
 pub const max_available_equipment: usize = 32;
 pub const max_duration_estimates: usize = 64;
+pub const max_volume_targets: usize = volume.max_muscles;
 pub const max_ids_per_set: usize = 32;
 
 pub const MusclePriority = struct {
@@ -46,6 +48,10 @@ pub const SessionPolicy = struct {
     target_duration_minutes: ?u16 = null,
     muscle_priorities: []const MusclePriority = &.{},
     duration_estimates: []const CandidateDurationEstimate = &.{},
+    /// Program-owned muscle-volume intent. Accounting remains in `volume`;
+    /// this strategy only selects the policy and resolved targets.
+    volume_policy: volume.CreditPolicy = volume.CreditPolicy.firstParty(),
+    volume_targets: []const volume.Target = &.{},
 };
 
 /// A host-authored adaptive slot.  The caller owns all IDs and progression
@@ -92,6 +98,10 @@ pub const BuildError = error{
     TooManyMusclePriorities,
     TooManyAvailableEquipmentIds,
     TooManyDurationEstimates,
+    TooManyVolumeTargets,
+    InvalidVolumePolicy,
+    InvalidVolumeTarget,
+    DuplicateVolumeTarget,
     TooManyIdsInSet,
     InvalidMusclePriorityWeight,
     DuplicateMusclePriority,
@@ -158,6 +168,15 @@ fn validate(request: Request) BuildError!void {
         return error.TooManyAvailableEquipmentIds;
     if (request.policy.duration_estimates.len > max_duration_estimates)
         return error.TooManyDurationEstimates;
+    if (request.policy.volume_targets.len > max_volume_targets)
+        return error.TooManyVolumeTargets;
+    volume.validatePolicy(request.policy.volume_policy) catch return error.InvalidVolumePolicy;
+    for (request.policy.volume_targets, 0..) |target, index| {
+        if (!volume.validTarget(target)) return error.InvalidVolumeTarget;
+        for (request.policy.volume_targets[0..index]) |prior| {
+            if (prior.muscle_id.eql(target.muscle_id)) return error.DuplicateVolumeTarget;
+        }
+    }
 
     for (request.policy.muscle_priorities, 0..) |priority, index| {
         if (priority.weight == 0) return error.InvalidMusclePriorityWeight;

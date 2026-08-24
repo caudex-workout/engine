@@ -4,6 +4,7 @@ const std = @import("std");
 const primitives = @import("../primitives.zig");
 const training = @import("../training.zig");
 const progression = @import("../progression/root.zig");
+const volume = @import("../volume.zig");
 
 pub const schema_version: u32 = 1;
 pub const planner_id = "caudex.session-planner";
@@ -111,6 +112,12 @@ pub const PlanningProblem = struct {
     constraints: SessionConstraints = .{},
     objectives: []const Objective = &.{},
     duration_estimates: []const DurationEstimate = &.{},
+    volume_context: ?VolumeContext = null,
+};
+
+pub const VolumeContext = struct {
+    state: volume.State,
+    policy: volume.CreditPolicy,
 };
 
 pub const ScoreVector = struct {
@@ -252,6 +259,13 @@ pub const ResolvedSessionPlan = struct {
 
 pub const InfeasibilityViolation = union(enum) {
     required_slot_has_no_eligible_candidate: Id,
+    volume_cap_prevents_required_slot: struct {
+        slot_id: Id,
+        muscle_id: Id,
+        current: u64,
+        proposed: u64,
+        hard_cap: u64,
+    },
     required_exercise_cannot_be_assigned: Id,
     constraints_jointly_unsatisfiable,
     minimum_exercise_count_unreachable,

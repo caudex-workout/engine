@@ -19,6 +19,14 @@ the composed primary exercise. Ranked swaps and their reason codes come from
 the engine, while today's temporary equipment and exclusions change the viable
 choices without embedding equivalence rules in the browser.
 
+The Muscle-volume state panel is another thin public-API consumer. It calls
+`caudex.calculateVolume()` for an explicit interval and renders prescribed,
+completed, credited, direct/indirect, target, remaining, status, and exposure
+observations. Its next-work line calls `caudex.estimateVolume()` for a proposed
+three-set bench press, so prospective credit uses the same policy as historical
+accounting. The demo records are illustrative and can be replaced by a host's
+canonical catalog, history, targets, and scope.
+
 The program-planning lab below the recommendation workspace uses the package's
 actual `programs` presets, `instantiateProgram`, `resolveNextSession`,
 `proposeProgramAdvancement`, and `acceptProgramAdvancement` exports. It contrasts

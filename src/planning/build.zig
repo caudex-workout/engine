@@ -21,6 +21,7 @@ pub const SessionContext = struct {
     exercise_preferences: []const ExercisePreference = &.{},
     muscle_priorities: []const hypertrophy.MusclePriority = &.{},
     target_duration_minutes: ?u16 = null,
+    volume_context: ?model.VolumeContext = null,
 };
 
 pub const ExercisePreference = struct {
@@ -130,6 +131,17 @@ pub fn build(
             objective_count_written += 1;
         }
     }
+    if (context.volume_context) |volume_context| {
+        for (volume_context.state.muscles) |observation| {
+            if (!needsVolumePriority(observation) or
+                hasExplicitPriority(context, policy, observation.muscle_id)) continue;
+            storage.objectives[objective_count_written] = .{ .muscle_priority = .{
+                .muscle_id = observation.muscle_id,
+                .weight = volumePriorityWeight(observation),
+            } };
+            objective_count_written += 1;
+        }
+    }
     storage.objectives[objective_count_written] = .{ .avoid_exercise_reuse = .{
         .weight = default_avoid_exercise_reuse_weight,
     } };
@@ -173,6 +185,7 @@ pub fn build(
         .constraints = constraints,
         .objectives = storage.objectives[0..objective_count_written],
         .duration_estimates = storage.duration_estimates[0..duration_count_written],
+        .volume_context = context.volume_context,
     };
 }
 
@@ -199,8 +212,38 @@ fn requiredObjectiveCount(context: SessionContext, policy: ?hypertrophy.SessionP
             count = std.math.add(usize, count, 1) catch return error.TooManyObjectives;
         }
     }
+    if (context.volume_context) |volume_context| {
+        for (volume_context.state.muscles) |observation| {
+            if (!needsVolumePriority(observation) or
+                hasExplicitPriority(context, policy, observation.muscle_id)) continue;
+            count = std.math.add(usize, count, 1) catch return error.TooManyObjectives;
+        }
+    }
     if (count > solver.max_objectives) return error.TooManyObjectives;
     return count;
+}
+
+fn needsVolumePriority(observation: @import("../volume.zig").Observation) bool {
+    return (observation.remaining.required orelse 0) != 0 or
+        (observation.remaining.preferred orelse 0) != 0;
+}
+
+fn volumePriorityWeight(observation: @import("../volume.zig").Observation) u16 {
+    const base = if ((observation.remaining.required orelse 0) != 0) @as(u16, 2) else 1;
+    const configured = if (observation.target) |target| target.priority_weight orelse 1 else 1;
+    return std.math.mul(u16, base, configured) catch std.math.maxInt(u16);
+}
+
+fn hasExplicitPriority(
+    context: SessionContext,
+    policy: ?hypertrophy.SessionPolicy,
+    muscle_id: primitives.Id,
+) bool {
+    for (context.muscle_priorities) |priority| if (priority.muscle_id.eql(muscle_id)) return true;
+    if (policy) |value| for (value.muscle_priorities) |priority| {
+        if (priority.muscle_id.eql(muscle_id)) return true;
+    };
+    return false;
 }
 
 fn validateIntent(intent: program_intent.PlannedSessionIntent) BuildError!void {

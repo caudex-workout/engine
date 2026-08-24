@@ -27,7 +27,8 @@
       "progression",
       "rpe_top_set_backoff",
       "session_composer",
-      "training"
+      "training",
+      "volume"
     ]
   },
   "cAbi": {

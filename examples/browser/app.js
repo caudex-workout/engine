@@ -14,6 +14,7 @@ const elements = Object.fromEntries([
   "explanations", "explanation-count", "output",
   "program-example", "program-start", "program-advance", "program-status",
   "program-summary", "program-output",
+  "volume-status", "volume-scope", "volume-progress", "volume-estimate", "volume-output",
 ].map((id) => [id, document.querySelector(`#${id}`)]));
 
 const methodologyReferences = {
@@ -135,7 +136,7 @@ const compositionRequest = {
     })),
   },
   catalog: [
-    { id: "bench-press", name: "Bench Press", equipmentIds: ["barbell", "adjustable-bench"], movementTags: ["horizontal-push"] },
+    { id: "bench-press", name: "Bench Press", equipmentIds: ["barbell", "adjustable-bench"], movementTags: ["horizontal-push"], muscleContributions: [{ muscleId: "chest", role: "primary" }, { muscleId: "triceps", role: "secondary" }] },
     { id: "incline-dumbbell-press", name: "Incline Dumbbell Press", equipmentIds: ["dumbbell", "adjustable-bench"], movementTags: ["horizontal-push"] },
     { id: "flat-dumbbell-press", name: "Flat Dumbbell Press", equipmentIds: ["dumbbell", "adjustable-bench"], movementTags: ["horizontal-push"] },
     { id: "machine-chest-press", name: "Machine Chest Press", equipmentIds: ["chest-press-machine"], movementTags: ["horizontal-push"] },
@@ -237,6 +238,128 @@ try {
 } catch (error) {
   renderFailure(error);
 }
+
+// This deliberately small snapshot is a first-party consumer of the public
+// volume API. Hosts can replace its catalog, history, targets, and scope with
+// their own canonical records without reproducing accounting rules in UI code.
+const volumeDemoRequest = {
+  schemaVersion: 1,
+  catalog: [
+    { id: "volume-bench-press", name: "Bench Press", muscleContributions: [
+      { muscleId: "chest", role: "primary" },
+      { muscleId: "triceps", role: "secondary" },
+      { muscleId: "front-delts", role: "secondary" },
+    ] },
+    { id: "volume-row", name: "Chest-Supported Row", muscleContributions: [
+      { muscleId: "back", role: "primary" },
+      { muscleId: "biceps", role: "secondary" },
+    ] },
+    { id: "volume-lateral-raise", name: "Cable Lateral Raise", muscleContributions: [
+      { muscleId: "side-delts", role: "primary" },
+    ] },
+  ],
+  history: { workouts: [{
+    id: "volume-monday",
+    startedAt: "2026-08-17T10:00:00Z",
+    completedAt: "2026-08-17T11:00:00Z",
+    exercises: [
+      { exerciseId: "volume-bench-press", sets: [
+        { id: "m-bench-1", kind: "working", actualMetrics: [], status: "completed" },
+        { id: "m-bench-2", kind: "working", actualMetrics: [], status: "completed" },
+        { id: "m-bench-3", kind: "working", actualMetrics: [], status: "skipped" },
+      ] },
+      { exerciseId: "volume-row", sets: [
+        { id: "m-row-1", kind: "working", actualMetrics: [], status: "completed" },
+        { id: "m-row-2", kind: "working", actualMetrics: [], status: "completed" },
+      ] },
+    ],
+  }] },
+  prescribedWorkouts: [{
+    id: "volume-monday",
+    scheduledAt: "2026-08-17T10:00:00Z",
+    exercises: [
+      { exerciseId: "volume-bench-press", sets: [
+        { id: "m-bench-1", kind: "working" },
+        { id: "m-bench-2", kind: "working" },
+        { id: "m-bench-3", kind: "working" },
+      ] },
+      { exerciseId: "volume-row", sets: [
+        { id: "m-row-1", kind: "working" },
+        { id: "m-row-2", kind: "working" },
+        { id: "m-row-3", kind: "working" },
+      ] },
+    ],
+  }],
+  targets: [
+    { muscleId: "chest", minimum: 8_000_000, preferredMinimum: 10_000_000, preferredMaximum: 12_000_000, hardCap: 16_000_000, desiredExposures: 2, priorityWeight: 2, source: { kind: "program_strategy", id: "browser-hypertrophy" } },
+    { muscleId: "back", minimum: 8_000_000, preferredMinimum: 10_000_000, preferredMaximum: 14_000_000, hardCap: 18_000_000, desiredExposures: 2, source: { kind: "program_strategy", id: "browser-hypertrophy" } },
+    { muscleId: "side-delts", minimum: 6_000_000, preferredMinimum: 8_000_000, preferredMaximum: 12_000_000, hardCap: 16_000_000, desiredExposures: 2, priorityWeight: 1, source: { kind: "program_strategy", id: "browser-hypertrophy" } },
+  ],
+  scope: { interval: { from: "2026-08-10T00:00:00Z", through: "2026-08-23T23:59:59Z" } },
+};
+
+function renderVolumeDemo() {
+  try {
+    const state = caudex.calculateVolume(volumeDemoRequest);
+    const estimate = caudex.estimateVolume({
+      catalog: volumeDemoRequest.catalog,
+      work: [{ exerciseId: "volume-bench-press", setCount: 3, kind: "working" }],
+    });
+    const nextSession = caudex.composeSession({
+      ...compositionRequest,
+      volumeState: state,
+      volumePolicy: {},
+    });
+    elements["volume-status"].textContent = "Calculated";
+    elements["volume-status"].className = "result-status success";
+    elements["volume-scope"].textContent = "Scope · 10 Aug – 23 Aug 2026 · explicit interval";
+    elements["volume-progress"].replaceChildren(
+      ...state.muscles
+        .filter((observation) => observation.target || observation.completedCredit > 0)
+        .map((observation) => volumeObservation(observation)),
+    );
+    elements["volume-estimate"].replaceChildren(
+      element("strong", "Next-work estimate · 3 bench press working sets"),
+      element("p", estimate.muscles.map((muscle) => `${displayName(muscle.muscleId)} +${volumeSets(muscle.credit)} sets`).join(" · ")),
+    );
+    elements["volume-output"].textContent = formatJson({ state, estimate, nextSession });
+  } catch (error) {
+    elements["volume-status"].textContent = "Unavailable";
+    elements["volume-status"].className = "result-status error";
+    elements["volume-progress"].replaceChildren(element("p", error.message));
+  }
+}
+
+function volumeObservation(observation) {
+  const target = observation.target?.preferredMaximum ?? observation.target?.minimum ?? 0;
+  const credited = volumeSets(observation.completedCredit);
+  const targetSets = volumeSets(target);
+  const ratio = targetSets > 0 ? Math.min(100, (credited / targetSets) * 100) : 0;
+  const card = document.createElement("article");
+  card.className = "volume-card";
+  card.append(
+    element("div", displayName(observation.muscleId), "volume-muscle"),
+    element("div", `${credited} / ${targetSets || "—"} target sets`, "volume-total"),
+  );
+  const meter = document.createElement("div");
+  meter.className = "volume-meter";
+  const fill = document.createElement("span");
+  fill.style.width = `${ratio}%`;
+  meter.append(fill);
+  card.append(meter);
+  const hasPreferredRemaining = observation.remaining.preferred !== null && observation.remaining.preferred !== undefined;
+  const remaining = hasPreferredRemaining ? observation.remaining.preferred : observation.remaining.required;
+  const remainingKind = hasPreferredRemaining ? "preferred" : "required";
+  card.append(element("p", `${displayName(observation.status)} · ${remaining === null || remaining === undefined ? "no remaining target" : `${volumeSets(remaining)} ${remainingKind} sets remain`} · ${observation.exposureCount} exposure${observation.exposureCount === 1 ? "" : "s"}`, "volume-detail"));
+  card.append(element("p", `Direct ${observation.directRawSets} raw sets · indirect ${observation.indirectRawSets} · prescribed ${volumeSets(observation.prescribedCredit)} credited`, "volume-detail"));
+  return card;
+}
+
+function volumeSets(units) {
+  return (units / 1_000_000).toFixed(1).replace(/\.0$/, "");
+}
+
+if (caudex) renderVolumeDemo();
 
 function startProgramDemo() {
   const definition = programExamples[elements["program-example"].value]();

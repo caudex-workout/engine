@@ -7,6 +7,7 @@ const training = @import("../training.zig");
 const exercise_knowledge = @import("../exercise_knowledge.zig");
 const exercise_selection = @import("../exercise_selection.zig");
 const progression = @import("../progression/root.zig");
+const volume = @import("../volume.zig");
 const model = @import("problem.zig");
 
 pub const max_slots: usize = 16;
@@ -306,6 +307,12 @@ fn validateProblem(problem: model.PlanningProblem) SolveError!void {
     if (problem.slots.len > max_slots or problem.catalog.exercises.len > max_catalog_exercises or
         problem.objectives.len > max_objectives or problem.duration_estimates.len > max_duration_estimates)
         return error.ProblemLimitExceeded;
+    if (problem.volume_context) |context| {
+        volume.validatePolicy(context.policy) catch return error.InvalidProblem;
+        if (!context.state.policy_id.eql(context.policy.id) or
+            context.state.policy_version != context.policy.version) return error.InvalidProblem;
+        if (context.state.muscles.len > volume.max_muscles) return error.ProblemLimitExceeded;
+    }
     if (problem.constraints.minimum_exercises) |minimum| {
         if (problem.constraints.maximum_exercises) |maximum| if (minimum > maximum)
             return error.InvalidProblem;
@@ -506,6 +513,16 @@ fn tieOrder(policy: model.TieBreakPolicy, left: []const u8, right: []const u8) s
 }
 
 fn candidateEligible(problem: model.PlanningProblem, slot: model.Slot, exercise: training.Exercise) bool {
+    if (!candidateEligibleWithoutVolume(problem, slot, exercise)) return false;
+    if (candidateVolumeConflict(problem, slot, exercise) != null) return false;
+    return true;
+}
+
+fn candidateEligibleWithoutVolume(
+    problem: model.PlanningProblem,
+    slot: model.Slot,
+    exercise: training.Exercise,
+) bool {
     switch (slot.selection) {
         .fixed => |id| if (!id.eql(exercise.id)) return false,
         .adaptive => |adaptive| {
@@ -540,6 +557,56 @@ fn candidateEligible(problem: model.PlanningProblem, slot: model.Slot, exercise:
     if (durationFor(problem, slot.id, exercise.id) == null and
         constraints.unknown_duration_policy == .reject) return false;
     return true;
+}
+
+fn candidateVolumeConflict(
+    problem: model.PlanningProblem,
+    slot: model.Slot,
+    exercise: training.Exercise,
+) ?volume.CapConflict {
+    if (problem.volume_context) |context| {
+        const sets = expectedQualifyingSetCount(
+            slot.progression,
+            exercise.id,
+            context.policy,
+        ) orelse return null;
+        if (volume.capConflictForExercise(context.state, exercise, sets, context.policy) catch
+            return null) |conflict| return conflict;
+    }
+    return null;
+}
+
+fn expectedQualifyingSetCount(
+    lane: progression.Lane,
+    exercise_id: primitives.Id,
+    policy: volume.CreditPolicy,
+) ?u16 {
+    return switch (lane.method) {
+        .double_progression => |method| blk: {
+            var count = method.config.workingSets;
+            for (method.config.exerciseOverrides) |override| {
+                if (!std.mem.eql(u8, override.exerciseId, exercise_id.bytes)) continue;
+                count = override.workingSets orelse count;
+                break;
+            }
+            break :blk if (count == 0 or !policyCountsKind(policy, "working")) 0 else count;
+        },
+        .rpe_top_set_backoff => |method| blk: {
+            const top: u16 = @intFromBool(policyCountsKind(policy, "top"));
+            const backoff = if (policyCountsKind(policy, "backoff"))
+                method.config.backoff.setCount
+            else
+                0;
+            break :blk std.math.add(u16, top, backoff) catch null;
+        },
+    };
+}
+
+fn policyCountsKind(policy: volume.CreditPolicy, kind: []const u8) bool {
+    for (policy.qualifying_set_kinds) |candidate| {
+        if (std.mem.eql(u8, candidate.bytes, kind)) return true;
+    }
+    return false;
 }
 
 fn matchesPlannerOnlyRequirements(exercise: training.Exercise, requirements: model.SlotRequirements) bool {
@@ -681,7 +748,19 @@ fn proveCheapContradictions(
         if (range.eligible_count != 0) possible_slot_count += 1;
         if (slot.presence == .optional) continue;
         required_slot_count += 1;
-        if (range.eligible_count == 0) appendViolation(workspace, violation_count, .{ .required_slot_has_no_eligible_candidate = slot.id });
+        if (range.eligible_count == 0) {
+            if (firstSlotVolumeConflict(problem, slot)) |conflict| {
+                appendViolation(workspace, violation_count, .{ .volume_cap_prevents_required_slot = .{
+                    .slot_id = slot.id,
+                    .muscle_id = conflict.muscle_id,
+                    .current = conflict.current,
+                    .proposed = conflict.proposed,
+                    .hard_cap = conflict.hard_cap,
+                } });
+            } else appendViolation(workspace, violation_count, .{
+                .required_slot_has_no_eligible_candidate = slot.id,
+            });
+        }
         // A retained top-K is not a proof over the full candidate universe.
         // Only derive a duration lower bound when no eligible candidate was
         // truncated for this slot.
@@ -719,6 +798,17 @@ fn proveCheapContradictions(
         workspace.ranges[index].retained_count != 0) workspace.ranges[index].offset else null;
     if (!orderingFeasible(problem, workspace.current, workspace.order_indices, workspace.in_degrees))
         appendViolation(workspace, violation_count, .ordering_cycle);
+}
+
+fn firstSlotVolumeConflict(
+    problem: model.PlanningProblem,
+    slot: model.Slot,
+) ?volume.CapConflict {
+    for (problem.catalog.exercises) |exercise| {
+        if (!candidateEligibleWithoutVolume(problem, slot, exercise)) continue;
+        if (candidateVolumeConflict(problem, slot, exercise)) |conflict| return conflict;
+    }
+    return null;
 }
 
 fn appendViolation(workspace: *Workspace, count: *usize, value: model.InfeasibilityViolation) void {
@@ -1212,7 +1302,55 @@ fn fingerprintProblem(problem: model.PlanningProblem, out: *[64]u8) void {
     fingerprintConstraints(&hash, problem.constraints);
     aggregateEntities(&hash, problem.objectives, fingerprintObjective);
     aggregateEntities(&hash, problem.duration_estimates, fingerprintDuration);
+    if (problem.volume_context) |context| fingerprintVolumeContext(&hash, context) else hash.update("no-volume-context");
     finishHex(&hash, out);
+}
+
+fn fingerprintVolumeContext(
+    hash: *std.crypto.hash.sha2.Sha256,
+    context: model.VolumeContext,
+) void {
+    updateBytes(hash, context.policy.id.bytes);
+    updateU64(hash, context.policy.version);
+    updateBytes(hash, @tagName(context.policy.mode));
+    updateU64(hash, context.policy.primary_credit);
+    updateU64(hash, context.policy.secondary_credit);
+    updateU64(hash, context.policy.stabilizer_credit);
+    updateU64(hash, context.policy.custom_credit);
+    updateU64(hash, @intFromBool(context.policy.count_partial));
+    updateU64(hash, @intFromBool(context.policy.count_failed));
+    aggregateIds(hash, context.policy.qualifying_set_kinds);
+    updateU64(hash, context.policy.maximum_credit_per_muscle_per_set);
+    switch (context.state.scope) {
+        .all_history => hash.update("all-history"),
+        .interval => |interval| {
+            hash.update("interval");
+            updateBytes(hash, interval.from.bytes);
+            updateBytes(hash, interval.through.bytes);
+        },
+        .program_window => |window| {
+            hash.update("program-window");
+            updateBytes(hash, window.instance_id.bytes);
+            updateBytes(hash, window.block_id.bytes);
+            updateU64(hash, window.microcycle_index);
+        },
+    }
+    aggregateEntities(hash, context.state.muscles, fingerprintVolumeObservation);
+}
+
+fn fingerprintVolumeObservation(
+    hash: *std.crypto.hash.sha2.Sha256,
+    observation: volume.Observation,
+) void {
+    updateBytes(hash, observation.muscle_id.bytes);
+    updateU64(hash, observation.completed_credit);
+    updateOptionalU64(hash, observation.remaining.required);
+    updateOptionalU64(hash, observation.remaining.preferred);
+    updateOptionalU64(hash, observation.remaining.maximum_additional);
+    if (observation.target) |target| {
+        updateOptionalU64(hash, target.hard_cap);
+        updateOptionalU64(hash, target.priority_weight);
+    } else hash.update("no-target");
 }
 
 fn aggregateEntities(hash: *std.crypto.hash.sha2.Sha256, values: anytype, comptime fingerprint: anytype) void {

@@ -796,6 +796,114 @@ pub const CompositionConstraints = struct {
 };
 
 pub const CompositionDurationEstimate = struct { slotId: []const u8, exerciseId: []const u8, minutes: u16 };
+
+pub const VolumePolicy = struct {
+    id: []const u8 = "caudex.contribution-sets",
+    version: u32 = 1,
+    mode: enum { role_credit, catalog_weight, direct_only } = .role_credit,
+    primaryCredit: u64 = 1_000_000,
+    secondaryCredit: u64 = 500_000,
+    stabilizerCredit: u64 = 0,
+    customCredit: u64 = 0,
+    countPartial: bool = false,
+    countFailed: bool = false,
+    qualifyingSetKinds: []const []const u8 = &.{ "working", "top", "backoff" },
+    maximumCreditPerMusclePerSet: u64 = 1_000_000,
+};
+
+pub const VolumeScope = union(enum) {
+    allHistory: struct {},
+    interval: struct { from: []const u8, through: []const u8 },
+    programWindow: struct { instanceId: []const u8, blockId: []const u8, microcycleIndex: u32 },
+};
+
+pub const VolumeTargetSource = struct {
+    kind: enum { program_template, program_strategy, block, athlete_override, temporary_adjustment },
+    id: []const u8,
+    version: ?u32 = null,
+};
+
+pub const VolumeTarget = struct {
+    muscleId: []const u8,
+    minimum: ?u64 = null,
+    preferredMinimum: ?u64 = null,
+    preferredMaximum: ?u64 = null,
+    hardCap: ?u64 = null,
+    desiredExposures: ?u16 = null,
+    priorityWeight: ?u16 = null,
+    source: VolumeTargetSource,
+};
+
+pub const VolumePrescribedSet = struct { id: ?[]const u8 = null, kind: []const u8 };
+pub const VolumePrescribedExercise = struct { exerciseId: []const u8, sets: []const VolumePrescribedSet };
+pub const VolumePrescribedWorkout = struct {
+    id: []const u8,
+    scheduledAt: []const u8,
+    exercises: []const VolumePrescribedExercise,
+};
+
+pub const VolumeCalculateRequest = struct {
+    schemaVersion: u32 = 1,
+    catalog: []const Exercise,
+    history: HistorySnapshot = .{},
+    prescribedWorkouts: []const VolumePrescribedWorkout = &.{},
+    targets: []const VolumeTarget = &.{},
+    policy: VolumePolicy = .{},
+    scope: VolumeScope = .{ .allHistory = .{} },
+};
+
+pub const VolumeRemaining = struct {
+    required: ?u64 = null,
+    preferred: ?u64 = null,
+    maximumAdditional: ?u64 = null,
+};
+
+pub const VolumeObservation = struct {
+    muscleId: []const u8,
+    prescribedRawSets: u32,
+    completedRawSets: u32,
+    directRawSets: u32,
+    indirectRawSets: u32,
+    prescribedCredit: u64,
+    completedCredit: u64,
+    prescribedExposureCount: u16,
+    exposureCount: u16,
+    remainingExposures: ?u16 = null,
+    lastExposure: ?[]const u8 = null,
+    target: ?VolumeTarget = null,
+    remaining: VolumeRemaining,
+    excessAbovePreferred: u64,
+    status: enum { no_target, below_minimum, below_preferred, within_preferred, above_preferred, within_limits, at_hard_cap, above_hard_cap },
+};
+
+pub const VolumeContribution = struct {
+    phase: enum { prescribed, completed },
+    muscleId: []const u8,
+    workoutId: []const u8,
+    exerciseId: []const u8,
+    setId: ?[]const u8 = null,
+    role: MuscleRole,
+    credit: u64,
+};
+
+pub const VolumeState = struct {
+    policyId: []const u8,
+    policyVersion: u32,
+    scope: VolumeScope,
+    muscles: []const VolumeObservation,
+    contributions: []const VolumeContribution,
+};
+
+pub const VolumeProposedWork = struct { exerciseId: []const u8, setCount: u16, kind: []const u8 = "working" };
+pub const VolumeEstimateRequest = struct {
+    schemaVersion: u32 = 1,
+    catalog: []const Exercise,
+    work: []const VolumeProposedWork,
+    policy: VolumePolicy = .{},
+};
+pub const VolumeImpact = struct { muscleId: []const u8, rawSets: u32, credit: u64 };
+pub const VolumeEstimateResult = struct { policyId: []const u8, policyVersion: u32, muscles: []const VolumeImpact };
+
 pub const CompositionRequest = struct {
     schemaVersion: u32 = 1,
     asOf: []const u8,
@@ -806,6 +914,8 @@ pub const CompositionRequest = struct {
     history: HistorySnapshot = .{},
     preferences: []const Preference = &.{},
     musclePriorities: []const MusclePriority = &.{},
+    volumeState: ?VolumeState = null,
+    volumePolicy: ?VolumePolicy = null,
     candidateLimitPerSlot: u8 = 8,
     beamWidth: u16 = 256,
 };

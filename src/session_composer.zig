@@ -15,6 +15,7 @@ const hypertrophy = @import("programs/hypertrophy.zig");
 const training = @import("training.zig");
 const double_progression = @import("double_progression.zig");
 const rpe = @import("rpe_top_set_backoff.zig");
+const volume = @import("volume.zig");
 
 pub const InvalidInput = struct {
     code: []const u8,
@@ -74,6 +75,31 @@ pub const Result = union(enum) {
 };
 
 pub const Error = error{OutOfMemory};
+
+pub const VolumeConflict = struct {
+    conflict: volume.CapConflict,
+    policy_id: @import("primitives.zig").Id,
+    policy_version: u32,
+};
+
+pub const VolumeAwareResult = union(enum) {
+    composition: Result,
+    volume_conflict: VolumeConflict,
+    volume_policy_mismatch: struct {
+        state_policy_id: @import("primitives.zig").Id,
+        state_policy_version: u32,
+        requested_policy_id: @import("primitives.zig").Id,
+        requested_policy_version: u32,
+    },
+
+    pub fn deinit(self: *VolumeAwareResult) void {
+        switch (self.*) {
+            .composition => |*result| result.deinit(),
+            .volume_conflict, .volume_policy_mismatch => {},
+        }
+        self.* = undefined;
+    }
+};
 
 pub fn compose(
     backing_allocator: std.mem.Allocator,
@@ -135,6 +161,83 @@ pub fn composeIntent(
     };
     defer workspace.deinit();
     return compose(backing_allocator, problem, options, &workspace, history);
+}
+
+/// Composes with the ordinary planner, then uses the authoritative prospective
+/// volume policy to reject a plan whose direct or indirect credit would exceed
+/// a configured hard cap. The conflict is structured rather than silently
+/// weakening required program intent.
+pub fn composeIntentWithVolume(
+    backing_allocator: std.mem.Allocator,
+    intent: program_intent.PlannedSessionIntent,
+    context: problem_builder.SessionContext,
+    policy: hypertrophy.SessionPolicy,
+    options: planning.SolveOptions,
+    history: training.HistorySnapshot,
+    catalog: training.ExerciseCatalog,
+    current_volume: volume.State,
+) Error!VolumeAwareResult {
+    if (!current_volume.policy_id.eql(policy.volume_policy.id) or
+        current_volume.policy_version != policy.volume_policy.version)
+    {
+        return .{ .volume_policy_mismatch = .{
+            .state_policy_id = current_volume.policy_id,
+            .state_policy_version = current_volume.policy_version,
+            .requested_policy_id = policy.volume_policy.id,
+            .requested_policy_version = policy.volume_policy.version,
+        } };
+    }
+    var volume_aware_context = context;
+    volume_aware_context.volume_context = .{
+        .state = current_volume,
+        .policy = policy.volume_policy,
+    };
+    var composed = try composeIntent(
+        backing_allocator,
+        intent,
+        volume_aware_context,
+        policy,
+        options,
+        history,
+    );
+    errdefer composed.deinit();
+    const session = switch (composed) {
+        .successful, .constrained => |*value| value,
+        else => return .{ .composition = composed },
+    };
+    const exercises = session.prescription.recommendation.exercises;
+    var proposed_count: usize = 0;
+    for (exercises) |exercise| proposed_count = std.math.add(usize, proposed_count, exercise.sets.len) catch
+        return .{ .composition = composed };
+    const proposed = backing_allocator.alloc(volume.ProposedWork, proposed_count) catch
+        return error.OutOfMemory;
+    defer backing_allocator.free(proposed);
+    var proposed_index: usize = 0;
+    for (exercises) |exercise| {
+        const exercise_id = @import("primitives.zig").Id.parse(exercise.exerciseId) catch
+            return .{ .composition = composed };
+        for (exercise.sets) |set| {
+            proposed[proposed_index] = .{
+                .exercise_id = exercise_id,
+                .set_count = 1,
+                .kind = @import("primitives.zig").Id.parse(set.kind) catch
+                    return .{ .composition = composed },
+            };
+            proposed_index += 1;
+        }
+    }
+    var impact = volume.estimate(backing_allocator, catalog, proposed, policy.volume_policy) catch
+        return .{ .composition = composed };
+    defer impact.deinit();
+    if (volume.firstCapConflict(current_volume, impact.muscles)) |conflict| {
+        composed.deinit();
+        return .{ .volume_conflict = .{
+            .conflict = conflict,
+            .policy_id = policy.volume_policy.id,
+            .policy_version = policy.volume_policy.version,
+        } };
+    }
+    return .{ .composition = composed };
 }
 
 fn ownInfeasible(
@@ -271,6 +374,49 @@ test "composer reports an unavailable required exercise as unsatisfiable" {
         else => return error.TestUnexpectedResult,
     };
     try std.testing.expect(failure.failure.violations[0] == .required_slot_has_no_eligible_candidate);
+}
+
+test "volume-aware planner avoids indirect caps and prioritizes remaining targets" {
+    const chest = try @import("primitives.zig").Id.parse("chest");
+    const triceps = try @import("primitives.zig").Id.parse("triceps");
+    const bench = training.Exercise{ .id = try .parse("bench"), .muscle_contributions = &.{
+        .{ .muscle_id = chest, .role = .primary },
+        .{ .muscle_id = triceps, .role = .secondary },
+    } };
+    const fly = training.Exercise{ .id = try .parse("fly"), .muscle_contributions = &.{
+        .{ .muscle_id = chest, .role = .primary },
+    } };
+    const row = training.Exercise{ .id = try .parse("row"), .muscle_contributions = &.{} };
+    const targets = [_]volume.Target{
+        .{ .muscle_id = chest, .minimum = 3 * volume.units_per_set, .source = .{ .kind = .program_strategy, .id = try .parse("strategy") } },
+        .{ .muscle_id = triceps, .hard_cap = 0, .source = .{ .kind = .program_strategy, .id = try .parse("strategy") } },
+    };
+    var current = try volume.calculate(std.testing.allocator, .{
+        .catalog = .{ .exercises = &.{ bench, fly, row } },
+        .targets = &targets,
+    });
+    defer current.deinit();
+    const slots = [_]model.Slot{.{
+        .id = try .parse("adaptive"),
+        .selection = .{ .adaptive = .{} },
+        .progression = testLane("lane"),
+    }};
+    const problem: model.PlanningProblem = .{
+        .origin = testOrigin(),
+        .as_of = try .parse("2026-08-10T12:00:00Z"),
+        .catalog = .{ .exercises = &.{ bench, fly, row } },
+        .slots = &slots,
+        .objectives = &.{.{ .muscle_priority = .{ .muscle_id = chest, .weight = 2 } }},
+        .volume_context = .{ .state = current.state, .policy = .firstParty() },
+    };
+    var workspace = try planning.Workspace.init(std.testing.allocator, problem, .{});
+    defer workspace.deinit();
+    const solved = try planning.solve(problem, .{}, &workspace);
+    const resolved = switch (solved) {
+        .resolved => |value| value,
+        else => return error.TestUnexpectedResult,
+    };
+    try std.testing.expectEqualStrings("fly", resolved.slots[0].exercise_id.bytes);
 }
 
 fn testLane(state_id: []const u8) @import("progression/root.zig").Lane {

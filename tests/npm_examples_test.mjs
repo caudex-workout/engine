@@ -107,6 +107,7 @@ try {
     this.children = [];
     this.listeners = {};
     this.dataset = {};
+    this.style = {};
   }
   addEventListener(type, listener) { this.listeners[type] = listener; }
   append(...children) { this.children.push(...children); }
@@ -119,6 +120,7 @@ const ids = [
   "explanations", "explanation-count", "output",
   "program-example", "program-start", "program-advance", "program-status",
   "program-summary", "program-output",
+  "volume-status", "volume-scope", "volume-progress", "volume-estimate", "volume-output",
 ];
 const elements = Object.fromEntries(ids.map((id) => [id, new Element()]));
 elements.methodology.value = "double-progression";
@@ -151,6 +153,9 @@ URL.revokeObjectURL = () => {};
 await import("./browser/dist/app.js");
 if (document.body.dataset.status !== "passed") {
   throw new Error(elements.output.textContent);
+}
+if (!JSON.parse(elements["volume-output"].textContent).state?.muscles?.some((muscle) => muscle.muscleId === "chest")) {
+  throw new Error("playground did not render its public muscle-volume calculation");
 }
 const initial = JSON.parse(elements.output.textContent);
 const composed = initial.composition?.successful ?? initial.composition?.constrained;

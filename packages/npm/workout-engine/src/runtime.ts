@@ -15,4 +15,8 @@ export type {
   TrackingBatchResult,
   TrackingCommandRequest,
   TrackingCommandResult,
+  VolumeCalculateRequest,
+  VolumeEstimateRequest,
+  MuscleVolumeState,
+  VolumeEstimateImpact,
 } from "./index.ts";
