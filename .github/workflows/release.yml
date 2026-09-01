@@ -251,7 +251,7 @@ jobs:
           if-no-files-found: error
       - name: Attest CLI archive on a real tag run
         if: github.event_name == 'push'
-        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
           subject-path: release/caudex-workout-cli-${{ needs.validate.outputs.version }}-${{ matrix.target }}.${{ matrix.archive }}
 
