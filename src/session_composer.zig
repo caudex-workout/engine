@@ -15,6 +15,7 @@ const hypertrophy = @import("programs/hypertrophy.zig");
 const training = @import("training.zig");
 const double_progression = @import("double_progression.zig");
 const rpe = @import("rpe_top_set_backoff.zig");
+const recovery = @import("recovery.zig");
 const volume = @import("volume.zig");
 
 pub const InvalidInput = struct {
@@ -75,6 +76,17 @@ pub const Result = union(enum) {
 };
 
 pub const Error = error{OutOfMemory};
+
+/// Program/session-owned interpretation of derived readiness. Required slots
+/// remain required: a resulting conflict is returned by the ordinary planner
+/// instead of being silently removed by this adapter.
+pub const RecoveryCompositionPolicy = struct {
+    prefer_ready_optional_targets: bool = true,
+    minimum_preferred_readiness: u32 = 600_000,
+    ready_target_weight: u16 = 1,
+    reduce_session_when_systemic_below: ?u32 = null,
+    maximum_exercises_when_reduced: ?u16 = null,
+};
 
 pub const VolumeConflict = struct {
     conflict: volume.CapConflict,
@@ -161,6 +173,63 @@ pub fn composeIntent(
     };
     defer workspace.deinit();
     return compose(backing_allocator, problem, options, &workspace, history);
+}
+
+/// Applies an explicit composition policy to already-derived recovery state.
+/// Recovery equations remain in `recovery`; this boundary only translates a
+/// policy decision into existing typed planning priorities and constraints.
+pub fn composeIntentWithRecovery(
+    backing_allocator: std.mem.Allocator,
+    intent: program_intent.PlannedSessionIntent,
+    context: problem_builder.SessionContext,
+    policy: ?hypertrophy.SessionPolicy,
+    recovery_state: recovery.State,
+    recovery_policy: RecoveryCompositionPolicy,
+    options: planning.SolveOptions,
+    history: training.HistorySnapshot,
+) Error!Result {
+    if (recovery_policy.minimum_preferred_readiness > recovery.readiness_units or
+        recovery_policy.ready_target_weight == 0 or
+        (recovery_policy.reduce_session_when_systemic_below != null and
+            recovery_policy.reduce_session_when_systemic_below.? > recovery.readiness_units) or
+        (recovery_policy.maximum_exercises_when_reduced == 0))
+        return .{ .invalid = .{ .code = "InvalidRecoveryCompositionPolicy" } };
+
+    const priority_storage = backing_allocator.alloc(
+        hypertrophy.MusclePriority,
+        context.muscle_priorities.len + recovery_state.muscles.len,
+    ) catch return error.OutOfMemory;
+    defer backing_allocator.free(priority_storage);
+    @memcpy(priority_storage[0..context.muscle_priorities.len], context.muscle_priorities);
+    var priority_count = context.muscle_priorities.len;
+    if (recovery_policy.prefer_ready_optional_targets) {
+        for (recovery_state.muscles) |muscle| {
+            const readiness = muscle.readiness orelse continue;
+            if (readiness < recovery_policy.minimum_preferred_readiness) continue;
+            for (priority_storage[0..priority_count]) |existing| {
+                if (existing.muscle_id.eql(muscle.muscle_id)) break;
+            } else {
+                priority_storage[priority_count] = .{
+                    .muscle_id = muscle.muscle_id,
+                    .weight = recovery_policy.ready_target_weight,
+                };
+                priority_count += 1;
+            }
+        }
+    }
+    var adjusted = context;
+    adjusted.muscle_priorities = priority_storage[0..priority_count];
+    if (recovery_policy.reduce_session_when_systemic_below) |threshold| {
+        if (recovery_state.systemic.readiness) |readiness| {
+            if (readiness < threshold) if (recovery_policy.maximum_exercises_when_reduced) |maximum| {
+                adjusted.constraints.maximum_exercises = if (adjusted.constraints.maximum_exercises) |existing|
+                    @min(existing, maximum)
+                else
+                    maximum;
+            };
+        }
+    }
+    return composeIntent(backing_allocator, intent, adjusted, policy, options, history);
 }
 
 /// Composes with the ordinary planner, then uses the authoritative prospective

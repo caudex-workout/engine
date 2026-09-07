@@ -31,6 +31,7 @@ pub const planning = @import("planning/root.zig");
 pub const primitives = @import("primitives.zig");
 pub const programming = @import("programming.zig");
 pub const program_planning = @import("program_planning.zig");
+pub const recovery = @import("recovery.zig");
 pub const session_composer = @import("session_composer.zig");
 pub const rpe_top_set_backoff = @import("rpe_top_set_backoff.zig");
 pub const training = @import("training.zig");
@@ -44,6 +45,7 @@ test "library test target is wired" {
     _ = planning;
     _ = progression;
     _ = programs;
+    _ = recovery;
     _ = volume;
     try std.testing.expect(true);
 }
