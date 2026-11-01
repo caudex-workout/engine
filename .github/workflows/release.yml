@@ -126,7 +126,7 @@ jobs:
           node tests/npm_clean_smoke.mjs --tarball "$PWD/$tarball" --integrity "$(cat release/npm-integrity)"
           npm publish "$PWD/$tarball" --dry-run --ignore-scripts --access public --tag '${{ needs.validate.outputs.npm_tag }}'
       - name: Upload exact npm tarball
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-npm-${{ needs.validate.outputs.version }}
           path: release/caudex-workout-engine-${{ needs.validate.outputs.version }}.tgz
@@ -156,7 +156,7 @@ jobs:
           node tools/release/build-c-artifacts.mjs release/c
           node tools/release/package_release_sources.mjs --version '${{ needs.validate.outputs.version }}' --kind c --source release/c --output release/assets
       - name: Upload C archives
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-c-${{ needs.validate.outputs.version }}
           path: release/assets/*.tar.gz
@@ -182,7 +182,7 @@ jobs:
           node tools/release/build-zig-packages.mjs release/zig
           node tools/release/package_release_sources.mjs --version '${{ needs.validate.outputs.version }}' --kind zig --source release/zig --output release/assets
       - name: Upload Zig archives
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-zig-${{ needs.validate.outputs.version }}
           path: release/assets/*.tar.gz
@@ -244,7 +244,7 @@ jobs:
             --sqlite-source 'https://www.sqlite.org/2025/sqlite-amalgamation-3490100.zip' `
             --sqlite-source-file 'vendor/sqlite/sqlite3.c'
       - name: Upload CLI archive
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-cli-${{ matrix.target }}-${{ needs.validate.outputs.version }}
           path: release/caudex-workout-cli-*
@@ -274,7 +274,7 @@ jobs:
       - name: Verify archive contents, versions, and asset manifest
         run: node tools/release/verify-release.mjs --version '${{ needs.validate.outputs.version }}' release/assets
       - name: Upload one verified release staging bundle
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-staged-${{ needs.validate.outputs.version }}
           path: release/assets
